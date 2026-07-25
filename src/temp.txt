@@ -1,0 +1,4474 @@
+{
+    "success": true,
+    "trust_id": "e5e25685-2962-423b-a11e-274e2c6c7880",
+    "categories": [
+        {
+            "id": 36,
+            "name": "women",
+            "size": 23,
+            "status": "active",
+            "products": [],
+            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/category-images/categories/women-1784707328168.jpg",
+            "parent_id": null,
+            "display_orders": [],
+            "attributes_schema": [
+                {
+                    "id": 62,
+                    "status": "active",
+                    "attribute_name": "color"
+                },
+                {
+                    "id": 63,
+                    "status": "active",
+                    "attribute_name": "print"
+                },
+                {
+                    "id": 64,
+                    "status": "active",
+                    "attribute_name": "length"
+                },
+                {
+                    "id": 65,
+                    "status": "active",
+                    "attribute_name": "sleeves"
+                },
+                {
+                    "id": 68,
+                    "status": "active",
+                    "attribute_name": "size"
+                }
+            ]
+        },
+        {
+            "id": 37,
+            "name": "men",
+            "size": 16,
+            "status": "active",
+            "products": [
+                {
+                    "id": 132,
+                    "images": [
+                        {
+                            "id": 165,
+                            "size": 29,
+                            "status": "active",
+                            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/product-images/products/132/1784715846270-hvspqkho6xc.jpg",
+                            "sort_order": 0
+                        }
+                    ],
+                    "prices": [
+                        {
+                            "id": 94,
+                            "mrp": 500.00,
+                            "status": "active",
+                            "gst_pct": 18.00,
+                            "gst_amount": 90.00,
+                            "billing_type": "one_time",
+                            "discount_pct": 0.00,
+                            "member_price": 400.00,
+                            "platform_fee": null,
+                            "subscriptions": [],
+                            "total_payable": 590.00,
+                            "transport_fee": 0.00,
+                            "discount_amount": 0.00,
+                            "price_after_discount": 500.00
+                        }
+                    ],
+                    "status": "active",
+                    "alias_name": null,
+                    "attributes": {},
+                    "created_at": "2026-07-22T15:53:54.926191+05:30",
+                    "sort_order": 2,
+                    "updated_at": "2026-07-22T15:54:23.808454+05:30",
+                    "product_code": "s-23",
+                    "product_name": "shirt2",
+                    "product_type": "Product",
+                    "attribute_values": [
+                        {
+                            "id": 243,
+                            "value": "S,M,L,Xl,XXl",
+                            "status": "active",
+                            "attribute_id": 71,
+                            "attribute_name": "size"
+                        }
+                    ]
+                }
+            ],
+            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/category-images/categories/men-1784546899534.jpg",
+            "parent_id": null,
+            "display_orders": [],
+            "attributes_schema": []
+        },
+        {
+            "id": 38,
+            "name": "kids",
+            "size": 22,
+            "status": "active",
+            "products": [],
+            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/category-images/categories/kids-1784547003749.jpg",
+            "parent_id": null,
+            "display_orders": [],
+            "attributes_schema": []
+        },
+        {
+            "id": 39,
+            "name": "jewellery",
+            "size": 28,
+            "status": "active",
+            "products": [
+                {
+                    "id": 78,
+                    "images": [
+                        {
+                            "id": 94,
+                            "size": 26,
+                            "status": "active",
+                            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/product-images/products/78/1784610404022-v83gqk9sh9c.jpg",
+                            "sort_order": 0
+                        }
+                    ],
+                    "prices": [
+                        {
+                            "id": 72,
+                            "mrp": 400.00,
+                            "status": "active",
+                            "gst_pct": 18.00,
+                            "gst_amount": 82.80,
+                            "billing_type": "one_time",
+                            "discount_pct": 10.00,
+                            "member_price": 450.00,
+                            "platform_fee": null,
+                            "subscriptions": [],
+                            "total_payable": 542.80,
+                            "transport_fee": 100.00,
+                            "discount_amount": 40.00,
+                            "price_after_discount": 360.00
+                        }
+                    ],
+                    "status": "active",
+                    "alias_name": null,
+                    "attributes": {},
+                    "created_at": "2026-07-21T10:36:08.279579+05:30",
+                    "sort_order": 1,
+                    "updated_at": "2026-07-22T13:56:53.337318+05:30",
+                    "product_code": "H-72",
+                    "product_name": "hair accessories",
+                    "product_type": "Product",
+                    "attribute_values": [
+                        {
+                            "id": 210,
+                            "value": "2,3,4",
+                            "status": "active",
+                            "attribute_id": 53,
+                            "attribute_name": "size"
+                        },
+                        {
+                            "id": 211,
+                            "value": "artificial",
+                            "status": "active",
+                            "attribute_id": 54,
+                            "attribute_name": "material"
+                        },
+                        {
+                            "id": 212,
+                            "value": "south",
+                            "status": "active",
+                            "attribute_id": 56,
+                            "attribute_name": "style"
+                        }
+                    ]
+                },
+                {
+                    "id": 79,
+                    "images": [
+                        {
+                            "id": 95,
+                            "size": 31,
+                            "status": "active",
+                            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/product-images/products/79/1784610491378-y6id00xz4jk.jpg",
+                            "sort_order": 0
+                        }
+                    ],
+                    "prices": [
+                        {
+                            "id": 49,
+                            "mrp": 890.00,
+                            "status": "active",
+                            "gst_pct": 18.00,
+                            "gst_amount": 180.18,
+                            "billing_type": "one_time",
+                            "discount_pct": 10.00,
+                            "member_price": 999.00,
+                            "platform_fee": null,
+                            "subscriptions": [],
+                            "total_payable": 1181.18,
+                            "transport_fee": 200.00,
+                            "discount_amount": 89.00,
+                            "price_after_discount": 801.00
+                        }
+                    ],
+                    "status": "active",
+                    "alias_name": null,
+                    "attributes": {},
+                    "created_at": "2026-07-21T10:37:38.053797+05:30",
+                    "sort_order": 2,
+                    "updated_at": "2026-07-21T10:37:38.053797+05:30",
+                    "product_code": "H-23",
+                    "product_name": "hair acccessories A-2",
+                    "product_type": "Product",
+                    "attribute_values": [
+                        {
+                            "id": 139,
+                            "value": "2,3,4",
+                            "status": "active",
+                            "attribute_id": 53,
+                            "attribute_name": "size"
+                        },
+                        {
+                            "id": 140,
+                            "value": "artificial",
+                            "status": "active",
+                            "attribute_id": 54,
+                            "attribute_name": "material"
+                        },
+                        {
+                            "id": 141,
+                            "value": "braided",
+                            "status": "active",
+                            "attribute_id": 56,
+                            "attribute_name": "style"
+                        }
+                    ]
+                }
+            ],
+            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/category-images/categories/jewellery-1784547040448.jpg",
+            "parent_id": null,
+            "display_orders": [],
+            "attributes_schema": []
+        },
+        {
+            "id": 40,
+            "name": "handbags",
+            "size": 28,
+            "status": "active",
+            "products": [
+                {
+                    "id": 69,
+                    "images": [
+                        {
+                            "id": 73,
+                            "size": 9,
+                            "status": "active",
+                            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/product-images/products/69/1784550097724-9mx419uppec.jpg",
+                            "sort_order": 0
+                        },
+                        {
+                            "id": 74,
+                            "size": 28,
+                            "status": "active",
+                            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/product-images/products/69/1784550097999-xo3j54mfrmk.jpg",
+                            "sort_order": 1
+                        }
+                    ],
+                    "prices": [
+                        {
+                            "id": 40,
+                            "mrp": 500.00,
+                            "status": "active",
+                            "gst_pct": 18.00,
+                            "gst_amount": 117.00,
+                            "billing_type": "one_time",
+                            "discount_pct": 10.00,
+                            "member_price": 550.00,
+                            "platform_fee": null,
+                            "subscriptions": [],
+                            "total_payable": 767.00,
+                            "transport_fee": 200.00,
+                            "discount_amount": 50.00,
+                            "price_after_discount": 450.00
+                        }
+                    ],
+                    "status": "active",
+                    "alias_name": "purse",
+                    "attributes": {},
+                    "created_at": "2026-07-20T17:50:22.104248+05:30",
+                    "sort_order": 1,
+                    "updated_at": "2026-07-20T17:50:22.104248+05:30",
+                    "product_code": "H-1",
+                    "product_name": "pink purse",
+                    "product_type": "Product",
+                    "attribute_values": [
+                        {
+                            "id": 110,
+                            "value": "pink",
+                            "status": "active",
+                            "attribute_id": 51,
+                            "attribute_name": "color"
+                        },
+                        {
+                            "id": 111,
+                            "value": "leather",
+                            "status": "active",
+                            "attribute_id": 52,
+                            "attribute_name": "material"
+                        }
+                    ]
+                }
+            ],
+            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/category-images/categories/handbags-1784547115206.jpg",
+            "parent_id": null,
+            "display_orders": [
+                {
+                    "id": 16,
+                    "order": 1,
+                    "status": "active",
+                    "display_name": "handbags",
+                    "display_type": "slider"
+                }
+            ],
+            "attributes_schema": [
+                {
+                    "id": 51,
+                    "status": "active",
+                    "attribute_name": "color"
+                },
+                {
+                    "id": 52,
+                    "status": "active",
+                    "attribute_name": "material"
+                }
+            ]
+        },
+        {
+            "id": 41,
+            "name": "western wear",
+            "size": 28,
+            "status": "active",
+            "products": [],
+            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/category-images/categories/western-wear-1784547179752.jpg",
+            "parent_id": 36,
+            "display_orders": [
+                {
+                    "id": 25,
+                    "order": 2,
+                    "status": "active",
+                    "display_name": "western wear",
+                    "display_type": "cards"
+                }
+            ],
+            "attributes_schema": []
+        },
+        {
+            "id": 42,
+            "name": "jeans",
+            "size": 15,
+            "status": "active",
+            "products": [
+                {
+                    "id": 105,
+                    "images": [
+                        {
+                            "id": 124,
+                            "size": 9,
+                            "status": "active",
+                            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/product-images/products/105/1784706918766-xq6aw2aj5hf.jpg",
+                            "sort_order": 0
+                        }
+                    ],
+                    "prices": [
+                        {
+                            "id": 70,
+                            "mrp": 900.00,
+                            "status": "active",
+                            "gst_pct": 18.00,
+                            "gst_amount": 163.80,
+                            "billing_type": "one_time",
+                            "discount_pct": 10.00,
+                            "member_price": 900.00,
+                            "platform_fee": null,
+                            "subscriptions": [],
+                            "total_payable": 1073.80,
+                            "transport_fee": 100.00,
+                            "discount_amount": 90.00,
+                            "price_after_discount": 810.00
+                        }
+                    ],
+                    "status": "active",
+                    "alias_name": null,
+                    "attributes": {},
+                    "created_at": "2026-07-22T10:00:46.97011+05:30",
+                    "sort_order": 1,
+                    "updated_at": "2026-07-22T13:25:39.480985+05:30",
+                    "product_code": "j1",
+                    "product_name": "jeans1",
+                    "product_type": "Product",
+                    "attribute_values": [
+                        {
+                            "id": 205,
+                            "value": "S,M,L",
+                            "status": "active",
+                            "attribute_id": 60,
+                            "attribute_name": "size"
+                        },
+                        {
+                            "id": 206,
+                            "value": "blue",
+                            "status": "active",
+                            "attribute_id": 62,
+                            "attribute_name": "color"
+                        },
+                        {
+                            "id": 207,
+                            "value": "full",
+                            "status": "active",
+                            "attribute_id": 64,
+                            "attribute_name": "length"
+                        },
+                        {
+                            "id": 208,
+                            "value": "straight-fit",
+                            "status": "active",
+                            "attribute_id": 66,
+                            "attribute_name": "style"
+                        }
+                    ]
+                },
+                {
+                    "id": 108,
+                    "images": [
+                        {
+                            "id": 126,
+                            "size": 12,
+                            "status": "active",
+                            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/product-images/products/108/1784713195262-zyfosmfelj8.jpg",
+                            "sort_order": 0
+                        },
+                        {
+                            "id": 127,
+                            "size": 10,
+                            "status": "active",
+                            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/product-images/products/108/1784713195498-tubrfmt6q3.jpg",
+                            "sort_order": 1
+                        },
+                        {
+                            "id": 128,
+                            "size": 18,
+                            "status": "active",
+                            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/product-images/products/108/1784713195708-ikxbq3idyj.jpg",
+                            "sort_order": 2
+                        },
+                        {
+                            "id": 129,
+                            "size": 24,
+                            "status": "active",
+                            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/product-images/products/108/1784713196172-kyxqo0mffuo.jpg",
+                            "sort_order": 3
+                        },
+                        {
+                            "id": 130,
+                            "size": 23,
+                            "status": "active",
+                            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/product-images/products/108/1784713196423-rrpz34ypb9r.jpg",
+                            "sort_order": 4
+                        },
+                        {
+                            "id": 131,
+                            "size": 5,
+                            "status": "active",
+                            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/product-images/products/108/1784713196646-kyghytnywwf.jpg",
+                            "sort_order": 5
+                        },
+                        {
+                            "id": 132,
+                            "size": 36,
+                            "status": "active",
+                            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/product-images/products/108/1784713196989-jdm9aqwjm9.jpg",
+                            "sort_order": 6
+                        }
+                    ],
+                    "prices": [
+                        {
+                            "id": 73,
+                            "mrp": 600.00,
+                            "status": "active",
+                            "gst_pct": 18.00,
+                            "gst_amount": 115.20,
+                            "billing_type": "one_time",
+                            "discount_pct": 10.00,
+                            "member_price": 560.00,
+                            "platform_fee": null,
+                            "subscriptions": [],
+                            "total_payable": 755.20,
+                            "transport_fee": 100.00,
+                            "discount_amount": 60.00,
+                            "price_after_discount": 540.00
+                        }
+                    ],
+                    "status": "active",
+                    "alias_name": null,
+                    "attributes": {},
+                    "created_at": "2026-07-22T15:08:38.440947+05:30",
+                    "sort_order": 1,
+                    "updated_at": "2026-07-22T15:10:16.094408+05:30",
+                    "product_code": "j3",
+                    "product_name": "jeans3",
+                    "product_type": "Product",
+                    "attribute_values": [
+                        {
+                            "id": 213,
+                            "value": "S,M,L",
+                            "status": "active",
+                            "attribute_id": 60,
+                            "attribute_name": "size"
+                        },
+                        {
+                            "id": 214,
+                            "value": "blue",
+                            "status": "active",
+                            "attribute_id": 62,
+                            "attribute_name": "color"
+                        },
+                        {
+                            "id": 215,
+                            "value": "floral",
+                            "status": "active",
+                            "attribute_id": 63,
+                            "attribute_name": "print"
+                        },
+                        {
+                            "id": 216,
+                            "value": "casual",
+                            "status": "active",
+                            "attribute_id": 66,
+                            "attribute_name": "style"
+                        }
+                    ]
+                },
+                {
+                    "id": 106,
+                    "images": [
+                        {
+                            "id": 119,
+                            "size": 13,
+                            "status": "active",
+                            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/product-images/products/106/1784706425331-5uys198b53.jpg",
+                            "sort_order": 0
+                        },
+                        {
+                            "id": 120,
+                            "size": 36,
+                            "status": "active",
+                            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/product-images/products/106/1784706425643-jevlihnt8r.jpg",
+                            "sort_order": 1
+                        },
+                        {
+                            "id": 121,
+                            "size": 10,
+                            "status": "active",
+                            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/product-images/products/106/1784706425829-vjalceyc7bq.jpg",
+                            "sort_order": 2
+                        },
+                        {
+                            "id": 122,
+                            "size": 5,
+                            "status": "active",
+                            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/product-images/products/106/1784706426015-okuz6g9eoz.jpg",
+                            "sort_order": 3
+                        },
+                        {
+                            "id": 123,
+                            "size": 29,
+                            "status": "active",
+                            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/product-images/products/106/1784706426204-87j7oj0ovyx.jpg",
+                            "sort_order": 4
+                        }
+                    ],
+                    "prices": [
+                        {
+                            "id": 69,
+                            "mrp": 1300.00,
+                            "status": "active",
+                            "gst_pct": 18.00,
+                            "gst_amount": 190.80,
+                            "billing_type": "one_time",
+                            "discount_pct": 20.00,
+                            "member_price": 900.00,
+                            "platform_fee": null,
+                            "subscriptions": [],
+                            "total_payable": 1250.80,
+                            "transport_fee": 20.00,
+                            "discount_amount": 260.00,
+                            "price_after_discount": 1040.00
+                        }
+                    ],
+                    "status": "active",
+                    "alias_name": null,
+                    "attributes": {},
+                    "created_at": "2026-07-22T13:15:47.046761+05:30",
+                    "sort_order": 2,
+                    "updated_at": "2026-07-22T13:18:05.573056+05:30",
+                    "product_code": "j2",
+                    "product_name": "jeans2",
+                    "product_type": "Product",
+                    "attribute_values": [
+                        {
+                            "id": 201,
+                            "value": "S,M,L",
+                            "status": "active",
+                            "attribute_id": 60,
+                            "attribute_name": "size"
+                        },
+                        {
+                            "id": 202,
+                            "value": "black",
+                            "status": "active",
+                            "attribute_id": 62,
+                            "attribute_name": "color"
+                        },
+                        {
+                            "id": 204,
+                            "value": "full",
+                            "status": "active",
+                            "attribute_id": 64,
+                            "attribute_name": "length"
+                        },
+                        {
+                            "id": 203,
+                            "value": "straight fit",
+                            "status": "active",
+                            "attribute_id": 66,
+                            "attribute_name": "style"
+                        }
+                    ]
+                },
+                {
+                    "id": 109,
+                    "images": [
+                        {
+                            "id": 133,
+                            "size": 11,
+                            "status": "active",
+                            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/product-images/products/109/1784713274710-l6sahs39p4o.jpg",
+                            "sort_order": 0
+                        }
+                    ],
+                    "prices": [
+                        {
+                            "id": 74,
+                            "mrp": 600.00,
+                            "status": "active",
+                            "gst_pct": 18.00,
+                            "gst_amount": 97.20,
+                            "billing_type": "one_time",
+                            "discount_pct": 10.00,
+                            "member_price": 500.00,
+                            "platform_fee": null,
+                            "subscriptions": [],
+                            "total_payable": 637.20,
+                            "transport_fee": 0.00,
+                            "discount_amount": 60.00,
+                            "price_after_discount": 540.00
+                        }
+                    ],
+                    "status": "active",
+                    "alias_name": null,
+                    "attributes": {},
+                    "created_at": "2026-07-22T15:10:45.19711+05:30",
+                    "sort_order": 4,
+                    "updated_at": "2026-07-22T15:11:32.101117+05:30",
+                    "product_code": "j4",
+                    "product_name": "jeans4",
+                    "product_type": "Product",
+                    "attribute_values": [
+                        {
+                            "id": 217,
+                            "value": "S,M,L",
+                            "status": "active",
+                            "attribute_id": 60,
+                            "attribute_name": "size"
+                        },
+                        {
+                            "id": 218,
+                            "value": "black",
+                            "status": "active",
+                            "attribute_id": 62,
+                            "attribute_name": "color"
+                        },
+                        {
+                            "id": 219,
+                            "value": "skinny",
+                            "status": "active",
+                            "attribute_id": 66,
+                            "attribute_name": "style"
+                        }
+                    ]
+                },
+                {
+                    "id": 110,
+                    "images": [
+                        {
+                            "id": 134,
+                            "size": 32,
+                            "status": "active",
+                            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/product-images/products/110/1784713347731-2hyz4iixy0u.jpg",
+                            "sort_order": 0
+                        }
+                    ],
+                    "prices": [
+                        {
+                            "id": 75,
+                            "mrp": 700.00,
+                            "status": "active",
+                            "gst_pct": 18.00,
+                            "gst_amount": 113.40,
+                            "billing_type": "one_time",
+                            "discount_pct": 10.00,
+                            "member_price": 600.00,
+                            "platform_fee": null,
+                            "subscriptions": [],
+                            "total_payable": 743.40,
+                            "transport_fee": 0.00,
+                            "discount_amount": 70.00,
+                            "price_after_discount": 630.00
+                        }
+                    ],
+                    "status": "active",
+                    "alias_name": null,
+                    "attributes": {},
+                    "created_at": "2026-07-22T15:11:58.42283+05:30",
+                    "sort_order": 5,
+                    "updated_at": "2026-07-22T15:12:44.040512+05:30",
+                    "product_code": "j5",
+                    "product_name": "jeans5",
+                    "product_type": "Product",
+                    "attribute_values": [
+                        {
+                            "id": 220,
+                            "value": "S,M,L",
+                            "status": "active",
+                            "attribute_id": 60,
+                            "attribute_name": "size"
+                        },
+                        {
+                            "id": 221,
+                            "value": "white",
+                            "status": "active",
+                            "attribute_id": 62,
+                            "attribute_name": "color"
+                        }
+                    ]
+                },
+                {
+                    "id": 111,
+                    "images": [
+                        {
+                            "id": 135,
+                            "size": 24,
+                            "status": "active",
+                            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/product-images/products/111/1784713409614-4dfd18c01qg.jpg",
+                            "sort_order": 0
+                        }
+                    ],
+                    "prices": [
+                        {
+                            "id": 76,
+                            "mrp": 700.00,
+                            "status": "active",
+                            "gst_pct": 18.00,
+                            "gst_amount": 113.40,
+                            "billing_type": "one_time",
+                            "discount_pct": 10.00,
+                            "member_price": 590.00,
+                            "platform_fee": null,
+                            "subscriptions": [],
+                            "total_payable": 743.40,
+                            "transport_fee": 0.00,
+                            "discount_amount": 70.00,
+                            "price_after_discount": 630.00
+                        }
+                    ],
+                    "status": "active",
+                    "alias_name": null,
+                    "attributes": {},
+                    "created_at": "2026-07-22T15:13:04.365862+05:30",
+                    "sort_order": 6,
+                    "updated_at": "2026-07-22T15:13:48.077312+05:30",
+                    "product_code": "j6",
+                    "product_name": "jeans6",
+                    "product_type": "Product",
+                    "attribute_values": [
+                        {
+                            "id": 222,
+                            "value": "S,M,L",
+                            "status": "active",
+                            "attribute_id": 60,
+                            "attribute_name": "size"
+                        },
+                        {
+                            "id": 223,
+                            "value": "blue",
+                            "status": "active",
+                            "attribute_id": 62,
+                            "attribute_name": "color"
+                        }
+                    ]
+                },
+                {
+                    "id": 114,
+                    "images": [
+                        {
+                            "id": 136,
+                            "size": 28,
+                            "status": "active",
+                            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/product-images/products/114/1784713512021-6t3m4ahxp4.jpg",
+                            "sort_order": 0
+                        }
+                    ],
+                    "prices": [
+                        {
+                            "id": 77,
+                            "mrp": 600.00,
+                            "status": "active",
+                            "gst_pct": 18.00,
+                            "gst_amount": 97.20,
+                            "billing_type": "one_time",
+                            "discount_pct": 10.00,
+                            "member_price": 499.00,
+                            "platform_fee": null,
+                            "subscriptions": [],
+                            "total_payable": 637.20,
+                            "transport_fee": 0.00,
+                            "discount_amount": 60.00,
+                            "price_after_discount": 540.00
+                        }
+                    ],
+                    "status": "active",
+                    "alias_name": null,
+                    "attributes": {},
+                    "created_at": "2026-07-22T15:14:47.239804+05:30",
+                    "sort_order": 6,
+                    "updated_at": "2026-07-22T15:15:30.254116+05:30",
+                    "product_code": "j-6",
+                    "product_name": "jeans6",
+                    "product_type": "Product",
+                    "attribute_values": []
+                },
+                {
+                    "id": 115,
+                    "images": [
+                        {
+                            "id": 137,
+                            "size": 23,
+                            "status": "active",
+                            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/product-images/products/115/1784713565169-yvgvq1zfx3.jpg",
+                            "sort_order": 0
+                        }
+                    ],
+                    "prices": [
+                        {
+                            "id": 78,
+                            "mrp": 900.00,
+                            "status": "active",
+                            "gst_pct": 18.00,
+                            "gst_amount": 145.80,
+                            "billing_type": "one_time",
+                            "discount_pct": 10.00,
+                            "member_price": 700.00,
+                            "platform_fee": null,
+                            "subscriptions": [],
+                            "total_payable": 955.80,
+                            "transport_fee": 0.00,
+                            "discount_amount": 90.00,
+                            "price_after_discount": 810.00
+                        }
+                    ],
+                    "status": "active",
+                    "alias_name": null,
+                    "attributes": {},
+                    "created_at": "2026-07-22T15:15:52.271158+05:30",
+                    "sort_order": 7,
+                    "updated_at": "2026-07-22T15:16:20.166117+05:30",
+                    "product_code": "j-7",
+                    "product_name": "jeans7",
+                    "product_type": "Product",
+                    "attribute_values": [
+                        {
+                            "id": 224,
+                            "value": "S,M,L",
+                            "status": "active",
+                            "attribute_id": 60,
+                            "attribute_name": "size"
+                        }
+                    ]
+                },
+                {
+                    "id": 116,
+                    "images": [
+                        {
+                            "id": 138,
+                            "size": 10,
+                            "status": "active",
+                            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/product-images/products/116/1784713625775-sofjqt8fzm.jpg",
+                            "sort_order": 0
+                        },
+                        {
+                            "id": 139,
+                            "size": 5,
+                            "status": "active",
+                            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/product-images/products/116/1784713626179-lnw7iv3g5ja.jpg",
+                            "sort_order": 1
+                        },
+                        {
+                            "id": 140,
+                            "size": 29,
+                            "status": "active",
+                            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/product-images/products/116/1784713626525-phxcqkbbmz.jpg",
+                            "sort_order": 2
+                        }
+                    ],
+                    "prices": [
+                        {
+                            "id": 79,
+                            "mrp": 1000.00,
+                            "status": "active",
+                            "gst_pct": 18.00,
+                            "gst_amount": 183.60,
+                            "billing_type": "one_time",
+                            "discount_pct": 10.00,
+                            "member_price": 1000.00,
+                            "platform_fee": null,
+                            "subscriptions": [],
+                            "total_payable": 1203.60,
+                            "transport_fee": 120.00,
+                            "discount_amount": 100.00,
+                            "price_after_discount": 900.00
+                        }
+                    ],
+                    "status": "active",
+                    "alias_name": null,
+                    "attributes": {},
+                    "created_at": "2026-07-22T15:16:37.531887+05:30",
+                    "sort_order": 8,
+                    "updated_at": "2026-07-22T15:17:27.213659+05:30",
+                    "product_code": "j-8",
+                    "product_name": "jeans8",
+                    "product_type": "Product",
+                    "attribute_values": [
+                        {
+                            "id": 225,
+                            "value": "S,M,L",
+                            "status": "active",
+                            "attribute_id": 60,
+                            "attribute_name": "size"
+                        },
+                        {
+                            "id": 226,
+                            "value": "white",
+                            "status": "active",
+                            "attribute_id": 62,
+                            "attribute_name": "color"
+                        }
+                    ]
+                },
+                {
+                    "id": 117,
+                    "images": [
+                        {
+                            "id": 141,
+                            "size": 36,
+                            "status": "active",
+                            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/product-images/products/117/1784713701276-z4sbqq7f4t.jpg",
+                            "sort_order": 0
+                        },
+                        {
+                            "id": 142,
+                            "size": 29,
+                            "status": "active",
+                            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/product-images/products/117/1784713701540-wp7fhfhnsvf.jpg",
+                            "sort_order": 1
+                        }
+                    ],
+                    "prices": [
+                        {
+                            "id": 80,
+                            "mrp": 1000.00,
+                            "status": "active",
+                            "gst_pct": 18.00,
+                            "gst_amount": 162.00,
+                            "billing_type": "one_time",
+                            "discount_pct": 20.00,
+                            "member_price": 899.00,
+                            "platform_fee": null,
+                            "subscriptions": [],
+                            "total_payable": 1062.00,
+                            "transport_fee": 100.00,
+                            "discount_amount": 200.00,
+                            "price_after_discount": 800.00
+                        }
+                    ],
+                    "status": "active",
+                    "alias_name": null,
+                    "attributes": {},
+                    "created_at": "2026-07-22T15:17:48.482356+05:30",
+                    "sort_order": 9,
+                    "updated_at": "2026-07-22T15:18:39.216348+05:30",
+                    "product_code": "j-9",
+                    "product_name": "jeans9",
+                    "product_type": "Product",
+                    "attribute_values": [
+                        {
+                            "id": 227,
+                            "value": "S,M,L",
+                            "status": "active",
+                            "attribute_id": 60,
+                            "attribute_name": "size"
+                        },
+                        {
+                            "id": 228,
+                            "value": "black",
+                            "status": "active",
+                            "attribute_id": 62,
+                            "attribute_name": "color"
+                        }
+                    ]
+                }
+            ],
+            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/category-images/categories/jeans-1784547663317.jpg",
+            "parent_id": 41,
+            "display_orders": [
+                {
+                    "id": 23,
+                    "order": 4,
+                    "status": "active",
+                    "display_name": "jeans",
+                    "display_type": "cards"
+                }
+            ],
+            "attributes_schema": []
+        },
+        {
+            "id": 43,
+            "name": "dresses",
+            "size": 15,
+            "status": "active",
+            "products": [
+                {
+                    "id": 103,
+                    "images": [
+                        {
+                            "id": 114,
+                            "size": 38,
+                            "status": "active",
+                            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/product-images/products/103/1784615142395-jkedu0u9ul9.jpg",
+                            "sort_order": 0
+                        },
+                        {
+                            "id": 115,
+                            "size": 6,
+                            "status": "active",
+                            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/product-images/products/103/1784615142623-ryg0xcgsm08.jpg",
+                            "sort_order": 1
+                        },
+                        {
+                            "id": 116,
+                            "size": 18,
+                            "status": "active",
+                            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/product-images/products/103/1784615142794-ddn2ucoxel.jpg",
+                            "sort_order": 2
+                        },
+                        {
+                            "id": 117,
+                            "size": 18,
+                            "status": "active",
+                            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/product-images/products/103/1784615142981-99nphj3adho.jpg",
+                            "sort_order": 3
+                        }
+                    ],
+                    "prices": [
+                        {
+                            "id": 67,
+                            "mrp": 900.00,
+                            "status": "active",
+                            "gst_pct": 18.00,
+                            "gst_amount": 163.80,
+                            "billing_type": "one_time",
+                            "discount_pct": 10.00,
+                            "member_price": 800.00,
+                            "platform_fee": null,
+                            "subscriptions": [],
+                            "total_payable": 1073.80,
+                            "transport_fee": 100.00,
+                            "discount_amount": 90.00,
+                            "price_after_discount": 810.00
+                        }
+                    ],
+                    "status": "active",
+                    "alias_name": null,
+                    "attributes": {},
+                    "created_at": "2026-07-21T11:54:55.131442+05:30",
+                    "sort_order": 1,
+                    "updated_at": "2026-07-21T11:54:55.131442+05:30",
+                    "product_code": "d-12",
+                    "product_name": "dress1",
+                    "product_type": "Product",
+                    "attribute_values": [
+                        {
+                            "id": 196,
+                            "value": "S,M,L",
+                            "status": "active",
+                            "attribute_id": 60,
+                            "attribute_name": "size"
+                        },
+                        {
+                            "id": 197,
+                            "value": "brown",
+                            "status": "active",
+                            "attribute_id": 62,
+                            "attribute_name": "color"
+                        },
+                        {
+                            "id": 198,
+                            "value": "casual",
+                            "status": "active",
+                            "attribute_id": 66,
+                            "attribute_name": "style"
+                        }
+                    ]
+                },
+                {
+                    "id": 104,
+                    "images": [
+                        {
+                            "id": 118,
+                            "size": 8,
+                            "status": "active",
+                            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/product-images/products/104/1784615349386-slfy4s9rerq.jpg",
+                            "sort_order": 0
+                        }
+                    ],
+                    "prices": [
+                        {
+                            "id": 68,
+                            "mrp": 800.00,
+                            "status": "active",
+                            "gst_pct": 18.00,
+                            "gst_amount": 129.60,
+                            "billing_type": "one_time",
+                            "discount_pct": 10.00,
+                            "member_price": 699.00,
+                            "platform_fee": null,
+                            "subscriptions": [],
+                            "total_payable": 849.60,
+                            "transport_fee": 0.00,
+                            "discount_amount": 80.00,
+                            "price_after_discount": 720.00
+                        }
+                    ],
+                    "status": "active",
+                    "alias_name": null,
+                    "attributes": {},
+                    "created_at": "2026-07-21T11:58:44.419182+05:30",
+                    "sort_order": 2,
+                    "updated_at": "2026-07-21T11:58:44.419182+05:30",
+                    "product_code": "d-122",
+                    "product_name": "dress2",
+                    "product_type": "Product",
+                    "attribute_values": [
+                        {
+                            "id": 199,
+                            "value": "S,M,L",
+                            "status": "active",
+                            "attribute_id": 60,
+                            "attribute_name": "size"
+                        },
+                        {
+                            "id": 200,
+                            "value": "black",
+                            "status": "active",
+                            "attribute_id": 62,
+                            "attribute_name": "color"
+                        }
+                    ]
+                }
+            ],
+            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/category-images/categories/dresses-1784548138124.jpg",
+            "parent_id": 41,
+            "display_orders": [
+                {
+                    "id": 24,
+                    "order": 5,
+                    "status": "active",
+                    "display_name": "dresses",
+                    "display_type": "cards"
+                }
+            ],
+            "attributes_schema": []
+        },
+        {
+            "id": 44,
+            "name": "tops",
+            "size": 20,
+            "status": "active",
+            "products": [],
+            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/category-images/categories/tops-1784548198130.jpg",
+            "parent_id": 41,
+            "display_orders": [
+                {
+                    "id": 21,
+                    "order": 2,
+                    "status": "active",
+                    "display_name": "tops",
+                    "display_type": "cards"
+                },
+                {
+                    "id": 30,
+                    "order": 6,
+                    "status": "active",
+                    "display_name": "women-tops",
+                    "display_type": "cards"
+                }
+            ],
+            "attributes_schema": []
+        },
+        {
+            "id": 45,
+            "name": "skirts",
+            "size": 16,
+            "status": "active",
+            "products": [
+                {
+                    "id": 118,
+                    "images": [
+                        {
+                            "id": 143,
+                            "size": 13,
+                            "status": "active",
+                            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/product-images/products/118/1784714578673-62vkggzffie.jpg",
+                            "sort_order": 0
+                        },
+                        {
+                            "id": 144,
+                            "size": 40,
+                            "status": "active",
+                            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/product-images/products/118/1784714578992-5sd6b5gn1yf.jpg",
+                            "sort_order": 1
+                        },
+                        {
+                            "id": 145,
+                            "size": 59,
+                            "status": "active",
+                            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/product-images/products/118/1784714579241-n1bbrbtktfd.jpg",
+                            "sort_order": 2
+                        },
+                        {
+                            "id": 146,
+                            "size": 37,
+                            "status": "active",
+                            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/product-images/products/118/1784714579561-em1c3wr0lur.jpg",
+                            "sort_order": 3
+                        },
+                        {
+                            "id": 147,
+                            "size": 33,
+                            "status": "active",
+                            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/product-images/products/118/1784714579851-5ewthgk9lkc.jpg",
+                            "sort_order": 4
+                        }
+                    ],
+                    "prices": [
+                        {
+                            "id": 81,
+                            "mrp": 500.00,
+                            "status": "active",
+                            "gst_pct": 18.00,
+                            "gst_amount": 82.80,
+                            "billing_type": "one_time",
+                            "discount_pct": 10.00,
+                            "member_price": 300.00,
+                            "platform_fee": null,
+                            "subscriptions": [],
+                            "total_payable": 542.80,
+                            "transport_fee": 10.00,
+                            "discount_amount": 50.00,
+                            "price_after_discount": 450.00
+                        }
+                    ],
+                    "status": "active",
+                    "alias_name": null,
+                    "attributes": {},
+                    "created_at": "2026-07-22T15:30:30.873061+05:30",
+                    "sort_order": 1,
+                    "updated_at": "2026-07-22T15:33:20.504331+05:30",
+                    "product_code": "skirt-1",
+                    "product_name": "long skirt",
+                    "product_type": "Product",
+                    "attribute_values": [
+                        {
+                            "id": 229,
+                            "value": "S,M,L",
+                            "status": "active",
+                            "attribute_id": 60,
+                            "attribute_name": "size"
+                        },
+                        {
+                            "id": 230,
+                            "value": "multi",
+                            "status": "active",
+                            "attribute_id": 62,
+                            "attribute_name": "color"
+                        },
+                        {
+                            "id": 231,
+                            "value": "5",
+                            "status": "active",
+                            "attribute_id": 70,
+                            "attribute_name": "types"
+                        }
+                    ]
+                },
+                {
+                    "id": 119,
+                    "images": [
+                        {
+                            "id": 148,
+                            "size": 64,
+                            "status": "active",
+                            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/product-images/products/119/1784714675079-z7zfzttk5aq.jpg",
+                            "sort_order": 0
+                        },
+                        {
+                            "id": 149,
+                            "size": 33,
+                            "status": "active",
+                            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/product-images/products/119/1784714675335-8dbh0yvfwgi.jpg",
+                            "sort_order": 1
+                        },
+                        {
+                            "id": 150,
+                            "size": 34,
+                            "status": "active",
+                            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/product-images/products/119/1784714675567-nmp0kfozkn.jpg",
+                            "sort_order": 2
+                        },
+                        {
+                            "id": 151,
+                            "size": 23,
+                            "status": "active",
+                            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/product-images/products/119/1784714675758-qzsdbp4qhwm.jpg",
+                            "sort_order": 3
+                        }
+                    ],
+                    "prices": [
+                        {
+                            "id": 82,
+                            "mrp": 400.00,
+                            "status": "active",
+                            "gst_pct": 18.00,
+                            "gst_amount": 68.40,
+                            "billing_type": "one_time",
+                            "discount_pct": 10.00,
+                            "member_price": 349.00,
+                            "platform_fee": null,
+                            "subscriptions": [],
+                            "total_payable": 448.40,
+                            "transport_fee": 20.00,
+                            "discount_amount": 40.00,
+                            "price_after_discount": 360.00
+                        }
+                    ],
+                    "status": "active",
+                    "alias_name": null,
+                    "attributes": {},
+                    "created_at": "2026-07-22T15:33:52.537258+05:30",
+                    "sort_order": 2,
+                    "updated_at": "2026-07-22T15:34:56.87651+05:30",
+                    "product_code": "s-2",
+                    "product_name": "cute skirts",
+                    "product_type": "Product",
+                    "attribute_values": [
+                        {
+                            "id": 232,
+                            "value": "S,M,L",
+                            "status": "active",
+                            "attribute_id": 60,
+                            "attribute_name": "size"
+                        },
+                        {
+                            "id": 233,
+                            "value": "knee length",
+                            "status": "active",
+                            "attribute_id": 64,
+                            "attribute_name": "length"
+                        }
+                    ]
+                },
+                {
+                    "id": 120,
+                    "images": [
+                        {
+                            "id": 152,
+                            "size": 41,
+                            "status": "active",
+                            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/product-images/products/120/1784714759151-g6xort94nc4.jpg",
+                            "sort_order": 0
+                        },
+                        {
+                            "id": 153,
+                            "size": 25,
+                            "status": "active",
+                            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/product-images/products/120/1784714759432-xy04321h0k.jpg",
+                            "sort_order": 1
+                        }
+                    ],
+                    "prices": [
+                        {
+                            "id": 83,
+                            "mrp": 350.00,
+                            "status": "active",
+                            "gst_pct": 18.00,
+                            "gst_amount": 56.70,
+                            "billing_type": "one_time",
+                            "discount_pct": 10.00,
+                            "member_price": 299.00,
+                            "platform_fee": null,
+                            "subscriptions": [],
+                            "total_payable": 371.70,
+                            "transport_fee": 0.00,
+                            "discount_amount": 35.00,
+                            "price_after_discount": 315.00
+                        }
+                    ],
+                    "status": "active",
+                    "alias_name": null,
+                    "attributes": {},
+                    "created_at": "2026-07-22T15:35:19.966004+05:30",
+                    "sort_order": 3,
+                    "updated_at": "2026-07-22T15:36:18.723768+05:30",
+                    "product_code": "s-3",
+                    "product_name": "Mini skirts",
+                    "product_type": "Product",
+                    "attribute_values": [
+                        {
+                            "id": 234,
+                            "value": "S,M,L",
+                            "status": "active",
+                            "attribute_id": 60,
+                            "attribute_name": "size"
+                        },
+                        {
+                            "id": 235,
+                            "value": "mini",
+                            "status": "active",
+                            "attribute_id": 64,
+                            "attribute_name": "length"
+                        }
+                    ]
+                },
+                {
+                    "id": 121,
+                    "images": [
+                        {
+                            "id": 154,
+                            "size": 41,
+                            "status": "active",
+                            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/product-images/products/121/1784714858667-de6adqclsd.jpg",
+                            "sort_order": 0
+                        }
+                    ],
+                    "prices": [
+                        {
+                            "id": 84,
+                            "mrp": 600.00,
+                            "status": "active",
+                            "gst_pct": 18.00,
+                            "gst_amount": 99.00,
+                            "billing_type": "one_time",
+                            "discount_pct": 10.00,
+                            "member_price": 490.00,
+                            "platform_fee": null,
+                            "subscriptions": [],
+                            "total_payable": 649.00,
+                            "transport_fee": 10.00,
+                            "discount_amount": 60.00,
+                            "price_after_discount": 540.00
+                        }
+                    ],
+                    "status": "active",
+                    "alias_name": null,
+                    "attributes": {},
+                    "created_at": "2026-07-22T15:37:03.146348+05:30",
+                    "sort_order": 4,
+                    "updated_at": "2026-07-22T15:37:57.475996+05:30",
+                    "product_code": "s-4",
+                    "product_name": "denim skirt",
+                    "product_type": "Product",
+                    "attribute_values": [
+                        {
+                            "id": 236,
+                            "value": "S,M,L",
+                            "status": "active",
+                            "attribute_id": 60,
+                            "attribute_name": "size"
+                        },
+                        {
+                            "id": 237,
+                            "value": "blue",
+                            "status": "active",
+                            "attribute_id": 62,
+                            "attribute_name": "color"
+                        },
+                        {
+                            "id": 238,
+                            "value": "denim",
+                            "status": "active",
+                            "attribute_id": 66,
+                            "attribute_name": "style"
+                        }
+                    ]
+                }
+            ],
+            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/category-images/categories/skirts-1784548232289.jpg",
+            "parent_id": 41,
+            "display_orders": [
+                {
+                    "id": 22,
+                    "order": 3,
+                    "status": "active",
+                    "display_name": "skirts",
+                    "display_type": "cards"
+                }
+            ],
+            "attributes_schema": [
+                {
+                    "id": 69,
+                    "status": "active",
+                    "attribute_name": "quantity"
+                },
+                {
+                    "id": 70,
+                    "status": "active",
+                    "attribute_name": "types"
+                }
+            ]
+        },
+        {
+            "id": 46,
+            "name": "tunics",
+            "size": 38,
+            "status": "active",
+            "products": [
+                {
+                    "id": 122,
+                    "images": [
+                        {
+                            "id": 155,
+                            "size": 34,
+                            "status": "active",
+                            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/product-images/products/122/1784714996214-evvf20wsewb.jpg",
+                            "sort_order": 0
+                        }
+                    ],
+                    "prices": [
+                        {
+                            "id": 85,
+                            "mrp": 400.00,
+                            "status": "active",
+                            "gst_pct": 18.00,
+                            "gst_amount": 64.80,
+                            "billing_type": "one_time",
+                            "discount_pct": 10.00,
+                            "member_price": 300.00,
+                            "platform_fee": null,
+                            "subscriptions": [],
+                            "total_payable": 424.80,
+                            "transport_fee": 0.00,
+                            "discount_amount": 40.00,
+                            "price_after_discount": 360.00
+                        }
+                    ],
+                    "status": "active",
+                    "alias_name": null,
+                    "attributes": {},
+                    "created_at": "2026-07-22T15:39:44.51432+05:30",
+                    "sort_order": 0,
+                    "updated_at": "2026-07-22T15:40:11.538964+05:30",
+                    "product_code": "t1",
+                    "product_name": "tunic1",
+                    "product_type": "Product",
+                    "attribute_values": [
+                        {
+                            "id": 239,
+                            "value": "S,M,L",
+                            "status": "active",
+                            "attribute_id": 60,
+                            "attribute_name": "size"
+                        }
+                    ]
+                },
+                {
+                    "id": 123,
+                    "images": [
+                        {
+                            "id": 156,
+                            "size": 32,
+                            "status": "active",
+                            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/product-images/products/123/1784715042755-ytimgb4k1de.jpg",
+                            "sort_order": 0
+                        }
+                    ],
+                    "prices": [
+                        {
+                            "id": 86,
+                            "mrp": 400.00,
+                            "status": "active",
+                            "gst_pct": 18.00,
+                            "gst_amount": 64.80,
+                            "billing_type": "one_time",
+                            "discount_pct": 10.00,
+                            "member_price": 300.00,
+                            "platform_fee": null,
+                            "subscriptions": [],
+                            "total_payable": 424.80,
+                            "transport_fee": 0.00,
+                            "discount_amount": 40.00,
+                            "price_after_discount": 360.00
+                        }
+                    ],
+                    "status": "active",
+                    "alias_name": null,
+                    "attributes": {},
+                    "created_at": "2026-07-22T15:40:35.19039+05:30",
+                    "sort_order": 2,
+                    "updated_at": "2026-07-22T15:40:55.982259+05:30",
+                    "product_code": "t2",
+                    "product_name": "tunic2",
+                    "product_type": "Product",
+                    "attribute_values": []
+                },
+                {
+                    "id": 124,
+                    "images": [
+                        {
+                            "id": 157,
+                            "size": 24,
+                            "status": "active",
+                            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/product-images/products/124/1784715095791-7zig7137y2d.jpg",
+                            "sort_order": 0
+                        }
+                    ],
+                    "prices": [
+                        {
+                            "id": 87,
+                            "mrp": 400.00,
+                            "status": "active",
+                            "gst_pct": 18.00,
+                            "gst_amount": 59.40,
+                            "billing_type": "one_time",
+                            "discount_pct": 20.00,
+                            "member_price": 300.00,
+                            "platform_fee": null,
+                            "subscriptions": [],
+                            "total_payable": 389.40,
+                            "transport_fee": 10.00,
+                            "discount_amount": 80.00,
+                            "price_after_discount": 320.00
+                        }
+                    ],
+                    "status": "active",
+                    "alias_name": null,
+                    "attributes": {},
+                    "created_at": "2026-07-22T15:41:19.73146+05:30",
+                    "sort_order": 3,
+                    "updated_at": "2026-07-22T15:41:50.515041+05:30",
+                    "product_code": "t3",
+                    "product_name": "tunic3",
+                    "product_type": "Product",
+                    "attribute_values": []
+                },
+                {
+                    "id": 125,
+                    "images": [
+                        {
+                            "id": 158,
+                            "size": 30,
+                            "status": "active",
+                            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/product-images/products/125/1784715146203-egf3ueotm54.jpg",
+                            "sort_order": 0
+                        }
+                    ],
+                    "prices": [
+                        {
+                            "id": 88,
+                            "mrp": 200.00,
+                            "status": "active",
+                            "gst_pct": 18.00,
+                            "gst_amount": 41.40,
+                            "billing_type": "one_time",
+                            "discount_pct": 10.00,
+                            "member_price": 200.00,
+                            "platform_fee": null,
+                            "subscriptions": [],
+                            "total_payable": 271.40,
+                            "transport_fee": 50.00,
+                            "discount_amount": 20.00,
+                            "price_after_discount": 180.00
+                        }
+                    ],
+                    "status": "active",
+                    "alias_name": null,
+                    "attributes": {},
+                    "created_at": "2026-07-22T15:42:16.624252+05:30",
+                    "sort_order": 4,
+                    "updated_at": "2026-07-22T15:42:45.819854+05:30",
+                    "product_code": "t4",
+                    "product_name": "tunic4",
+                    "product_type": "Product",
+                    "attribute_values": []
+                },
+                {
+                    "id": 126,
+                    "images": [
+                        {
+                            "id": 159,
+                            "size": 39,
+                            "status": "active",
+                            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/product-images/products/126/1784715199766-1wqmjky3bhu.jpg",
+                            "sort_order": 0
+                        }
+                    ],
+                    "prices": [
+                        {
+                            "id": 89,
+                            "mrp": 300.00,
+                            "status": "active",
+                            "gst_pct": 18.00,
+                            "gst_amount": 55.80,
+                            "billing_type": "one_time",
+                            "discount_pct": 10.00,
+                            "member_price": 250.00,
+                            "platform_fee": null,
+                            "subscriptions": [],
+                            "total_payable": 365.80,
+                            "transport_fee": 40.00,
+                            "discount_amount": 30.00,
+                            "price_after_discount": 270.00
+                        }
+                    ],
+                    "status": "active",
+                    "alias_name": null,
+                    "attributes": {},
+                    "created_at": "2026-07-22T15:43:07.871281+05:30",
+                    "sort_order": 5,
+                    "updated_at": "2026-07-22T15:43:37.635367+05:30",
+                    "product_code": "t5",
+                    "product_name": "tunic5",
+                    "product_type": "Product",
+                    "attribute_values": []
+                }
+            ],
+            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/category-images/categories/tunics-1784548258091.jpg",
+            "parent_id": 41,
+            "display_orders": [
+                {
+                    "id": 20,
+                    "order": 1,
+                    "status": "active",
+                    "display_name": "women-tunics",
+                    "display_type": "cards"
+                }
+            ],
+            "attributes_schema": []
+        },
+        {
+            "id": 47,
+            "name": "ethnic wear",
+            "size": 89,
+            "status": "active",
+            "products": [],
+            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/category-images/categories/ethnic-wear-1784548313451.jpg",
+            "parent_id": 36,
+            "display_orders": [
+                {
+                    "id": 36,
+                    "order": 4,
+                    "status": "active",
+                    "display_name": null,
+                    "display_type": "cards"
+                }
+            ],
+            "attributes_schema": []
+        },
+        {
+            "id": 48,
+            "name": "kurta",
+            "size": 47,
+            "status": "active",
+            "products": [
+                {
+                    "id": 99,
+                    "images": [
+                        {
+                            "id": 110,
+                            "size": 47,
+                            "status": "active",
+                            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/product-images/products/99/1784613768702-h79nlqm5pwu.jpg",
+                            "sort_order": 0
+                        }
+                    ],
+                    "prices": [
+                        {
+                            "id": 63,
+                            "mrp": 1200.00,
+                            "status": "active",
+                            "gst_pct": 18.00,
+                            "gst_amount": 194.40,
+                            "billing_type": "one_time",
+                            "discount_pct": 10.00,
+                            "member_price": 1000.00,
+                            "platform_fee": null,
+                            "subscriptions": [],
+                            "total_payable": 1274.40,
+                            "transport_fee": 0.00,
+                            "discount_amount": 120.00,
+                            "price_after_discount": 1080.00
+                        }
+                    ],
+                    "status": "active",
+                    "alias_name": null,
+                    "attributes": {},
+                    "created_at": "2026-07-21T11:32:10.977511+05:30",
+                    "sort_order": 1,
+                    "updated_at": "2026-07-21T11:32:10.977511+05:30",
+                    "product_code": "k-2",
+                    "product_name": "kurta1",
+                    "product_type": "Product",
+                    "attribute_values": [
+                        {
+                            "id": 184,
+                            "value": "S,M,L",
+                            "status": "active",
+                            "attribute_id": 60,
+                            "attribute_name": "size"
+                        },
+                        {
+                            "id": 185,
+                            "value": "red",
+                            "status": "active",
+                            "attribute_id": 62,
+                            "attribute_name": "color"
+                        },
+                        {
+                            "id": 186,
+                            "value": "3/4",
+                            "status": "active",
+                            "attribute_id": 65,
+                            "attribute_name": "sleeves"
+                        }
+                    ]
+                },
+                {
+                    "id": 100,
+                    "images": [
+                        {
+                            "id": 111,
+                            "size": 9,
+                            "status": "active",
+                            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/product-images/products/100/1784613872926-nzjdyja517.jpg",
+                            "sort_order": 0
+                        }
+                    ],
+                    "prices": [
+                        {
+                            "id": 64,
+                            "mrp": 890.00,
+                            "status": "active",
+                            "gst_pct": 18.00,
+                            "gst_amount": 130.16,
+                            "billing_type": "one_time",
+                            "discount_pct": 21.00,
+                            "member_price": 699.00,
+                            "platform_fee": null,
+                            "subscriptions": [],
+                            "total_payable": 853.26,
+                            "transport_fee": 20.00,
+                            "discount_amount": 186.90,
+                            "price_after_discount": 703.10
+                        }
+                    ],
+                    "status": "active",
+                    "alias_name": null,
+                    "attributes": {},
+                    "created_at": "2026-07-21T11:33:44.155496+05:30",
+                    "sort_order": 1,
+                    "updated_at": "2026-07-21T11:33:44.155496+05:30",
+                    "product_code": "k-12",
+                    "product_name": "kurta2",
+                    "product_type": "Product",
+                    "attribute_values": [
+                        {
+                            "id": 187,
+                            "value": "S,M,L",
+                            "status": "active",
+                            "attribute_id": 60,
+                            "attribute_name": "size"
+                        },
+                        {
+                            "id": 188,
+                            "value": "beige",
+                            "status": "active",
+                            "attribute_id": 62,
+                            "attribute_name": "color"
+                        },
+                        {
+                            "id": 189,
+                            "value": "floral",
+                            "status": "active",
+                            "attribute_id": 63,
+                            "attribute_name": "print"
+                        },
+                        {
+                            "id": 190,
+                            "value": "straight",
+                            "status": "active",
+                            "attribute_id": 66,
+                            "attribute_name": "style"
+                        }
+                    ]
+                }
+            ],
+            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/category-images/categories/kurta-1784548404661.jpg",
+            "parent_id": 47,
+            "display_orders": [],
+            "attributes_schema": []
+        },
+        {
+            "id": 49,
+            "name": "coord set",
+            "size": 34,
+            "status": "active",
+            "products": [
+                {
+                    "id": 95,
+                    "images": [],
+                    "prices": [],
+                    "status": "active",
+                    "alias_name": null,
+                    "attributes": {},
+                    "created_at": "2026-07-21T11:22:49.30152+05:30",
+                    "sort_order": 1,
+                    "updated_at": "2026-07-21T11:22:49.30152+05:30",
+                    "product_code": "c0-1",
+                    "product_name": "coord1",
+                    "product_type": "Product",
+                    "attribute_values": []
+                },
+                {
+                    "id": 96,
+                    "images": [
+                        {
+                            "id": 107,
+                            "size": 51,
+                            "status": "active",
+                            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/product-images/products/96/1784613306086-2mo7yapxux5.jpg",
+                            "sort_order": 0
+                        }
+                    ],
+                    "prices": [
+                        {
+                            "id": 60,
+                            "mrp": 3000.00,
+                            "status": "active",
+                            "gst_pct": 18.00,
+                            "gst_amount": 522.00,
+                            "billing_type": "one_time",
+                            "discount_pct": 10.00,
+                            "member_price": 2500.00,
+                            "platform_fee": null,
+                            "subscriptions": [],
+                            "total_payable": 3422.00,
+                            "transport_fee": 200.00,
+                            "discount_amount": 300.00,
+                            "price_after_discount": 2700.00
+                        }
+                    ],
+                    "status": "active",
+                    "alias_name": null,
+                    "attributes": {},
+                    "created_at": "2026-07-21T11:24:13.704703+05:30",
+                    "sort_order": 1,
+                    "updated_at": "2026-07-21T11:24:13.704703+05:30",
+                    "product_code": "co-1",
+                    "product_name": "coord1",
+                    "product_type": "Product",
+                    "attribute_values": [
+                        {
+                            "id": 176,
+                            "value": "S,M,L",
+                            "status": "active",
+                            "attribute_id": 60,
+                            "attribute_name": "size"
+                        },
+                        {
+                            "id": 177,
+                            "value": "blue",
+                            "status": "active",
+                            "attribute_id": 62,
+                            "attribute_name": "color"
+                        },
+                        {
+                            "id": 178,
+                            "value": "full",
+                            "status": "active",
+                            "attribute_id": 64,
+                            "attribute_name": "length"
+                        },
+                        {
+                            "id": 179,
+                            "value": "party-wear",
+                            "status": "active",
+                            "attribute_id": 66,
+                            "attribute_name": "style"
+                        }
+                    ]
+                },
+                {
+                    "id": 97,
+                    "images": [
+                        {
+                            "id": 108,
+                            "size": 41,
+                            "status": "active",
+                            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/product-images/products/97/1784613531409-5o185fn2mhh.jpg",
+                            "sort_order": 0
+                        }
+                    ],
+                    "prices": [
+                        {
+                            "id": 61,
+                            "mrp": 918.00,
+                            "status": "active",
+                            "gst_pct": 18.00,
+                            "gst_amount": 153.40,
+                            "billing_type": "one_time",
+                            "discount_pct": 10.00,
+                            "member_price": 920.00,
+                            "platform_fee": null,
+                            "subscriptions": [],
+                            "total_payable": 1005.60,
+                            "transport_fee": 26.00,
+                            "discount_amount": 91.80,
+                            "price_after_discount": 826.20
+                        }
+                    ],
+                    "status": "active",
+                    "alias_name": null,
+                    "attributes": {},
+                    "created_at": "2026-07-21T11:28:26.48548+05:30",
+                    "sort_order": 1,
+                    "updated_at": "2026-07-21T11:28:26.48548+05:30",
+                    "product_code": "co-2",
+                    "product_name": "coord2",
+                    "product_type": "Product",
+                    "attribute_values": [
+                        {
+                            "id": 180,
+                            "value": "S,M,L",
+                            "status": "active",
+                            "attribute_id": 60,
+                            "attribute_name": "size"
+                        },
+                        {
+                            "id": 181,
+                            "value": "white",
+                            "status": "active",
+                            "attribute_id": 62,
+                            "attribute_name": "color"
+                        }
+                    ]
+                },
+                {
+                    "id": 98,
+                    "images": [
+                        {
+                            "id": 109,
+                            "size": 41,
+                            "status": "active",
+                            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/product-images/products/98/1784613612707-bb0hfcm0lv5.jpg",
+                            "sort_order": 0
+                        }
+                    ],
+                    "prices": [
+                        {
+                            "id": 62,
+                            "mrp": 800.00,
+                            "status": "active",
+                            "gst_pct": 18.00,
+                            "gst_amount": 147.60,
+                            "billing_type": "one_time",
+                            "discount_pct": 10.00,
+                            "member_price": 790.00,
+                            "platform_fee": null,
+                            "subscriptions": [],
+                            "total_payable": 967.60,
+                            "transport_fee": 100.00,
+                            "discount_amount": 80.00,
+                            "price_after_discount": 720.00
+                        }
+                    ],
+                    "status": "active",
+                    "alias_name": null,
+                    "attributes": {},
+                    "created_at": "2026-07-21T11:29:43.767619+05:30",
+                    "sort_order": 2,
+                    "updated_at": "2026-07-21T11:29:43.767619+05:30",
+                    "product_code": "co-3",
+                    "product_name": "coord3",
+                    "product_type": "Product",
+                    "attribute_values": [
+                        {
+                            "id": 182,
+                            "value": "S,M,L",
+                            "status": "active",
+                            "attribute_id": 60,
+                            "attribute_name": "size"
+                        },
+                        {
+                            "id": 183,
+                            "value": "-",
+                            "status": "active",
+                            "attribute_id": 62,
+                            "attribute_name": "color"
+                        }
+                    ]
+                }
+            ],
+            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/category-images/categories/coord-set-1784548469654.jpg",
+            "parent_id": 47,
+            "display_orders": [],
+            "attributes_schema": [
+                {
+                    "id": 60,
+                    "status": "active",
+                    "attribute_name": "size"
+                },
+                {
+                    "id": 66,
+                    "status": "active",
+                    "attribute_name": "style"
+                }
+            ]
+        },
+        {
+            "id": 50,
+            "name": "sarees",
+            "size": 22,
+            "status": "active",
+            "products": [
+                {
+                    "id": 101,
+                    "images": [
+                        {
+                            "id": 112,
+                            "size": 40,
+                            "status": "active",
+                            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/product-images/products/101/1784614854581-trjokj95p9.jpg",
+                            "sort_order": 0
+                        }
+                    ],
+                    "prices": [
+                        {
+                            "id": 65,
+                            "mrp": 590.00,
+                            "status": "active",
+                            "gst_pct": 18.00,
+                            "gst_amount": 104.58,
+                            "billing_type": "one_time",
+                            "discount_pct": 10.00,
+                            "member_price": 549.00,
+                            "platform_fee": null,
+                            "subscriptions": [],
+                            "total_payable": 685.58,
+                            "transport_fee": 50.00,
+                            "discount_amount": 59.00,
+                            "price_after_discount": 531.00
+                        }
+                    ],
+                    "status": "active",
+                    "alias_name": null,
+                    "attributes": {},
+                    "created_at": "2026-07-21T11:50:19.045308+05:30",
+                    "sort_order": 1,
+                    "updated_at": "2026-07-21T11:50:19.045308+05:30",
+                    "product_code": "S-12",
+                    "product_name": "casual saree",
+                    "product_type": "Product",
+                    "attribute_values": [
+                        {
+                            "id": 191,
+                            "value": "S,M,L",
+                            "status": "active",
+                            "attribute_id": 60,
+                            "attribute_name": "size"
+                        },
+                        {
+                            "id": 192,
+                            "value": "half",
+                            "status": "active",
+                            "attribute_id": 65,
+                            "attribute_name": "sleeves"
+                        },
+                        {
+                            "id": 193,
+                            "value": "semi-stiched",
+                            "status": "active",
+                            "attribute_id": 66,
+                            "attribute_name": "style"
+                        }
+                    ]
+                },
+                {
+                    "id": 102,
+                    "images": [
+                        {
+                            "id": 113,
+                            "size": 63,
+                            "status": "active",
+                            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/product-images/products/102/1784614939071-opmb263crg.jpg",
+                            "sort_order": 0
+                        }
+                    ],
+                    "prices": [
+                        {
+                            "id": 66,
+                            "mrp": 1400.00,
+                            "status": "active",
+                            "gst_pct": 18.00,
+                            "gst_amount": 262.80,
+                            "billing_type": "one_time",
+                            "discount_pct": 10.00,
+                            "member_price": 1500.00,
+                            "platform_fee": null,
+                            "subscriptions": [],
+                            "total_payable": 1722.80,
+                            "transport_fee": 200.00,
+                            "discount_amount": 140.00,
+                            "price_after_discount": 1260.00
+                        }
+                    ],
+                    "status": "active",
+                    "alias_name": null,
+                    "attributes": {},
+                    "created_at": "2026-07-21T11:51:52.572581+05:30",
+                    "sort_order": 2,
+                    "updated_at": "2026-07-21T11:51:52.572581+05:30",
+                    "product_code": "S-123",
+                    "product_name": "party-wear saree",
+                    "product_type": "Product",
+                    "attribute_values": [
+                        {
+                            "id": 194,
+                            "value": "S,M,L",
+                            "status": "active",
+                            "attribute_id": 60,
+                            "attribute_name": "size"
+                        },
+                        {
+                            "id": 195,
+                            "value": "white",
+                            "status": "active",
+                            "attribute_id": 62,
+                            "attribute_name": "color"
+                        }
+                    ]
+                }
+            ],
+            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/category-images/categories/sarees-1784548524278.jpg",
+            "parent_id": 47,
+            "display_orders": [],
+            "attributes_schema": []
+        },
+        {
+            "id": 51,
+            "name": "accessories",
+            "size": 41,
+            "status": "active",
+            "products": [],
+            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/category-images/categories/jewellery-1784548594666.jpg",
+            "parent_id": 47,
+            "display_orders": [],
+            "attributes_schema": []
+        },
+        {
+            "id": 52,
+            "name": "formal wear",
+            "size": 23,
+            "status": "active",
+            "products": [],
+            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/category-images/categories/formal-wear-1784548657327.jpg",
+            "parent_id": 37,
+            "display_orders": [
+                {
+                    "id": 28,
+                    "order": 1,
+                    "status": "active",
+                    "display_name": "formal-wear",
+                    "display_type": "cards"
+                }
+            ],
+            "attributes_schema": []
+        },
+        {
+            "id": 53,
+            "name": "casual wear",
+            "size": 41,
+            "status": "active",
+            "products": [
+                {
+                    "id": 128,
+                    "images": [
+                        {
+                            "id": 162,
+                            "size": 37,
+                            "status": "active",
+                            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/product-images/products/128/1784715512833-01s8iq7i69at.jpg",
+                            "sort_order": 0
+                        }
+                    ],
+                    "prices": [
+                        {
+                            "id": 91,
+                            "mrp": 500.00,
+                            "status": "active",
+                            "gst_pct": 18.00,
+                            "gst_amount": 81.00,
+                            "billing_type": "one_time",
+                            "discount_pct": 10.00,
+                            "member_price": 300.00,
+                            "platform_fee": null,
+                            "subscriptions": [],
+                            "total_payable": 531.00,
+                            "transport_fee": 0.00,
+                            "discount_amount": 50.00,
+                            "price_after_discount": 450.00
+                        }
+                    ],
+                    "status": "active",
+                    "alias_name": null,
+                    "attributes": {},
+                    "created_at": "2026-07-22T15:47:30.984635+05:30",
+                    "sort_order": 2,
+                    "updated_at": "2026-07-22T15:48:50.946048+05:30",
+                    "product_code": "t-2",
+                    "product_name": "tee2",
+                    "product_type": "Product",
+                    "attribute_values": []
+                }
+            ],
+            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/category-images/categories/casual-wear-1784548722103.jpg",
+            "parent_id": 37,
+            "display_orders": [
+                {
+                    "id": 29,
+                    "order": 2,
+                    "status": "active",
+                    "display_name": "casual wear",
+                    "display_type": "cards"
+                }
+            ],
+            "attributes_schema": []
+        },
+        {
+            "id": 54,
+            "name": "shirt",
+            "size": 20,
+            "status": "active",
+            "products": [
+                {
+                    "id": 130,
+                    "images": [
+                        {
+                            "id": 164,
+                            "size": 10,
+                            "status": "active",
+                            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/product-images/products/130/1784715774690-57n4atvbrmv.jpg",
+                            "sort_order": 0
+                        }
+                    ],
+                    "prices": [
+                        {
+                            "id": 93,
+                            "mrp": 500.00,
+                            "status": "active",
+                            "gst_pct": 18.00,
+                            "gst_amount": 81.00,
+                            "billing_type": "one_time",
+                            "discount_pct": 10.00,
+                            "member_price": 400.00,
+                            "platform_fee": null,
+                            "subscriptions": [],
+                            "total_payable": 531.00,
+                            "transport_fee": 0.00,
+                            "discount_amount": 50.00,
+                            "price_after_discount": 450.00
+                        }
+                    ],
+                    "status": "active",
+                    "alias_name": null,
+                    "attributes": {},
+                    "created_at": "2026-07-22T15:52:36.504839+05:30",
+                    "sort_order": 1,
+                    "updated_at": "2026-07-22T15:53:09.628973+05:30",
+                    "product_code": "s-1",
+                    "product_name": "shirt1",
+                    "product_type": "Product",
+                    "attribute_values": [
+                        {
+                            "id": 242,
+                            "value": "S,M,L,Xl,XXl",
+                            "status": "active",
+                            "attribute_id": 71,
+                            "attribute_name": "size"
+                        }
+                    ]
+                }
+            ],
+            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/category-images/categories/shirt-1784548793071.jpg",
+            "parent_id": 52,
+            "display_orders": [
+                {
+                    "id": 26,
+                    "order": 1,
+                    "status": "active",
+                    "display_name": "shirt",
+                    "display_type": "cards"
+                }
+            ],
+            "attributes_schema": []
+        },
+        {
+            "id": 55,
+            "name": "trousers",
+            "size": 17,
+            "status": "active",
+            "products": [
+                {
+                    "id": 129,
+                    "images": [
+                        {
+                            "id": 163,
+                            "size": 16,
+                            "status": "active",
+                            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/product-images/products/129/1784715635010-8mqcmfl3vjy.jpg",
+                            "sort_order": 0
+                        }
+                    ],
+                    "prices": [
+                        {
+                            "id": 92,
+                            "mrp": 600.00,
+                            "status": "active",
+                            "gst_pct": 18.00,
+                            "gst_amount": 115.20,
+                            "billing_type": "one_time",
+                            "discount_pct": 10.00,
+                            "member_price": 500.00,
+                            "platform_fee": null,
+                            "subscriptions": [],
+                            "total_payable": 755.20,
+                            "transport_fee": 100.00,
+                            "discount_amount": 60.00,
+                            "price_after_discount": 540.00
+                        }
+                    ],
+                    "status": "active",
+                    "alias_name": null,
+                    "attributes": {},
+                    "created_at": "2026-07-22T15:50:26.84261+05:30",
+                    "sort_order": 1,
+                    "updated_at": "2026-07-22T15:50:50.015405+05:30",
+                    "product_code": "trou1",
+                    "product_name": "trouser- olive",
+                    "product_type": "Product",
+                    "attribute_values": []
+                }
+            ],
+            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/category-images/categories/trousers-1784548848669.jpg",
+            "parent_id": 52,
+            "display_orders": [
+                {
+                    "id": 27,
+                    "order": 2,
+                    "status": "active",
+                    "display_name": "trousers",
+                    "display_type": "cards"
+                }
+            ],
+            "attributes_schema": []
+        },
+        {
+            "id": 56,
+            "name": "tshirts",
+            "size": 34,
+            "status": "active",
+            "products": [
+                {
+                    "id": 127,
+                    "images": [
+                        {
+                            "id": 160,
+                            "size": 22,
+                            "status": "active",
+                            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/product-images/products/127/1784715378902-n4hhtvzqxb9.jpg",
+                            "sort_order": 0
+                        },
+                        {
+                            "id": 161,
+                            "size": 14,
+                            "status": "active",
+                            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/product-images/products/127/1784715379217-645cwe74t3h.jpg",
+                            "sort_order": 1
+                        }
+                    ],
+                    "prices": [
+                        {
+                            "id": 90,
+                            "mrp": 400.00,
+                            "status": "active",
+                            "gst_pct": 18.00,
+                            "gst_amount": 82.80,
+                            "billing_type": "one_time",
+                            "discount_pct": 10.00,
+                            "member_price": 360.00,
+                            "platform_fee": null,
+                            "subscriptions": [],
+                            "total_payable": 542.80,
+                            "transport_fee": 100.00,
+                            "discount_amount": 40.00,
+                            "price_after_discount": 360.00
+                        }
+                    ],
+                    "status": "active",
+                    "alias_name": null,
+                    "attributes": {},
+                    "created_at": "2026-07-22T15:45:24.652601+05:30",
+                    "sort_order": 1,
+                    "updated_at": "2026-07-22T15:46:39.688765+05:30",
+                    "product_code": "t-1",
+                    "product_name": "tee1",
+                    "product_type": "Product",
+                    "attribute_values": [
+                        {
+                            "id": 240,
+                            "value": "S,M,L,Xl,XXl",
+                            "status": "active",
+                            "attribute_id": 71,
+                            "attribute_name": "size"
+                        },
+                        {
+                            "id": 241,
+                            "value": "black",
+                            "status": "active",
+                            "attribute_id": 72,
+                            "attribute_name": "color"
+                        }
+                    ]
+                }
+            ],
+            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/category-images/categories/tshirts-1784548929585.jpg",
+            "parent_id": 53,
+            "display_orders": [],
+            "attributes_schema": [
+                {
+                    "id": 71,
+                    "status": "active",
+                    "attribute_name": "size"
+                },
+                {
+                    "id": 72,
+                    "status": "active",
+                    "attribute_name": "color"
+                }
+            ]
+        },
+        {
+            "id": 57,
+            "name": "men jewellery",
+            "size": 32,
+            "status": "active",
+            "products": [],
+            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/category-images/categories/men-jewellery-1784549008892.jpg",
+            "parent_id": 39,
+            "display_orders": [
+                {
+                    "id": 17,
+                    "order": 1,
+                    "status": "active",
+                    "display_name": "men-jewellery",
+                    "display_type": "cards"
+                }
+            ],
+            "attributes_schema": []
+        },
+        {
+            "id": 58,
+            "name": "rings",
+            "size": 20,
+            "status": "active",
+            "products": [
+                {
+                    "id": 70,
+                    "images": [
+                        {
+                            "id": 75,
+                            "size": 29,
+                            "status": "active",
+                            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/product-images/products/70/1784550376192-xbherw2zfx.jpg",
+                            "sort_order": 0
+                        },
+                        {
+                            "id": 76,
+                            "size": 13,
+                            "status": "active",
+                            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/product-images/products/70/1784550377330-zpvgzx0a9ea.jpg",
+                            "sort_order": 1
+                        },
+                        {
+                            "id": 77,
+                            "size": 20,
+                            "status": "active",
+                            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/product-images/products/70/1784550377541-cmloynbu4at.jpg",
+                            "sort_order": 2
+                        },
+                        {
+                            "id": 78,
+                            "size": 14,
+                            "status": "active",
+                            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/product-images/products/70/1784550377717-i6wmq311pj9.jpg",
+                            "sort_order": 3
+                        },
+                        {
+                            "id": 79,
+                            "size": 24,
+                            "status": "active",
+                            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/product-images/products/70/1784550377898-68cz5890sgr.jpg",
+                            "sort_order": 4
+                        }
+                    ],
+                    "prices": [
+                        {
+                            "id": 41,
+                            "mrp": 120020.00,
+                            "status": "active",
+                            "gst_pct": 18.00,
+                            "gst_amount": 17354.88,
+                            "billing_type": "one_time",
+                            "discount_pct": 20.00,
+                            "member_price": 95770.00,
+                            "platform_fee": null,
+                            "subscriptions": [],
+                            "total_payable": 113770.88,
+                            "transport_fee": 400.00,
+                            "discount_amount": 24004.00,
+                            "price_after_discount": 96016.00
+                        }
+                    ],
+                    "status": "active",
+                    "alias_name": "ring",
+                    "attributes": {},
+                    "created_at": "2026-07-20T17:53:03.109322+05:30",
+                    "sort_order": 1,
+                    "updated_at": "2026-07-20T17:53:03.109322+05:30",
+                    "product_code": "MJ-01",
+                    "product_name": "gold ring",
+                    "product_type": "Product",
+                    "attribute_values": [
+                        {
+                            "id": 112,
+                            "value": "2,3,4",
+                            "status": "active",
+                            "attribute_id": 53,
+                            "attribute_name": "size"
+                        },
+                        {
+                            "id": 113,
+                            "value": "gold",
+                            "status": "active",
+                            "attribute_id": 54,
+                            "attribute_name": "material"
+                        }
+                    ]
+                }
+            ],
+            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/category-images/categories/rings-1784549108444.jpg",
+            "parent_id": 57,
+            "display_orders": [
+                {
+                    "id": 19,
+                    "order": 2,
+                    "status": "active",
+                    "display_name": "men-ring",
+                    "display_type": "cards"
+                }
+            ],
+            "attributes_schema": [
+                {
+                    "id": 53,
+                    "status": "active",
+                    "attribute_name": "size"
+                },
+                {
+                    "id": 54,
+                    "status": "active",
+                    "attribute_name": "material"
+                }
+            ]
+        },
+        {
+            "id": 59,
+            "name": "chains",
+            "size": 47,
+            "status": "active",
+            "products": [
+                {
+                    "id": 71,
+                    "images": [
+                        {
+                            "id": 80,
+                            "size": 29,
+                            "status": "active",
+                            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/product-images/products/71/1784609030708-tgj1259ijy.jpg",
+                            "sort_order": 0
+                        },
+                        {
+                            "id": 81,
+                            "size": 25,
+                            "status": "active",
+                            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/product-images/products/71/1784609030988-ozrw164wed.jpg",
+                            "sort_order": 1
+                        },
+                        {
+                            "id": 82,
+                            "size": 28,
+                            "status": "active",
+                            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/product-images/products/71/1784609031183-5pcd0gh58au.jpg",
+                            "sort_order": 2
+                        },
+                        {
+                            "id": 83,
+                            "size": 23,
+                            "status": "active",
+                            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/product-images/products/71/1784609031385-lrg0zjelbk.jpg",
+                            "sort_order": 3
+                        }
+                    ],
+                    "prices": [
+                        {
+                            "id": 42,
+                            "mrp": 12000.00,
+                            "status": "active",
+                            "gst_pct": 12.00,
+                            "gst_amount": 1332.00,
+                            "billing_type": "one_time",
+                            "discount_pct": 10.00,
+                            "member_price": 11000.00,
+                            "platform_fee": null,
+                            "subscriptions": [],
+                            "total_payable": 12432.00,
+                            "transport_fee": 300.00,
+                            "discount_amount": 1200.00,
+                            "price_after_discount": 10800.00
+                        }
+                    ],
+                    "status": "active",
+                    "alias_name": null,
+                    "attributes": {},
+                    "created_at": "2026-07-21T10:12:31.066286+05:30",
+                    "sort_order": 1,
+                    "updated_at": "2026-07-21T10:12:31.066286+05:30",
+                    "product_code": "GC-1",
+                    "product_name": "GC1 chain",
+                    "product_type": "Product",
+                    "attribute_values": [
+                        {
+                            "id": 114,
+                            "value": "2,3,4",
+                            "status": "active",
+                            "attribute_id": 53,
+                            "attribute_name": "size"
+                        },
+                        {
+                            "id": 115,
+                            "value": "gold",
+                            "status": "active",
+                            "attribute_id": 54,
+                            "attribute_name": "material"
+                        },
+                        {
+                            "id": 116,
+                            "value": "M",
+                            "status": "active",
+                            "attribute_id": 55,
+                            "attribute_name": "length"
+                        },
+                        {
+                            "id": 117,
+                            "value": "braided",
+                            "status": "active",
+                            "attribute_id": 56,
+                            "attribute_name": "style"
+                        }
+                    ]
+                },
+                {
+                    "id": 72,
+                    "images": [
+                        {
+                            "id": 84,
+                            "size": 23,
+                            "status": "active",
+                            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/product-images/products/72/1784609545546-drbds6u4dyg.jpg",
+                            "sort_order": 0
+                        },
+                        {
+                            "id": 85,
+                            "size": 38,
+                            "status": "active",
+                            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/product-images/products/72/1784609545771-3s57zer56q8.jpg",
+                            "sort_order": 1
+                        },
+                        {
+                            "id": 86,
+                            "size": 18,
+                            "status": "active",
+                            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/product-images/products/72/1784609545914-1rq8uj1ut6a.jpg",
+                            "sort_order": 2
+                        },
+                        {
+                            "id": 87,
+                            "size": 25,
+                            "status": "active",
+                            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/product-images/products/72/1784609546086-y6vy7a9mzon.jpg",
+                            "sort_order": 3
+                        },
+                        {
+                            "id": 88,
+                            "size": 28,
+                            "status": "active",
+                            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/product-images/products/72/1784609546277-ukhy9dklfq.jpg",
+                            "sort_order": 4
+                        },
+                        {
+                            "id": 89,
+                            "size": 23,
+                            "status": "active",
+                            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/product-images/products/72/1784609546500-aqoswwlnrei.jpg",
+                            "sort_order": 5
+                        }
+                    ],
+                    "prices": [
+                        {
+                            "id": 43,
+                            "mrp": 12000.00,
+                            "status": "active",
+                            "gst_pct": 5.00,
+                            "gst_amount": 550.00,
+                            "billing_type": "one_time",
+                            "discount_pct": 10.00,
+                            "member_price": 10000.00,
+                            "platform_fee": null,
+                            "subscriptions": [],
+                            "total_payable": 11550.00,
+                            "transport_fee": 200.00,
+                            "discount_amount": 1200.00,
+                            "price_after_discount": 10800.00
+                        }
+                    ],
+                    "status": "active",
+                    "alias_name": null,
+                    "attributes": {},
+                    "created_at": "2026-07-21T10:21:07.942305+05:30",
+                    "sort_order": 2,
+                    "updated_at": "2026-07-21T10:21:07.942305+05:30",
+                    "product_code": "G-2",
+                    "product_name": "GC-2 chain",
+                    "product_type": "Product",
+                    "attribute_values": [
+                        {
+                            "id": 118,
+                            "value": "2,3,4",
+                            "status": "active",
+                            "attribute_id": 53,
+                            "attribute_name": "size"
+                        },
+                        {
+                            "id": 119,
+                            "value": "gold",
+                            "status": "active",
+                            "attribute_id": 54,
+                            "attribute_name": "material"
+                        },
+                        {
+                            "id": 120,
+                            "value": "S",
+                            "status": "active",
+                            "attribute_id": 55,
+                            "attribute_name": "length"
+                        },
+                        {
+                            "id": 121,
+                            "value": "boho",
+                            "status": "active",
+                            "attribute_id": 56,
+                            "attribute_name": "style"
+                        }
+                    ]
+                }
+            ],
+            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/category-images/categories/chains-1784549211961.jpg",
+            "parent_id": 57,
+            "display_orders": [
+                {
+                    "id": 18,
+                    "order": 1,
+                    "status": "active",
+                    "display_name": "men-chain",
+                    "display_type": "cards"
+                }
+            ],
+            "attributes_schema": [
+                {
+                    "id": 55,
+                    "status": "active",
+                    "attribute_name": "length"
+                },
+                {
+                    "id": 56,
+                    "status": "active",
+                    "attribute_name": "style"
+                }
+            ]
+        },
+        {
+            "id": 60,
+            "name": "women jewellery",
+            "size": 28,
+            "status": "active",
+            "products": [
+                {
+                    "id": 80,
+                    "images": [
+                        {
+                            "id": 96,
+                            "size": 35,
+                            "status": "active",
+                            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/product-images/products/80/1784610770154-5336ms2gsoj.jpg",
+                            "sort_order": 0
+                        }
+                    ],
+                    "prices": [
+                        {
+                            "id": 50,
+                            "mrp": 120.00,
+                            "status": "active",
+                            "gst_pct": 18.00,
+                            "gst_amount": 24.84,
+                            "billing_type": "one_time",
+                            "discount_pct": 10.00,
+                            "member_price": 120.00,
+                            "platform_fee": null,
+                            "subscriptions": [],
+                            "total_payable": 162.84,
+                            "transport_fee": 30.00,
+                            "discount_amount": 12.00,
+                            "price_after_discount": 108.00
+                        }
+                    ],
+                    "status": "active",
+                    "alias_name": null,
+                    "attributes": {},
+                    "created_at": "2026-07-21T10:41:08.035803+05:30",
+                    "sort_order": 1,
+                    "updated_at": "2026-07-21T10:41:08.035803+05:30",
+                    "product_code": "c-1",
+                    "product_name": "clips",
+                    "product_type": "Product",
+                    "attribute_values": [
+                        {
+                            "id": 144,
+                            "value": "M",
+                            "status": "active",
+                            "attribute_id": 53,
+                            "attribute_name": "size"
+                        },
+                        {
+                            "id": 142,
+                            "value": "artificial",
+                            "status": "active",
+                            "attribute_id": 54,
+                            "attribute_name": "material"
+                        },
+                        {
+                            "id": 143,
+                            "value": "party-wear",
+                            "status": "active",
+                            "attribute_id": 56,
+                            "attribute_name": "style"
+                        }
+                    ]
+                },
+                {
+                    "id": 81,
+                    "images": [
+                        {
+                            "id": 97,
+                            "size": 35,
+                            "status": "active",
+                            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/product-images/products/81/1784610932553-layuqz6feop.jpg",
+                            "sort_order": 0
+                        }
+                    ],
+                    "prices": [
+                        {
+                            "id": 51,
+                            "mrp": 120.00,
+                            "status": "active",
+                            "gst_pct": 18.00,
+                            "gst_amount": 21.24,
+                            "billing_type": "one_time",
+                            "discount_pct": 10.00,
+                            "member_price": 99.00,
+                            "platform_fee": null,
+                            "subscriptions": [],
+                            "total_payable": 139.24,
+                            "transport_fee": 10.00,
+                            "discount_amount": 12.00,
+                            "price_after_discount": 108.00
+                        }
+                    ],
+                    "status": "active",
+                    "alias_name": null,
+                    "attributes": {},
+                    "created_at": "2026-07-21T10:44:55.652479+05:30",
+                    "sort_order": 2,
+                    "updated_at": "2026-07-21T10:44:55.652479+05:30",
+                    "product_code": "c-2",
+                    "product_name": "clip-2",
+                    "product_type": "Product",
+                    "attribute_values": [
+                        {
+                            "id": 145,
+                            "value": "plastic",
+                            "status": "active",
+                            "attribute_id": 54,
+                            "attribute_name": "material"
+                        },
+                        {
+                            "id": 146,
+                            "value": "party-wear",
+                            "status": "active",
+                            "attribute_id": 56,
+                            "attribute_name": "style"
+                        }
+                    ]
+                }
+            ],
+            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/category-images/categories/women-jewellery-1784549248580.jpg",
+            "parent_id": 39,
+            "display_orders": [
+                {
+                    "id": 31,
+                    "order": 2,
+                    "status": "active",
+                    "display_name": "women-jewellery",
+                    "display_type": "cards"
+                }
+            ],
+            "attributes_schema": []
+        },
+        {
+            "id": 61,
+            "name": "bridal set",
+            "size": 42,
+            "status": "active",
+            "products": [
+                {
+                    "id": 135,
+                    "images": [
+                        {
+                            "id": 168,
+                            "size": 43,
+                            "status": "active",
+                            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/product-images/products/135/1784717152133-bycadorvsim.jpg",
+                            "sort_order": 0
+                        }
+                    ],
+                    "prices": [
+                        {
+                            "id": 97,
+                            "mrp": 1300.00,
+                            "status": "active",
+                            "gst_pct": 18.00,
+                            "gst_amount": 264.60,
+                            "billing_type": "one_time",
+                            "discount_pct": 10.00,
+                            "member_price": 1200.00,
+                            "platform_fee": null,
+                            "subscriptions": [],
+                            "total_payable": 1734.60,
+                            "transport_fee": 300.00,
+                            "discount_amount": 130.00,
+                            "price_after_discount": 1170.00
+                        }
+                    ],
+                    "status": "active",
+                    "alias_name": null,
+                    "attributes": {},
+                    "created_at": "2026-07-22T16:15:39.050614+05:30",
+                    "sort_order": 1,
+                    "updated_at": "2026-07-22T16:16:14.771086+05:30",
+                    "product_code": "br-1",
+                    "product_name": "bridal1",
+                    "product_type": "Product",
+                    "attribute_values": []
+                },
+                {
+                    "id": 136,
+                    "images": [
+                        {
+                            "id": 169,
+                            "size": 42,
+                            "status": "active",
+                            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/product-images/products/136/1784717202515-tbck8py47n.jpg",
+                            "sort_order": 0
+                        }
+                    ],
+                    "prices": [
+                        {
+                            "id": 98,
+                            "mrp": 1600.00,
+                            "status": "active",
+                            "gst_pct": 18.00,
+                            "gst_amount": 313.20,
+                            "billing_type": "one_time",
+                            "discount_pct": 10.00,
+                            "member_price": 1500.00,
+                            "platform_fee": null,
+                            "subscriptions": [],
+                            "total_payable": 2053.20,
+                            "transport_fee": 300.00,
+                            "discount_amount": 160.00,
+                            "price_after_discount": 1440.00
+                        }
+                    ],
+                    "status": "active",
+                    "alias_name": null,
+                    "attributes": {},
+                    "created_at": "2026-07-22T16:16:34.198031+05:30",
+                    "sort_order": 2,
+                    "updated_at": "2026-07-22T16:17:03.110066+05:30",
+                    "product_code": "br-2",
+                    "product_name": "bridal2",
+                    "product_type": "Product",
+                    "attribute_values": []
+                }
+            ],
+            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/category-images/categories/bridal-set-1784549497551.jpg",
+            "parent_id": 60,
+            "display_orders": [
+                {
+                    "id": 34,
+                    "order": 3,
+                    "status": "active",
+                    "display_name": "women-bridalSet",
+                    "display_type": "cards"
+                }
+            ],
+            "attributes_schema": []
+        },
+        {
+            "id": 62,
+            "name": "bangles",
+            "size": 59,
+            "status": "active",
+            "products": [
+                {
+                    "id": 73,
+                    "images": [
+                        {
+                            "id": 90,
+                            "size": 26,
+                            "status": "active",
+                            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/product-images/products/73/1784609815545-d5olcp83eyq.jpg",
+                            "sort_order": 0
+                        }
+                    ],
+                    "prices": [
+                        {
+                            "id": 44,
+                            "mrp": 2000.00,
+                            "status": "active",
+                            "gst_pct": 18.00,
+                            "gst_amount": 360.00,
+                            "billing_type": "one_time",
+                            "discount_pct": 10.00,
+                            "member_price": 1600.00,
+                            "platform_fee": null,
+                            "subscriptions": [],
+                            "total_payable": 2360.00,
+                            "transport_fee": 200.00,
+                            "discount_amount": 200.00,
+                            "price_after_discount": 1800.00
+                        }
+                    ],
+                    "status": "active",
+                    "alias_name": null,
+                    "attributes": {},
+                    "created_at": "2026-07-21T10:25:33.481941+05:30",
+                    "sort_order": 1,
+                    "updated_at": "2026-07-21T10:25:33.481941+05:30",
+                    "product_code": "B-1",
+                    "product_name": "bangle b-1",
+                    "product_type": "Product",
+                    "attribute_values": [
+                        {
+                            "id": 122,
+                            "value": "2,3,4",
+                            "status": "active",
+                            "attribute_id": 53,
+                            "attribute_name": "size"
+                        },
+                        {
+                            "id": 123,
+                            "value": "gold pleated",
+                            "status": "active",
+                            "attribute_id": 54,
+                            "attribute_name": "material"
+                        },
+                        {
+                            "id": 124,
+                            "value": "south",
+                            "status": "active",
+                            "attribute_id": 56,
+                            "attribute_name": "style"
+                        }
+                    ]
+                },
+                {
+                    "id": 74,
+                    "images": [
+                        {
+                            "id": 91,
+                            "size": 37,
+                            "status": "active",
+                            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/product-images/products/74/1784610021007-ssx0gp3uaf9.jpg",
+                            "sort_order": 0
+                        }
+                    ],
+                    "prices": [
+                        {
+                            "id": 45,
+                            "mrp": 500.00,
+                            "status": "active",
+                            "gst_pct": 18.00,
+                            "gst_amount": 100.80,
+                            "billing_type": "one_time",
+                            "discount_pct": 10.00,
+                            "member_price": 550.00,
+                            "platform_fee": null,
+                            "subscriptions": [],
+                            "total_payable": 660.80,
+                            "transport_fee": 110.00,
+                            "discount_amount": 50.00,
+                            "price_after_discount": 450.00
+                        }
+                    ],
+                    "status": "active",
+                    "alias_name": null,
+                    "attributes": {},
+                    "created_at": "2026-07-21T10:29:51.098679+05:30",
+                    "sort_order": 2,
+                    "updated_at": "2026-07-21T10:29:51.098679+05:30",
+                    "product_code": "b-2",
+                    "product_name": "bangle b-2",
+                    "product_type": "Product",
+                    "attribute_values": [
+                        {
+                            "id": 125,
+                            "value": "2,3,4",
+                            "status": "active",
+                            "attribute_id": 53,
+                            "attribute_name": "size"
+                        },
+                        {
+                            "id": 126,
+                            "value": "party-style",
+                            "status": "active",
+                            "attribute_id": 54,
+                            "attribute_name": "material"
+                        }
+                    ]
+                },
+                {
+                    "id": 75,
+                    "images": [
+                        {
+                            "id": 92,
+                            "size": 47,
+                            "status": "active",
+                            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/product-images/products/75/1784610098753-9ov0phgmul.jpg",
+                            "sort_order": 0
+                        }
+                    ],
+                    "prices": [
+                        {
+                            "id": 46,
+                            "mrp": 700.00,
+                            "status": "active",
+                            "gst_pct": 18.00,
+                            "gst_amount": 133.20,
+                            "billing_type": "one_time",
+                            "discount_pct": 10.00,
+                            "member_price": 670.00,
+                            "platform_fee": null,
+                            "subscriptions": [],
+                            "total_payable": 873.20,
+                            "transport_fee": 110.00,
+                            "discount_amount": 70.00,
+                            "price_after_discount": 630.00
+                        }
+                    ],
+                    "status": "active",
+                    "alias_name": null,
+                    "attributes": {},
+                    "created_at": "2026-07-21T10:31:08.68333+05:30",
+                    "sort_order": 3,
+                    "updated_at": "2026-07-21T10:31:08.68333+05:30",
+                    "product_code": "b-3",
+                    "product_name": "bangle b-3",
+                    "product_type": "Product",
+                    "attribute_values": [
+                        {
+                            "id": 127,
+                            "value": "2,3,4",
+                            "status": "active",
+                            "attribute_id": 53,
+                            "attribute_name": "size"
+                        },
+                        {
+                            "id": 128,
+                            "value": "gold pleated",
+                            "status": "active",
+                            "attribute_id": 54,
+                            "attribute_name": "material"
+                        },
+                        {
+                            "id": 129,
+                            "value": "party-wear",
+                            "status": "active",
+                            "attribute_id": 56,
+                            "attribute_name": "style"
+                        }
+                    ]
+                },
+                {
+                    "id": 76,
+                    "images": [
+                        {
+                            "id": 93,
+                            "size": 42,
+                            "status": "active",
+                            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/product-images/products/76/1784610238847-j6gx2vgikxl.jpg",
+                            "sort_order": 0
+                        }
+                    ],
+                    "prices": [
+                        {
+                            "id": 47,
+                            "mrp": 600.00,
+                            "status": "active",
+                            "gst_pct": 18.00,
+                            "gst_amount": 106.20,
+                            "billing_type": "one_time",
+                            "discount_pct": 10.00,
+                            "member_price": 550.00,
+                            "platform_fee": null,
+                            "subscriptions": [],
+                            "total_payable": 696.20,
+                            "transport_fee": 50.00,
+                            "discount_amount": 60.00,
+                            "price_after_discount": 540.00
+                        }
+                    ],
+                    "status": "active",
+                    "alias_name": null,
+                    "attributes": {},
+                    "created_at": "2026-07-21T10:32:49.151347+05:30",
+                    "sort_order": 4,
+                    "updated_at": "2026-07-21T10:32:49.151347+05:30",
+                    "product_code": "b-4",
+                    "product_name": "Bangle b-4",
+                    "product_type": "Product",
+                    "attribute_values": [
+                        {
+                            "id": 133,
+                            "value": "2,3,4",
+                            "status": "active",
+                            "attribute_id": 53,
+                            "attribute_name": "size"
+                        },
+                        {
+                            "id": 134,
+                            "value": "gold",
+                            "status": "active",
+                            "attribute_id": 54,
+                            "attribute_name": "material"
+                        },
+                        {
+                            "id": 135,
+                            "value": "south",
+                            "status": "active",
+                            "attribute_id": 56,
+                            "attribute_name": "style"
+                        }
+                    ]
+                }
+            ],
+            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/category-images/categories/bangles-1784549667236.jpg",
+            "parent_id": 60,
+            "display_orders": [
+                {
+                    "id": 32,
+                    "order": 1,
+                    "status": "active",
+                    "display_name": "women-bangle",
+                    "display_type": "cards"
+                }
+            ],
+            "attributes_schema": []
+        },
+        {
+            "id": 63,
+            "name": "boho collection",
+            "size": 38,
+            "status": "active",
+            "products": [
+                {
+                    "id": 82,
+                    "images": [
+                        {
+                            "id": 98,
+                            "size": 41,
+                            "status": "active",
+                            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/product-images/products/82/1784611289718-t6ey49w6f8.jpg",
+                            "sort_order": 0
+                        },
+                        {
+                            "id": 99,
+                            "size": 71,
+                            "status": "active",
+                            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/product-images/products/82/1784611290231-b533aolhfhv.jpg",
+                            "sort_order": 1
+                        }
+                    ],
+                    "prices": [
+                        {
+                            "id": 52,
+                            "mrp": 300.00,
+                            "status": "active",
+                            "gst_pct": 18.00,
+                            "gst_amount": 57.60,
+                            "billing_type": "one_time",
+                            "discount_pct": 10.00,
+                            "member_price": 280.00,
+                            "platform_fee": null,
+                            "subscriptions": [],
+                            "total_payable": 377.60,
+                            "transport_fee": 50.00,
+                            "discount_amount": 30.00,
+                            "price_after_discount": 270.00
+                        }
+                    ],
+                    "status": "active",
+                    "alias_name": null,
+                    "attributes": {},
+                    "created_at": "2026-07-21T10:49:01.907421+05:30",
+                    "sort_order": 1,
+                    "updated_at": "2026-07-21T10:49:01.907421+05:30",
+                    "product_code": "b-1",
+                    "product_name": "boho1",
+                    "product_type": "Product",
+                    "attribute_values": [
+                        {
+                            "id": 148,
+                            "value": "2,3,4",
+                            "status": "active",
+                            "attribute_id": 53,
+                            "attribute_name": "size"
+                        },
+                        {
+                            "id": 147,
+                            "value": "artificial",
+                            "status": "active",
+                            "attribute_id": 54,
+                            "attribute_name": "material"
+                        },
+                        {
+                            "id": 149,
+                            "value": "boho",
+                            "status": "active",
+                            "attribute_id": 56,
+                            "attribute_name": "style"
+                        }
+                    ]
+                },
+                {
+                    "id": 85,
+                    "images": [
+                        {
+                            "id": 100,
+                            "size": 27,
+                            "status": "active",
+                            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/product-images/products/85/1784611595167-v34wy2r86do.jpg",
+                            "sort_order": 0
+                        }
+                    ],
+                    "prices": [
+                        {
+                            "id": 53,
+                            "mrp": 300.00,
+                            "status": "active",
+                            "gst_pct": 18.00,
+                            "gst_amount": 52.20,
+                            "billing_type": "one_time",
+                            "discount_pct": 10.00,
+                            "member_price": 250.00,
+                            "platform_fee": null,
+                            "subscriptions": [],
+                            "total_payable": 342.20,
+                            "transport_fee": 20.00,
+                            "discount_amount": 30.00,
+                            "price_after_discount": 270.00
+                        }
+                    ],
+                    "status": "active",
+                    "alias_name": null,
+                    "attributes": {},
+                    "created_at": "2026-07-21T10:55:20.240411+05:30",
+                    "sort_order": 3,
+                    "updated_at": "2026-07-21T10:55:20.240411+05:30",
+                    "product_code": "b-23",
+                    "product_name": "boho b-2",
+                    "product_type": "Product",
+                    "attribute_values": [
+                        {
+                            "id": 150,
+                            "value": "2,3,4",
+                            "status": "active",
+                            "attribute_id": 53,
+                            "attribute_name": "size"
+                        },
+                        {
+                            "id": 151,
+                            "value": "artificial",
+                            "status": "active",
+                            "attribute_id": 54,
+                            "attribute_name": "material"
+                        },
+                        {
+                            "id": 152,
+                            "value": "boho",
+                            "status": "active",
+                            "attribute_id": 56,
+                            "attribute_name": "style"
+                        }
+                    ]
+                }
+            ],
+            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/category-images/categories/boho-collection-1784549735794.jpg",
+            "parent_id": 60,
+            "display_orders": [
+                {
+                    "id": 33,
+                    "order": 2,
+                    "status": "active",
+                    "display_name": "women-bohoCollection",
+                    "display_type": "cards"
+                }
+            ],
+            "attributes_schema": []
+        },
+        {
+            "id": 64,
+            "name": "boys",
+            "size": 31,
+            "status": "active",
+            "products": [
+                {
+                    "id": 87,
+                    "images": [
+                        {
+                            "id": 101,
+                            "size": 23,
+                            "status": "active",
+                            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/product-images/products/87/1784611947345-oipu52fmpog.jpg",
+                            "sort_order": 0
+                        }
+                    ],
+                    "prices": [
+                        {
+                            "id": 54,
+                            "mrp": 1200.00,
+                            "status": "active",
+                            "gst_pct": 18.00,
+                            "gst_amount": 212.40,
+                            "billing_type": "one_time",
+                            "discount_pct": 10.00,
+                            "member_price": 999.00,
+                            "platform_fee": null,
+                            "subscriptions": [],
+                            "total_payable": 1392.40,
+                            "transport_fee": 100.00,
+                            "discount_amount": 120.00,
+                            "price_after_discount": 1080.00
+                        }
+                    ],
+                    "status": "active",
+                    "alias_name": null,
+                    "attributes": {},
+                    "created_at": "2026-07-21T11:00:06.608821+05:30",
+                    "sort_order": 1,
+                    "updated_at": "2026-07-21T11:00:06.608821+05:30",
+                    "product_code": "b-100",
+                    "product_name": "formal",
+                    "product_type": "Product",
+                    "attribute_values": [
+                        {
+                            "id": 157,
+                            "value": "S,M,L",
+                            "status": "active",
+                            "attribute_id": 57,
+                            "attribute_name": "size"
+                        },
+                        {
+                            "id": 158,
+                            "value": "multi",
+                            "status": "active",
+                            "attribute_id": 58,
+                            "attribute_name": "color"
+                        }
+                    ]
+                },
+                {
+                    "id": 88,
+                    "images": [
+                        {
+                            "id": 102,
+                            "size": 16,
+                            "status": "active",
+                            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/product-images/products/88/1784612011278-3azw7xbyhkm.jpg",
+                            "sort_order": 0
+                        }
+                    ],
+                    "prices": [
+                        {
+                            "id": 55,
+                            "mrp": 700.00,
+                            "status": "active",
+                            "gst_pct": 18.00,
+                            "gst_amount": 131.40,
+                            "billing_type": "one_time",
+                            "discount_pct": 10.00,
+                            "member_price": 750.00,
+                            "platform_fee": null,
+                            "subscriptions": [],
+                            "total_payable": 861.40,
+                            "transport_fee": 100.00,
+                            "discount_amount": 70.00,
+                            "price_after_discount": 630.00
+                        }
+                    ],
+                    "status": "active",
+                    "alias_name": null,
+                    "attributes": {},
+                    "created_at": "2026-07-21T11:03:11.299604+05:30",
+                    "sort_order": 2,
+                    "updated_at": "2026-07-21T11:03:11.299604+05:30",
+                    "product_code": "b-110",
+                    "product_name": "casual",
+                    "product_type": "Product",
+                    "attribute_values": [
+                        {
+                            "id": 159,
+                            "value": "S,M,L",
+                            "status": "active",
+                            "attribute_id": 57,
+                            "attribute_name": "size"
+                        },
+                        {
+                            "id": 160,
+                            "value": "blue",
+                            "status": "active",
+                            "attribute_id": 58,
+                            "attribute_name": "color"
+                        }
+                    ]
+                }
+            ],
+            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/category-images/categories/boys-1784549876883.jpg",
+            "parent_id": 38,
+            "display_orders": [],
+            "attributes_schema": [
+                {
+                    "id": 57,
+                    "status": "active",
+                    "attribute_name": "size"
+                },
+                {
+                    "id": 58,
+                    "status": "active",
+                    "attribute_name": "color"
+                }
+            ]
+        },
+        {
+            "id": 65,
+            "name": "girls",
+            "size": 26,
+            "status": "active",
+            "products": [
+                {
+                    "id": 91,
+                    "images": [
+                        {
+                            "id": 104,
+                            "size": 51,
+                            "status": "active",
+                            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/product-images/products/91/1784612653875-amrvks50gtk.jpg",
+                            "sort_order": 0
+                        }
+                    ],
+                    "prices": [
+                        {
+                            "id": 57,
+                            "mrp": 2000.00,
+                            "status": "active",
+                            "gst_pct": 18.00,
+                            "gst_amount": 324.00,
+                            "billing_type": "one_time",
+                            "discount_pct": 20.00,
+                            "member_price": 1800.00,
+                            "platform_fee": null,
+                            "subscriptions": [],
+                            "total_payable": 2124.00,
+                            "transport_fee": 200.00,
+                            "discount_amount": 400.00,
+                            "price_after_discount": 1600.00
+                        }
+                    ],
+                    "status": "active",
+                    "alias_name": null,
+                    "attributes": {},
+                    "created_at": "2026-07-21T11:13:22.831921+05:30",
+                    "sort_order": 1,
+                    "updated_at": "2026-07-21T11:13:22.831921+05:30",
+                    "product_code": "g-123",
+                    "product_name": "girls ethnic",
+                    "product_type": "Product",
+                    "attribute_values": [
+                        {
+                            "id": 165,
+                            "value": "S,M,L",
+                            "status": "active",
+                            "attribute_id": 57,
+                            "attribute_name": "size"
+                        },
+                        {
+                            "id": 166,
+                            "value": "blue",
+                            "status": "active",
+                            "attribute_id": 58,
+                            "attribute_name": "color"
+                        },
+                        {
+                            "id": 167,
+                            "value": "floral",
+                            "status": "active",
+                            "attribute_id": 59,
+                            "attribute_name": "prints"
+                        }
+                    ]
+                },
+                {
+                    "id": 92,
+                    "images": [
+                        {
+                            "id": 105,
+                            "size": 29,
+                            "status": "active",
+                            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/product-images/products/92/1784612753107-gubj45p0o98.jpg",
+                            "sort_order": 0
+                        }
+                    ],
+                    "prices": [
+                        {
+                            "id": 58,
+                            "mrp": 1300.00,
+                            "status": "active",
+                            "gst_pct": 18.00,
+                            "gst_amount": 228.60,
+                            "billing_type": "one_time",
+                            "discount_pct": 10.00,
+                            "member_price": 1200.00,
+                            "platform_fee": null,
+                            "subscriptions": [],
+                            "total_payable": 1498.60,
+                            "transport_fee": 100.00,
+                            "discount_amount": 130.00,
+                            "price_after_discount": 1170.00
+                        }
+                    ],
+                    "status": "active",
+                    "alias_name": null,
+                    "attributes": {},
+                    "created_at": "2026-07-21T11:15:06.653759+05:30",
+                    "sort_order": 3,
+                    "updated_at": "2026-07-21T11:15:06.653759+05:30",
+                    "product_code": "g-1223",
+                    "product_name": "casual wear",
+                    "product_type": "Product",
+                    "attribute_values": [
+                        {
+                            "id": 170,
+                            "value": "S,M,L",
+                            "status": "active",
+                            "attribute_id": 57,
+                            "attribute_name": "size"
+                        },
+                        {
+                            "id": 171,
+                            "value": "multi",
+                            "status": "active",
+                            "attribute_id": 58,
+                            "attribute_name": "color"
+                        },
+                        {
+                            "id": 172,
+                            "value": "floral",
+                            "status": "active",
+                            "attribute_id": 59,
+                            "attribute_name": "prints"
+                        }
+                    ]
+                },
+                {
+                    "id": 93,
+                    "images": [
+                        {
+                            "id": 106,
+                            "size": 29,
+                            "status": "active",
+                            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/product-images/products/93/1784612828789-or6jkpmais.jpg",
+                            "sort_order": 0
+                        }
+                    ],
+                    "prices": [
+                        {
+                            "id": 59,
+                            "mrp": 1200.00,
+                            "status": "active",
+                            "gst_pct": 18.00,
+                            "gst_amount": 208.80,
+                            "billing_type": "one_time",
+                            "discount_pct": 10.00,
+                            "member_price": 1100.00,
+                            "platform_fee": null,
+                            "subscriptions": [],
+                            "total_payable": 1368.80,
+                            "transport_fee": 80.00,
+                            "discount_amount": 120.00,
+                            "price_after_discount": 1080.00
+                        }
+                    ],
+                    "status": "active",
+                    "alias_name": null,
+                    "attributes": {},
+                    "created_at": "2026-07-21T11:16:39.175319+05:30",
+                    "sort_order": 3,
+                    "updated_at": "2026-07-21T11:16:39.175319+05:30",
+                    "product_code": "g-12233",
+                    "product_name": "baby-dress",
+                    "product_type": "Product",
+                    "attribute_values": [
+                        {
+                            "id": 173,
+                            "value": "S,M,L",
+                            "status": "active",
+                            "attribute_id": 57,
+                            "attribute_name": "size"
+                        },
+                        {
+                            "id": 174,
+                            "value": "red and black",
+                            "status": "active",
+                            "attribute_id": 58,
+                            "attribute_name": "color"
+                        },
+                        {
+                            "id": 175,
+                            "value": "plain",
+                            "status": "active",
+                            "attribute_id": 59,
+                            "attribute_name": "prints"
+                        }
+                    ]
+                }
+            ],
+            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/category-images/categories/girls-1784549919179.jpg",
+            "parent_id": 38,
+            "display_orders": [],
+            "attributes_schema": [
+                {
+                    "id": 59,
+                    "status": "active",
+                    "attribute_name": "prints"
+                }
+            ]
+        },
+        {
+            "id": 66,
+            "name": "waist chain",
+            "size": 24,
+            "status": "active",
+            "products": [
+                {
+                    "id": 89,
+                    "images": [
+                        {
+                            "id": 103,
+                            "size": 20,
+                            "status": "active",
+                            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/product-images/products/89/1784612328728-25eqaktd3p4.jpg",
+                            "sort_order": 0
+                        }
+                    ],
+                    "prices": [
+                        {
+                            "id": 56,
+                            "mrp": 300.00,
+                            "status": "active",
+                            "gst_pct": 18.00,
+                            "gst_amount": 59.40,
+                            "billing_type": "one_time",
+                            "discount_pct": 10.00,
+                            "member_price": 250.00,
+                            "platform_fee": null,
+                            "subscriptions": [],
+                            "total_payable": 389.40,
+                            "transport_fee": 60.00,
+                            "discount_amount": 30.00,
+                            "price_after_discount": 270.00
+                        }
+                    ],
+                    "status": "active",
+                    "alias_name": null,
+                    "attributes": {},
+                    "created_at": "2026-07-21T11:06:26.633618+05:30",
+                    "sort_order": 1,
+                    "updated_at": "2026-07-21T11:06:26.633618+05:30",
+                    "product_code": "w-12",
+                    "product_name": "waistchain-south",
+                    "product_type": "Product",
+                    "attribute_values": [
+                        {
+                            "id": 161,
+                            "value": "S,M,L",
+                            "status": "active",
+                            "attribute_id": 53,
+                            "attribute_name": "size"
+                        },
+                        {
+                            "id": 162,
+                            "value": "artificial",
+                            "status": "active",
+                            "attribute_id": 54,
+                            "attribute_name": "material"
+                        }
+                    ]
+                }
+            ],
+            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/category-images/categories/waist-chain-1784612158922.jpg",
+            "parent_id": 60,
+            "display_orders": [],
+            "attributes_schema": []
+        },
+        {
+            "id": 67,
+            "name": "test",
+            "size": 89,
+            "status": "inactive",
+            "products": [
+                {
+                    "id": 107,
+                    "images": [
+                        {
+                            "id": 125,
+                            "size": 89,
+                            "status": "active",
+                            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/product-images/products/107/1784708450803-9htmvjd36ew.jpg",
+                            "sort_order": 0
+                        }
+                    ],
+                    "prices": [
+                        {
+                            "id": 71,
+                            "mrp": 1000.00,
+                            "status": "active",
+                            "gst_pct": 18.00,
+                            "gst_amount": 180.00,
+                            "billing_type": "one_time",
+                            "discount_pct": 10.00,
+                            "member_price": 800.00,
+                            "platform_fee": null,
+                            "subscriptions": [],
+                            "total_payable": 1180.00,
+                            "transport_fee": 100.00,
+                            "discount_amount": 100.00,
+                            "price_after_discount": 900.00
+                        }
+                    ],
+                    "status": "active",
+                    "alias_name": "3846T-32",
+                    "attributes": {},
+                    "created_at": "2026-07-22T13:49:31.182473+05:30",
+                    "sort_order": 1,
+                    "updated_at": "2026-07-22T13:51:14.96738+05:30",
+                    "product_code": "T-24",
+                    "product_name": "test",
+                    "product_type": "Product",
+                    "attribute_values": [
+                        {
+                            "id": 209,
+                            "value": "S,M,L",
+                            "status": "active",
+                            "attribute_id": 60,
+                            "attribute_name": "size"
+                        }
+                    ]
+                }
+            ],
+            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/category-images/categories/test-1784708344966.jpg",
+            "parent_id": 36,
+            "display_orders": [
+                {
+                    "id": 35,
+                    "order": 2,
+                    "status": "active",
+                    "display_name": "test",
+                    "display_type": "cards"
+                }
+            ],
+            "attributes_schema": []
+        },
+        {
+            "id": 68,
+            "name": "earings",
+            "size": 38,
+            "status": "active",
+            "products": [
+                {
+                    "id": 141,
+                    "images": [
+                        {
+                            "id": 172,
+                            "size": 41,
+                            "status": "active",
+                            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/product-images/products/141/1784717527688-0hdkco00hhz.jpg",
+                            "sort_order": 0
+                        },
+                        {
+                            "id": 173,
+                            "size": 45,
+                            "status": "active",
+                            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/product-images/products/141/1784717527944-md9hb00xwih.jpg",
+                            "sort_order": 1
+                        },
+                        {
+                            "id": 174,
+                            "size": 27,
+                            "status": "active",
+                            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/product-images/products/141/1784717528237-2sno8v5qbot.jpg",
+                            "sort_order": 2
+                        },
+                        {
+                            "id": 175,
+                            "size": 45,
+                            "status": "active",
+                            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/product-images/products/141/1784717528463-n6bidov4e6.jpg",
+                            "sort_order": 3
+                        }
+                    ],
+                    "prices": [
+                        {
+                            "id": 101,
+                            "mrp": 200.00,
+                            "status": "active",
+                            "gst_pct": 18.00,
+                            "gst_amount": 37.80,
+                            "billing_type": "one_time",
+                            "discount_pct": 10.00,
+                            "member_price": 150.00,
+                            "platform_fee": null,
+                            "subscriptions": [],
+                            "total_payable": 247.80,
+                            "transport_fee": 30.00,
+                            "discount_amount": 20.00,
+                            "price_after_discount": 180.00
+                        }
+                    ],
+                    "status": "active",
+                    "alias_name": null,
+                    "attributes": {},
+                    "created_at": "2026-07-22T16:21:31.58163+05:30",
+                    "sort_order": 1,
+                    "updated_at": "2026-07-22T16:22:38.963357+05:30",
+                    "product_code": "e-12",
+                    "product_name": "earing1",
+                    "product_type": "Product",
+                    "attribute_values": [
+                        {
+                            "id": 247,
+                            "value": "artificial",
+                            "status": "active",
+                            "attribute_id": 54,
+                            "attribute_name": "material"
+                        }
+                    ]
+                }
+            ],
+            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/category-images/categories/earings-1784716653235.jpg",
+            "parent_id": 60,
+            "display_orders": [],
+            "attributes_schema": []
+        },
+        {
+            "id": 69,
+            "name": "brooch",
+            "size": 19,
+            "status": "active",
+            "products": [
+                {
+                    "id": 137,
+                    "images": [
+                        {
+                            "id": 170,
+                            "size": 8,
+                            "status": "active",
+                            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/product-images/products/137/1784717382887-gwux6mqktrt.jpg",
+                            "sort_order": 0
+                        }
+                    ],
+                    "prices": [
+                        {
+                            "id": 99,
+                            "mrp": 500.00,
+                            "status": "active",
+                            "gst_pct": 18.00,
+                            "gst_amount": 81.00,
+                            "billing_type": "one_time",
+                            "discount_pct": 10.00,
+                            "member_price": 300.00,
+                            "platform_fee": null,
+                            "subscriptions": [],
+                            "total_payable": 531.00,
+                            "transport_fee": 0.00,
+                            "discount_amount": 50.00,
+                            "price_after_discount": 450.00
+                        }
+                    ],
+                    "status": "active",
+                    "alias_name": null,
+                    "attributes": {},
+                    "created_at": "2026-07-22T16:19:34.823955+05:30",
+                    "sort_order": 1,
+                    "updated_at": "2026-07-22T16:19:59.301978+05:30",
+                    "product_code": "br-12",
+                    "product_name": "brooch1",
+                    "product_type": "Product",
+                    "attribute_values": []
+                },
+                {
+                    "id": 140,
+                    "images": [
+                        {
+                            "id": 171,
+                            "size": 7,
+                            "status": "active",
+                            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/product-images/products/140/1784717455834-q0qev3cjim9.jpg",
+                            "sort_order": 0
+                        }
+                    ],
+                    "prices": [
+                        {
+                            "id": 100,
+                            "mrp": 600.00,
+                            "status": "active",
+                            "gst_pct": 18.00,
+                            "gst_amount": 86.40,
+                            "billing_type": "one_time",
+                            "discount_pct": 20.00,
+                            "member_price": 400.00,
+                            "platform_fee": null,
+                            "subscriptions": [],
+                            "total_payable": 566.40,
+                            "transport_fee": 0.00,
+                            "discount_amount": 120.00,
+                            "price_after_discount": 480.00
+                        }
+                    ],
+                    "status": "active",
+                    "alias_name": null,
+                    "attributes": {},
+                    "created_at": "2026-07-22T16:20:39.006428+05:30",
+                    "sort_order": 2,
+                    "updated_at": "2026-07-22T16:21:10.302505+05:30",
+                    "product_code": "br-243",
+                    "product_name": "brooch2",
+                    "product_type": "Product",
+                    "attribute_values": [
+                        {
+                            "id": 246,
+                            "value": "2,3,4",
+                            "status": "active",
+                            "attribute_id": 53,
+                            "attribute_name": "size"
+                        }
+                    ]
+                }
+            ],
+            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/category-images/categories/brooch-1784716676483.jpg",
+            "parent_id": 60,
+            "display_orders": [],
+            "attributes_schema": []
+        },
+        {
+            "id": 70,
+            "name": "anklets",
+            "size": 9,
+            "status": "active",
+            "products": [
+                {
+                    "id": 133,
+                    "images": [
+                        {
+                            "id": 166,
+                            "size": 28,
+                            "status": "active",
+                            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/product-images/products/133/1784716914299-f6a2jusvds.jpg",
+                            "sort_order": 0
+                        }
+                    ],
+                    "prices": [
+                        {
+                            "id": 95,
+                            "mrp": 1200.00,
+                            "status": "active",
+                            "gst_pct": 18.00,
+                            "gst_amount": 212.40,
+                            "billing_type": "one_time",
+                            "discount_pct": 10.00,
+                            "member_price": 999.00,
+                            "platform_fee": null,
+                            "subscriptions": [],
+                            "total_payable": 1392.40,
+                            "transport_fee": 100.00,
+                            "discount_amount": 120.00,
+                            "price_after_discount": 1080.00
+                        }
+                    ],
+                    "status": "active",
+                    "alias_name": null,
+                    "attributes": {},
+                    "created_at": "2026-07-22T16:11:37.850732+05:30",
+                    "sort_order": 1,
+                    "updated_at": "2026-07-22T16:12:20.261052+05:30",
+                    "product_code": "ank-1",
+                    "product_name": "anklets1",
+                    "product_type": "Product",
+                    "attribute_values": [
+                        {
+                            "id": 244,
+                            "value": "silver",
+                            "status": "active",
+                            "attribute_id": 54,
+                            "attribute_name": "material"
+                        }
+                    ]
+                }
+            ],
+            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/category-images/categories/anklets-1784716698973.jpg",
+            "parent_id": 60,
+            "display_orders": [],
+            "attributes_schema": []
+        },
+        {
+            "id": 71,
+            "name": "kadas",
+            "size": 30,
+            "status": "active",
+            "products": [
+                {
+                    "id": 142,
+                    "images": [
+                        {
+                            "id": 176,
+                            "size": 72,
+                            "status": "active",
+                            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/product-images/products/142/1784717608993-w82ldh5hdue.jpg",
+                            "sort_order": 0
+                        }
+                    ],
+                    "prices": [
+                        {
+                            "id": 102,
+                            "mrp": 600.00,
+                            "status": "active",
+                            "gst_pct": 18.00,
+                            "gst_amount": 97.20,
+                            "billing_type": "one_time",
+                            "discount_pct": 10.00,
+                            "member_price": 400.00,
+                            "platform_fee": null,
+                            "subscriptions": [],
+                            "total_payable": 637.20,
+                            "transport_fee": 0.00,
+                            "discount_amount": 60.00,
+                            "price_after_discount": 540.00
+                        }
+                    ],
+                    "status": "active",
+                    "alias_name": null,
+                    "attributes": {},
+                    "created_at": "2026-07-22T16:23:18.16424+05:30",
+                    "sort_order": 1,
+                    "updated_at": "2026-07-22T16:23:45.611888+05:30",
+                    "product_code": "SK-1",
+                    "product_name": " silver kadas",
+                    "product_type": "Product",
+                    "attribute_values": [
+                        {
+                            "id": 248,
+                            "value": "2,3,4",
+                            "status": "active",
+                            "attribute_id": 53,
+                            "attribute_name": "size"
+                        }
+                    ]
+                },
+                {
+                    "id": 143,
+                    "images": [
+                        {
+                            "id": 177,
+                            "size": 39,
+                            "status": "active",
+                            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/product-images/products/143/1784717668094-d74tqlpbazw.jpg",
+                            "sort_order": 0
+                        }
+                    ],
+                    "prices": [
+                        {
+                            "id": 103,
+                            "mrp": 4000.00,
+                            "status": "active",
+                            "gst_pct": 18.00,
+                            "gst_amount": 576.00,
+                            "billing_type": "one_time",
+                            "discount_pct": 20.00,
+                            "member_price": 2500.00,
+                            "platform_fee": null,
+                            "subscriptions": [],
+                            "total_payable": 3776.00,
+                            "transport_fee": 0.00,
+                            "discount_amount": 800.00,
+                            "price_after_discount": 3200.00
+                        }
+                    ],
+                    "status": "active",
+                    "alias_name": null,
+                    "attributes": {},
+                    "created_at": "2026-07-22T16:24:14.035923+05:30",
+                    "sort_order": 3,
+                    "updated_at": "2026-07-22T16:24:48.662191+05:30",
+                    "product_code": "kada-12",
+                    "product_name": "kada -gold",
+                    "product_type": "Product",
+                    "attribute_values": []
+                }
+            ],
+            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/category-images/categories/kadas-1784716745372.jpg",
+            "parent_id": 60,
+            "display_orders": [],
+            "attributes_schema": []
+        },
+        {
+            "id": 72,
+            "name": "rings",
+            "size": 12,
+            "status": "active",
+            "products": [
+                {
+                    "id": 134,
+                    "images": [
+                        {
+                            "id": 167,
+                            "size": 8,
+                            "status": "active",
+                            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/product-images/products/134/1784717018509-k0h527a9jm8.jpg",
+                            "sort_order": 0
+                        }
+                    ],
+                    "prices": [
+                        {
+                            "id": 96,
+                            "mrp": 12000.00,
+                            "status": "active",
+                            "gst_pct": 18.00,
+                            "gst_amount": 1998.00,
+                            "billing_type": "one_time",
+                            "discount_pct": 10.00,
+                            "member_price": 10000.00,
+                            "platform_fee": null,
+                            "subscriptions": [],
+                            "total_payable": 13098.00,
+                            "transport_fee": 300.00,
+                            "discount_amount": 1200.00,
+                            "price_after_discount": 10800.00
+                        }
+                    ],
+                    "status": "active",
+                    "alias_name": null,
+                    "attributes": {},
+                    "created_at": "2026-07-22T16:13:13.42399+05:30",
+                    "sort_order": 1,
+                    "updated_at": "2026-07-22T16:14:03.838986+05:30",
+                    "product_code": "r-12",
+                    "product_name": "gold ring",
+                    "product_type": "Product",
+                    "attribute_values": [
+                        {
+                            "id": 245,
+                            "value": "S,M,L",
+                            "status": "active",
+                            "attribute_id": 53,
+                            "attribute_name": "size"
+                        }
+                    ]
+                }
+            ],
+            "image_url": "https://lqdmefugrhluzlfabmuy.supabase.co/storage/v1/object/public/category-images/categories/rings-1784716800959.jpg",
+            "parent_id": 60,
+            "display_orders": [],
+            "attributes_schema": []
+        }
+    ]
+}

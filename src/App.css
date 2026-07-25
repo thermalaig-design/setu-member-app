@@ -1,0 +1,45 @@
+/* Sidebar scrollbar adjustments to avoid overlap with clickable area on mobile */
+.sidebar-scroll {
+	-webkit-overflow-scrolling: touch;
+	scrollbar-width: thin; /* Firefox */
+	scrollbar-color: rgba(0,0,0,0.25) transparent;
+	touch-action: pan-y;
+}
+
+/* WebKit scrollbars */
+.sidebar-scroll::-webkit-scrollbar {
+	width: 8px;
+}
+.sidebar-scroll::-webkit-scrollbar-thumb {
+	background: rgba(0,0,0,0.25);
+	border-radius: 9999px;
+}
+.sidebar-scroll::-webkit-scrollbar-track {
+	background: transparent;
+}
+
+/* Global themed shell so all child routes inherit Home-like theme tokens */
+.app-root-shell {
+	background: var(--page-bg, var(--app-page-bg));
+	display: flex !important;
+	justify-content: center !important;
+	align-items: stretch;
+	width: 100% !important;
+}
+
+.app-route-shell {
+	background: var(--page-bg, var(--app-page-bg));
+	color: var(--body-text-color, #374151);
+	margin-left: auto !important;
+	margin-right: auto !important;
+}
+
+.app-route-shell h1,
+.app-route-shell h2,
+.app-route-shell h3,
+.app-route-shell h4,
+.app-route-shell h5,
+.app-route-shell h6 {
+	color: var(--heading-color, #111827);
+}
+
