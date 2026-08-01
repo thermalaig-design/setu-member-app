@@ -32,6 +32,179 @@ const attachProfilePhotosByMembersId = async (items = []) => {
   }
 };
 
+const normalizePriorityValue = (value) => {
+  const raw = String(value ?? '').trim();
+  if (!raw) return null;
+
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
+const normalizeDirectoryText = (value) => {
+  if (value === null || value === undefined) return '';
+  return String(value).trim();
+};
+
+const firstDirectoryValue = (...values) => {
+  for (const value of values) {
+    const text = normalizeDirectoryText(value);
+    if (text) return text;
+  }
+  return '';
+};
+
+const toDirectoryBoolean = (value) => {
+  if (typeof value === 'boolean') return value;
+  const normalized = normalizeDirectoryText(value).toLowerCase();
+  if (!normalized) return false;
+  return ['true', '1', 'yes', 'y'].includes(normalized);
+};
+
+const mapDirectoryMemberRow = (row = {}) => {
+  const name = firstDirectoryValue(
+    row?.Name,
+    row?.member_name_english,
+    row?.member_name_hindi,
+    row?.name,
+    row?.full_name
+  );
+  const membershipNumber = firstDirectoryValue(
+    row?.['Membership number'],
+    row?.membership_number,
+    row?.membership_no,
+    row?.membershipNumber,
+    row?.member_no,
+    row?.member_id_number
+  );
+  const role = firstDirectoryValue(row?.role, row?.member_role, row?.role_type, row?.type);
+  const companyName = firstDirectoryValue(row?.['Company Name'], row?.company_name, row?.company, row?.organization_name);
+  const addressHome = firstDirectoryValue(row?.['Address Home'], row?.address_home, row?.home_address, row?.address);
+  const addressOffice = firstDirectoryValue(row?.['Address Office'], row?.address_office, row?.office_address);
+  const residentLandline = firstDirectoryValue(row?.['Resident Landline'], row?.resident_landline, row?.landline_home);
+  const officeLandline = firstDirectoryValue(row?.['Office Landline'], row?.office_landline, row?.landline_office);
+  const mobile = firstDirectoryValue(row?.Mobile, row?.mobile, row?.phone1, row?.phone2, row?.contact_no, row?.contact_number);
+  const email = firstDirectoryValue(row?.Email, row?.email, row?.email_id, row?.mail);
+  const serialNumber = firstDirectoryValue(
+    row?.['S. No.'],
+    row?.['S.No.'],
+    row?.s_no,
+    row?.serial_no,
+    row?.serialNumber,
+    row?.id ? `REG-${String(row.id).slice(0, 8)}` : ''
+  );
+  const privacy = row?.Privacy ?? row?.privacy ?? row?.is_private ?? row?.private ?? false;
+
+  return {
+    id: row?.id || row?.reg_id || row?.members_id || null,
+    reg_id: row?.reg_id || row?.id || null,
+    trust_id: row?.trust_id || null,
+    members_id: row?.members_id || row?.member_id || null,
+    Name: name || 'N/A',
+    Mobile: mobile || null,
+    Email: email || null,
+    role: role || null,
+    type: firstDirectoryValue(row?.type, role) || null,
+    'Membership number': membershipNumber || null,
+    'S. No.': serialNumber || null,
+    'Company Name': companyName || null,
+    'Address Home': addressHome || null,
+    'Address Office': addressOffice || null,
+    'Resident Landline': residentLandline || null,
+    'Office Landline': officeLandline || null,
+    joined_date: row?.joined_date || row?.created_at || null,
+    Privacy: toDirectoryBoolean(privacy),
+    profile_photo_url: firstDirectoryValue(row?.profile_photo_url, row?.photo_url, row?.image_url, row?.avatar_url) || null,
+    title: row?.title || null,
+    subtitle: row?.subtitle || null,
+    member_role: row?.member_role || null,
+    role_type: row?.role_type || null,
+    committee_name_english: row?.committee_name_english || null,
+    committee_name_hindi: row?.committee_name_hindi || null,
+    position: row?.position || null,
+    location: row?.location || null,
+    original_id: row?.original_id ?? row?.originalId ?? row?.['S.No.'] ?? row?.['S. No.'] ?? null,
+  };
+};
+
+const dedupeDirectoryMembers = (rows = []) => {
+  const seen = new Set();
+  return (rows || []).filter((row) => {
+    const key = firstDirectoryValue(
+      row?.members_id,
+      row?.['Membership number'],
+      row?.id,
+      row?.reg_id,
+      row?.Name
+    ).toLowerCase();
+    if (!key) return true;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+};
+
+const directoryRpcCache = new Map();
+const DIRECTORY_RPC_CACHE_TTL_MS = 5 * 60 * 1000;
+
+export const getDirectoryViewRoles = async (trustId = null) => {
+  const normalizedTrustId = normalizeDirectoryText(trustId);
+  if (!normalizedTrustId) {
+    return { success: true, data: [] };
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from('directory_view_roles')
+      .select('id, trust_id, role, status, created_at')
+      .eq('trust_id', normalizedTrustId)
+      .eq('status', 'active')
+      .order('created_at', { ascending: true })
+      .order('role', { ascending: true });
+
+    if (error) throw error;
+
+    return {
+      success: true,
+      data: (data || []).map((row) => ({
+        id: row?.id || null,
+        trust_id: row?.trust_id || null,
+        role: firstDirectoryValue(row?.role) || null,
+        status: row?.status || 'active',
+        created_at: row?.created_at || null,
+      })).filter((row) => row.role),
+    };
+  } catch (error) {
+    console.error('Error fetching directory view roles:', error);
+    return { success: false, data: [], error: error?.message || 'Failed to fetch directory view roles' };
+  }
+};
+
+const fetchDirectoryMembersFromRpc = async (trustId) => {
+  const normalizedTrustId = normalizeDirectoryText(trustId);
+  if (!normalizedTrustId) return [];
+
+  const cacheKey = normalizedTrustId;
+  const cached = directoryRpcCache.get(cacheKey);
+  if (cached && (Date.now() - cached.ts) < DIRECTORY_RPC_CACHE_TTL_MS) {
+    return cached.rows;
+  }
+
+  try {
+    const { data, error } = await supabase.rpc('get_members_full_details_by_trust_id', {
+      p_trust_id: normalizedTrustId,
+    });
+    if (error) throw error;
+
+    const rows = Array.isArray(data) ? data : data ? [data] : [];
+    const mapped = dedupeDirectoryMembers(rows.map(mapDirectoryMemberRow));
+    directoryRpcCache.set(cacheKey, { ts: Date.now(), rows: mapped });
+    return mapped;
+  } catch (error) {
+    console.warn('Failed to fetch directory members via RPC:', error?.message || error);
+    return null;
+  }
+};
+
 // Fetch trustees and patrons directly from Supabase using reg_members + Members tables
 export const getTrusteesAndPatrons = async (trustId = null, trustName = null) => {
   try {
@@ -280,6 +453,8 @@ export const getExecutiveBodyMembers = async (trustId = null, trustName = null) 
         role_type,
         title,
         subtitle,
+        priority,
+        privacy,
         created_at,
         updated_at,
         reg_members!inner (
@@ -391,6 +566,8 @@ export const getExecutiveBodyMembers = async (trustId = null, trustName = null) 
           role: regMember?.role || null,
           title: row?.title || null,
           subtitle: row?.subtitle || null,
+          priority: row?.priority ?? null,
+          privacy: row?.privacy ?? null,
           member_role: roleLabel,
           member_name_english: member?.Name || null,
           Name: member?.Name || null,
@@ -416,7 +593,17 @@ export const getExecutiveBodyMembers = async (trustId = null, trustName = null) 
         };
       });
 
-    const byMembershipThenName = (a, b) => {
+    const byPriorityThenMembershipThenName = (a, b) => {
+      const aPriority = normalizePriorityValue(a?.priority);
+      const bPriority = normalizePriorityValue(b?.priority);
+      const aHasPriority = aPriority !== null;
+      const bHasPriority = bPriority !== null;
+
+      if (aHasPriority || bHasPriority) {
+        if (aHasPriority !== bHasPriority) return aHasPriority ? -1 : 1;
+        if (aPriority !== bPriority) return aPriority - bPriority;
+      }
+
       const aMembership = normalizeMembershipNumber(a?.['Membership number']);
       const bMembership = normalizeMembershipNumber(b?.['Membership number']);
       const aNum = Number.parseInt((aMembership.match(/\d+/g) || ['999999999']).join(''), 10);
@@ -426,8 +613,8 @@ export const getExecutiveBodyMembers = async (trustId = null, trustName = null) 
     };
 
     const withPhotos = await attachProfilePhotosByMembersId(mapped);
-    const committee = withPhotos.filter((item) => item.role_type === 'committee').sort(byMembershipThenName);
-    const elected = withPhotos.filter((item) => item.role_type === 'elected').sort(byMembershipThenName);
+    const committee = withPhotos.filter((item) => item.role_type === 'committee').sort(byPriorityThenMembershipThenName);
+    const elected = withPhotos.filter((item) => item.role_type === 'elected').sort(byPriorityThenMembershipThenName);
 
     return {
       success: true,
@@ -447,13 +634,14 @@ export const getExecutiveBodyMembers = async (trustId = null, trustName = null) 
   }
 };
 
-// Fetch directory members from reg_members + Members
+// Fetch directory members from RPC first, then fall back to reg_members + Members
 export const getDirectoryMembers = async (trustId = null, trustName = null, opts = {}) => {
   try {
     let resolvedTrustId = trustId;
     const normalizeMembershipNumber = (value) => String(value || '').trim();
-    const page = Math.max(1, Number(opts?.page) || 1);
-    const limit = Math.max(1, Math.min(100, Number(opts?.limit) || 20));
+    const fullList = Boolean(opts?.fullList || opts?.allMembers || opts?.searchAll);
+    const page = fullList ? 1 : Math.max(1, Number(opts?.page) || 1);
+    const limit = fullList ? 100000 : Math.max(1, Math.min(100, Number(opts?.limit) || 20));
     const from = (page - 1) * limit;
     const to = from + limit - 1;
 
@@ -464,6 +652,35 @@ export const getDirectoryMembers = async (trustId = null, trustName = null, opts
         .ilike('name', String(trustName).trim())
         .limit(1);
       resolvedTrustId = trustData?.[0]?.id || null;
+    }
+
+    if (resolvedTrustId) {
+      const rpcRows = await fetchDirectoryMembersFromRpc(resolvedTrustId);
+      if (rpcRows) {
+        const sortedRows = [...rpcRows].sort((a, b) => String(a?.Name || '').localeCompare(String(b?.Name || '')));
+        const totalCount = sortedRows.length;
+        if (fullList) {
+          return {
+            success: true,
+            data: sortedRows,
+            page: 1,
+            limit: totalCount || limit,
+            totalCount,
+            hasMore: false
+          };
+        }
+        const pageRows = sortedRows.slice(from, to + 1);
+        const withPhotos = await attachProfilePhotosByMembersId(pageRows);
+
+        return {
+          success: true,
+          data: withPhotos,
+          page,
+          limit,
+          totalCount,
+          hasMore: to + 1 < totalCount
+        };
+      }
     }
 
     let query = supabase
@@ -488,7 +705,8 @@ export const getDirectoryMembers = async (trustId = null, trustName = null, opts
           "Address Office",
           "Resident Landline",
           "Office Landline",
-          members_id
+          members_id,
+          "Privacy"
         )
       `, { count: 'exact' })
       .or('is_active.is.null,is_active.eq.true');
@@ -497,9 +715,10 @@ export const getDirectoryMembers = async (trustId = null, trustName = null, opts
       query = query.eq('trust_id', resolvedTrustId);
     }
 
-    const { data: rows, error, count } = await query
-      .order('joined_date', { ascending: false })
-      .range(from, to);
+    const orderedQuery = query.order('joined_date', { ascending: false });
+    const { data: rows, error, count } = fullList
+      ? await orderedQuery
+      : await orderedQuery.range(from, to);
     if (error) throw error;
 
     const mapped = (rows || []).map((row) => {
@@ -526,8 +745,20 @@ export const getDirectoryMembers = async (trustId = null, trustName = null, opts
         'Resident Landline': joined?.['Resident Landline'] || null,
         'Office Landline': joined?.['Office Landline'] || null,
         joined_date: row?.joined_date || null,
+        Privacy: joined?.Privacy ?? true,
       };
     });
+
+    if (fullList) {
+      return {
+        success: true,
+        data: mapped,
+        page: 1,
+        limit: mapped.length || limit,
+        totalCount: Number(count || mapped.length || 0),
+        hasMore: false
+      };
+    }
 
     const withPhotos = await attachProfilePhotosByMembersId(mapped);
 

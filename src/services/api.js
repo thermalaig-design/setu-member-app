@@ -1,23 +1,5 @@
 import axios from 'axios';
-import { getCurrentNotificationContext } from './notificationAudience';
 import { supabase } from './supabaseClient.js';
-
-const buildNotificationContentKey = (notification) => {
-  const title = String(notification?.title || '').trim().toLowerCase();
-  const message = String(notification?.message || notification?.body || '').trim().toLowerCase();
-  const type = String(notification?.type || '').trim().toLowerCase();
-  const createdAt = String(notification?.created_at || '').trim();
-  const createdAtSecond = createdAt ? createdAt.slice(0, 19) : '';
-  return `${type}|${title}|${message}|${createdAtSecond}`;
-};
-
-const isMissingNotificationsColumnError = (error, columnName) => {
-  const message = String(error?.message || '');
-  const safeColumn = String(columnName || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const pattern = new RegExp(`column\\s+notifications\\.${safeColumn}\\s+does not exist`, 'i');
-  return pattern.test(message);
-};
-
 
 // Force local backend for current development flow.
 const resolveDevApiBaseUrl = () => {
@@ -31,6 +13,14 @@ const RAW_API_BASE_URL =
     : 'https://test-mahila-mandal.vercel.app/api');
 
 const API_BASE_URL = String(RAW_API_BASE_URL || '').replace(/\/auth\/?$/i, '');
+
+const normalizeTrustId = (value) => {
+  if (value === null || value === undefined) return '';
+  const normalized = String(value).trim();
+  if (!normalized) return '';
+  const lowered = normalized.toLowerCase();
+  return ['null', 'undefined', 'nan'].includes(lowered) ? '' : normalized;
+};
 
 
 // Create axios instance
@@ -308,6 +298,7 @@ const normalizeMemberProfilePayload = (member = {}, profile = {}, parsedUser = {
     memberId,
     membership_number: memberId,
     members_id: member?.members_id || profile?.members_id || parsedUser?.members_id || parsedUser?.member_id || parsedUser?.id || null,
+    privacy: member?.Privacy === true || member?.privacy === true,
     address_home: member?.['Address Home'] || '',
     address_office: member?.['Address Office'] || '',
     company_name: member?.['Company Name'] || '',
@@ -590,6 +581,29 @@ export const saveProfile = async (profileData, profilePhotoFile) => {
     }
   }
 };
+
+// Toggle whether the logged-in member's contact/address details are visible in Directory/Executive Body
+export const updateMemberPrivacy = async (nextValue) => {
+  const user = localStorage.getItem('user');
+  const parsedUser = user ? JSON.parse(user) : null;
+  if (!parsedUser) {
+    throw new Error('No user found in localStorage');
+  }
+
+  const membersId = await resolveMembersIdForProfile(parsedUser, {}, localStorage.getItem('selected_trust_id') || null);
+  if (!membersId) {
+    throw new Error('Member not found');
+  }
+
+  const privacy = Boolean(nextValue);
+  const { error } = await supabase
+    .from('Members')
+    .update({ Privacy: privacy })
+    .eq('members_id', membersId);
+  if (error) throw error;
+
+  return { success: true, privacy };
+};
 // Get marquee updates Ã¢â‚¬â€ direct Supabase (no backend needed)
 const USE_BACKEND_FAMILY_API = String(import.meta.env.VITE_USE_BACKEND_FAMILY_API || 'false').toLowerCase() === 'true';
 
@@ -836,19 +850,23 @@ const toYmdOnly = (value) => {
 const isFlashDateValidForToday = (row, todayYmd) => {
   const startYmd = toYmdOnly(row?.start_date);
   const endYmd = toYmdOnly(row?.end_date);
-  const startOk = Boolean(startYmd) && startYmd <= todayYmd;
+  const startOk = !startYmd || startYmd <= todayYmd;
   const endOk = !endYmd || endYmd >= todayYmd;
   return startOk && endOk;
 };
 
 const isRowActive = (row) => {
+  if (row?.status !== undefined && row?.status !== null) {
+    return String(row.status).trim().toLowerCase() === 'active';
+  }
+
   const value = row?.is_active;
   if (value === undefined || value === null) return true;
   if (typeof value === 'boolean') return value;
   if (typeof value === 'number') return value === 1;
   const normalized = String(value).trim().toLowerCase();
   if (!normalized) return true;
-  return !['false', '0', 'no', 'inactive'].includes(normalized);
+  return !['false', '0', 'no', 'inactive', 'paused'].includes(normalized);
 };
 
 // Get sponsor information
@@ -857,7 +875,7 @@ const isRowActive = (row) => {
 export const getSponsors = async (
   trustId = null,
   trustName = null,
-  { page = 1, limit = null, offset = null, view = 'carousel' } = {}
+  { page = 1, limit = null, offset = null } = {}
 ) => {
   const shouldDebug = Boolean(import.meta.env.DEV) || String(import.meta.env.VITE_SPONSOR_DEBUG || '').toLowerCase() === 'true';
   const shouldLogEmptyAsError = String(import.meta.env.VITE_SPONSOR_LOG_EMPTY || 'true').toLowerCase() !== 'false';
@@ -954,7 +972,7 @@ export const getSponsors = async (
       diagnostics.joinedSponsorIds = rows.map((row) => row?.id).filter(Boolean).map((id) => String(id));
       sponsorsById = rows.reduce((acc, sponsor) => {
         const key = sponsor?.id === null || sponsor?.id === undefined ? '' : String(sponsor.id);
-        if (key && isRowActive(sponsor)) acc[key] = sponsor;
+        if (key) acc[key] = sponsor;
         return acc;
       }, {});
     }
@@ -1124,7 +1142,7 @@ export const getAllSponsorsForTrust = async (trustId) => {
 
     const byId = {};
     (Array.isArray(sponsorRows) ? sponsorRows : []).forEach((s) => {
-      if (s?.id && isRowActive(s)) byId[String(s.id)] = s;
+      if (s?.id) byId[String(s.id)] = s;
     });
 
     // Build flash metadata map for duration etc.
@@ -1195,119 +1213,32 @@ export const getUserReports = async () => {
   }
 };
 
-// Get user notifications Ã¢â‚¬â€ directly from Supabase
-export const getUserNotifications = async () => {
+// Get user notifications from the new notification schema only
+export const getUserNotifications = async (trustIdOverride = null) => {
   try {
-    const { supabase } = await import('./supabaseClient.js');
-    const { userId, userIdVariants, audienceVariants } = getCurrentNotificationContext();
-    const selectedTrustId = String(localStorage.getItem('selected_trust_id') || '').trim();
+    const headers = resolveAuthHeaders();
+    const normalizedTrustIdOverride = normalizeTrustId(trustIdOverride);
+    const requestHeaders = normalizedTrustIdOverride
+      ? { ...headers, 'trust-id': normalizedTrustIdOverride }
+      : headers;
 
-    if (!userId) {
-      throw new Error('No user found in localStorage');
-    }
-    if (!selectedTrustId) {
-      return { success: true, data: [] };
-    }
-
-    // Fallback mapping:
-    // Notifications can be stored with user_id = patient_phone, patient_name, membership_number, or user_id.
-    // We query appointments by patient_phone variants to find all possible user_ids used in notifications.
-    const { data: linkedAppointments } = await supabase
-      .from('appointments')
-      .select('patient_name, membership_number, user_id, patient_phone')
-      .in('patient_phone', userIdVariants)
-      .limit(500);
-
-    const fallbackUserIds = new Set();
-    (linkedAppointments || []).forEach((row) => {
-      const patientName = String(row?.patient_name || '').trim();
-      const membershipNumber = String(row?.membership_number || '').trim();
-      const appointmentUserId = String(row?.user_id || '').trim();
-      // Ã¢Å“â€¦ patient_phone explicitly Ã¢â‚¬â€ this is what the Supabase trigger stores as user_id
-      const patientPhone = String(row?.patient_phone || '').trim();
-
-      if (patientName) fallbackUserIds.add(patientName);
-      if (membershipNumber) fallbackUserIds.add(membershipNumber);
-      if (appointmentUserId) fallbackUserIds.add(appointmentUserId);
-
-      // Add patient_phone and its variants (e.g. 9911334455, 919911334455, +919911334455)
-      if (patientPhone) {
-        fallbackUserIds.add(patientPhone);
-        const digitsOnly = patientPhone.replace(/\D/g, '');
-        if (digitsOnly) {
-          fallbackUserIds.add(digitsOnly);
-          if (digitsOnly.length >= 10) fallbackUserIds.add(digitsOnly.slice(-10));
-          if (!digitsOnly.startsWith('91') && digitsOnly.length === 10) {
-            fallbackUserIds.add(`91${digitsOnly}`);
-          }
-          if (digitsOnly.length === 10) fallbackUserIds.add(`+91${digitsOnly}`);
-          fallbackUserIds.add(`+${digitsOnly}`);
-        }
-      }
+    const response = await api.get('/notifications', {
+      headers: requestHeaders,
     });
 
-    const notificationUserIds = [...new Set([...userIdVariants, ...fallbackUserIds])];
-
-    let userNotifications = [];
-    const { data: directNotifications, error: userNotifError } = await supabase
-      .from('notifications')
-      .select('*')
-      .eq('trust_id', selectedTrustId)
-      .in('user_id', notificationUserIds)
-      .order('created_at', { ascending: false });
-
-    if (userNotifError) {
-      if (isMissingNotificationsColumnError(userNotifError, 'user_id')) {
-        console.warn('[Notifications] notifications.user_id column missing; returning audience notifications only.');
-      } else {
-        throw userNotifError;
-      }
-    } else {
-      userNotifications = directNotifications || [];
-    }
-
-    const { data: audienceNotifications, error: audienceError } = await supabase
-      .from('notifications')
-      .select('*')
-      .eq('trust_id', selectedTrustId)
-      .in('target_audience', audienceVariants)
-      .order('created_at', { ascending: false });
-
-    if (audienceError) throw audienceError;
-
-    const merged = [...(userNotifications || []), ...(audienceNotifications || [])];
-    const uniqueById = [...new Map(merged.map((item) => [item.id, item])).values()];
-    uniqueById.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-
-    const seenContent = new Set();
-    const deduped = [];
-    for (const notification of uniqueById) {
-      const key = buildNotificationContentKey(notification);
-      if (seenContent.has(key)) continue;
-      seenContent.add(key);
-      deduped.push(notification);
-    }
-
-    return { success: true, data: deduped };
+    return { success: true, data: response?.data?.data || [] };
   } catch (error) {
     console.error('Error fetching notifications:', error);
     return { success: false, message: error.message, data: [] };
   }
 };
 
-// Mark notification as read Ã¢â‚¬â€ directly via Supabase
+// Mark notification as read through the backend using the new schema
 export const markNotificationAsRead = async (id) => {
   try {
-    const { supabase } = await import('./supabaseClient.js');
-    const selectedTrustId = String(localStorage.getItem('selected_trust_id') || '').trim();
-    let query = supabase
-      .from('notifications')
-      .update({ is_read: true })
-      .eq('id', id);
-    if (selectedTrustId) query = query.eq('trust_id', selectedTrustId);
-    const { error } = await query;
-
-    if (error) throw error;
+    await api.patch(`/notifications/${id}/read`, {}, {
+      headers: resolveAuthHeaders(),
+    });
     return { success: true };
   } catch (error) {
     console.error('Error marking notification as read:', error);
@@ -1315,75 +1246,12 @@ export const markNotificationAsRead = async (id) => {
   }
 };
 
-// Mark all notifications as read Ã¢â‚¬â€ directly via Supabase
+// Mark all notifications as read through the backend using the new schema
 export const markAllNotificationsAsRead = async () => {
   try {
-    const { supabase } = await import('./supabaseClient.js');
-    const { userId, userIdVariants, audienceVariants } = getCurrentNotificationContext();
-    const selectedTrustId = String(localStorage.getItem('selected_trust_id') || '').trim();
-
-    if (!userId) {
-      throw new Error('No user found in localStorage');
-    }
-    if (!selectedTrustId) return { success: true };
-
-    const { data: linkedAppointments } = await supabase
-      .from('appointments')
-      .select('patient_name, membership_number, user_id, patient_phone')
-      .in('patient_phone', userIdVariants)
-      .limit(500);
-
-    const fallbackUserIds = new Set();
-    (linkedAppointments || []).forEach((row) => {
-      const patientName = String(row?.patient_name || '').trim();
-      const membershipNumber = String(row?.membership_number || '').trim();
-      const appointmentUserId = String(row?.user_id || '').trim();
-      const patientPhone = String(row?.patient_phone || '').trim();
-
-      if (patientName) fallbackUserIds.add(patientName);
-      if (membershipNumber) fallbackUserIds.add(membershipNumber);
-      if (appointmentUserId) fallbackUserIds.add(appointmentUserId);
-
-      // Ã¢Å“â€¦ patient_phone variants Ã¢â‚¬â€ matches notifications stored by trigger using patient_phone
-      if (patientPhone) {
-        fallbackUserIds.add(patientPhone);
-        const digitsOnly = patientPhone.replace(/\D/g, '');
-        if (digitsOnly) {
-          fallbackUserIds.add(digitsOnly);
-          if (digitsOnly.length >= 10) fallbackUserIds.add(digitsOnly.slice(-10));
-          if (!digitsOnly.startsWith('91') && digitsOnly.length === 10) {
-            fallbackUserIds.add(`91${digitsOnly}`);
-          }
-          if (digitsOnly.length === 10) fallbackUserIds.add(`+91${digitsOnly}`);
-          fallbackUserIds.add(`+${digitsOnly}`);
-        }
-      }
+    await api.patch('/notifications/read-all', {}, {
+      headers: resolveAuthHeaders(),
     });
-
-    const notificationUserIds = [...new Set([...userIdVariants, ...fallbackUserIds])];
-
-    const { error: userError } = await supabase
-      .from('notifications')
-      .update({ is_read: true })
-      .eq('trust_id', selectedTrustId)
-      .eq('is_read', false)
-      .in('user_id', notificationUserIds);
-
-    if (userError && !isMissingNotificationsColumnError(userError, 'user_id')) {
-      throw userError;
-    }
-    if (userError && isMissingNotificationsColumnError(userError, 'user_id')) {
-      console.warn('[Notifications] notifications.user_id column missing; skipping direct user mark-as-read update.');
-    }
-
-    const { error: audienceError } = await supabase
-      .from('notifications')
-      .update({ is_read: true })
-      .eq('trust_id', selectedTrustId)
-      .eq('is_read', false)
-      .in('target_audience', audienceVariants);
-
-    if (audienceError) throw audienceError;
     return { success: true };
   } catch (error) {
     console.error('Error marking all notifications as read:', error);
@@ -1444,19 +1312,12 @@ export const getMemberTrustLinks = async (memberId) => {
   }
 };
 
-// Delete/dismiss a specific notification Ã¢â‚¬â€ uses Supabase directly (no backend needed)
+// Delete/dismiss a specific notification through the backend using the new schema
 export const deleteNotification = async (id) => {
   try {
-    const { supabase } = await import('./supabaseClient.js');
-    const selectedTrustId = String(localStorage.getItem('selected_trust_id') || '').trim();
-    let query = supabase
-      .from('notifications')
-      .delete()
-      .eq('id', id);
-    if (selectedTrustId) query = query.eq('trust_id', selectedTrustId);
-    const { error } = await query;
-
-    if (error) throw error;
+    await api.delete(`/notifications/${id}`, {
+      headers: resolveAuthHeaders(),
+    });
     return { success: true };
   } catch (error) {
     console.error('Error deleting notification:', error);

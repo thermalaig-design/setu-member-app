@@ -5,6 +5,7 @@ import { specialLogin } from './services/authService';
 import { fetchDirectoryData } from './services/directoryService';
 import { logUserSessionEvent } from './services/sessionAuditService';
 import { persistUserSession } from './utils/storageUtils';
+import { setLoginTermsPromptPending } from './utils/legalContent';
 import { useAppTheme } from './context/ThemeContext';
 
 const OTP_FLOW_KEY = 'otp_flow_allowed';
@@ -90,6 +91,7 @@ function SpecialOTPVerification() {
         );
         try { sessionStorage.removeItem('trust_selected_in_session'); } catch { /* ignore */ }
         try { sessionStorage.removeItem(OTP_FLOW_KEY); } catch { /* ignore */ }
+        setLoginTermsPromptPending();
         navigate('/', { replace: true });
       } else {
         setError('User data not found. Please try again.');

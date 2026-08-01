@@ -31,6 +31,8 @@ import { checkPhoneNumber, verifyOTP } from './services/authService';
 import { fetchDirectoryData } from './services/directoryService';
 import { fetchTrustById } from './services/trustService';
 import { logUserSessionEvent } from './services/sessionAuditService';
+import TermsModal from './components/TermsModal';
+import { clearLoginTermsPromptPending, isLoginTermsPromptPending, resolveLegalTrustId, setLoginTermsPromptPending } from './utils/legalContent';
 import logo from '../new_logo.png';
 
 const DEFAULT_TRUST_NAME = import.meta.env.VITE_DEFAULT_TRUST_NAME || 'Trust';
@@ -87,6 +89,11 @@ function VIPLogin({ onNavigate, onLogout }) {
   const [dashLoading, setDashLoading] = useState(false);
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const [bannerDismissed, setBannerDismissed] = useState(false);
+  const [showTermsModal, setShowTermsModal] = useState(() => isLoginTermsPromptPending());
+  const [termsModalContent, setTermsModalContent] = useState('');
+  const [termsModalTrustName, setTermsModalTrustName] = useState('');
+  const [termsModalLoading, setTermsModalLoading] = useState(() => isLoginTermsPromptPending());
+  const [termsModalError, setTermsModalError] = useState('');
   const [selectedTrustId, setSelectedTrustId] = useState(() => localStorage.getItem('selected_trust_id') || '');
 
   // Back: on dashboard → do nothing; on otp/notmember/existingmember → go back to phone entry
@@ -138,6 +145,43 @@ function VIPLogin({ onNavigate, onLogout }) {
       document.removeEventListener('visibilitychange', syncTrustId);
     };
   }, []);
+
+  useEffect(() => {
+    if (!showTermsModal) return undefined;
+
+    let active = true;
+    const loadTerms = async () => {
+      const trustId = resolveLegalTrustId(selectedTrustId || BASE_TRUST_ID || '');
+      if (!trustId) {
+        setTermsModalContent('');
+        setTermsModalTrustName(localStorage.getItem('selected_trust_name') || DEFAULT_TRUST_NAME);
+        setTermsModalLoading(false);
+        return;
+      }
+
+      try {
+        setTermsModalLoading(true);
+        setTermsModalError('');
+        const trust = await fetchTrustById(trustId);
+        if (!active || !trust) return;
+        setTermsModalContent(trust.terms_content || '');
+        setTermsModalTrustName(trust.name || localStorage.getItem('selected_trust_name') || DEFAULT_TRUST_NAME);
+      } catch (err) {
+        if (!active) return;
+        console.warn('[VIPLogin] Failed to load terms content:', err?.message || err);
+        setTermsModalError('Failed to load Terms & Conditions. Please try again.');
+        setTermsModalContent('');
+        setTermsModalTrustName(localStorage.getItem('selected_trust_name') || DEFAULT_TRUST_NAME);
+      } finally {
+        if (active) setTermsModalLoading(false);
+      }
+    };
+
+    loadTerms();
+    return () => {
+      active = false;
+    };
+  }, [showTermsModal, selectedTrustId]);
 
   // ── Load dashboard data when step = 'dashboard' ──────────────────────────────
   useEffect(() => {
@@ -232,6 +276,12 @@ function VIPLogin({ onNavigate, onLogout }) {
       // Save user
       localStorage.setItem('user', JSON.stringify(pendingUser));
       localStorage.setItem('isLoggedIn', 'true');
+      setLoginTermsPromptPending();
+      setTermsModalLoading(true);
+      setTermsModalError('');
+      setTermsModalContent('');
+      setTermsModalTrustName('');
+      setShowTermsModal(true);
       await logUserSessionEvent({
         user: pendingUser,
         actionType: 'login',
@@ -311,7 +361,13 @@ function VIPLogin({ onNavigate, onLogout }) {
     });
     localStorage.removeItem('isLoggedIn');
     localStorage.removeItem('user');
+    clearLoginTermsPromptPending();
     sessionStorage.clear();
+    setShowTermsModal(false);
+    setTermsModalContent('');
+    setTermsModalTrustName('');
+    setTermsModalError('');
+    setTermsModalLoading(false);
     setUser(null); setMemberData(null); setTrustInfo(null);
     setPendingUser(null); setPhoneNumber(''); setOtp('');
     setApplicationSubmitted(false);
@@ -338,6 +394,26 @@ function VIPLogin({ onNavigate, onLogout }) {
   };
 
   // ── VIP colour config ──────────────────────────────────────────────────────
+  const handleAcceptTerms = () => {
+    clearLoginTermsPromptPending();
+    setShowTermsModal(false);
+    setTermsModalContent('');
+    setTermsModalTrustName('');
+    setTermsModalError('');
+    setTermsModalLoading(false);
+  };
+
+  const termsPrompt = (
+    <TermsModal
+      isOpen={showTermsModal}
+      onAccept={handleAcceptTerms}
+      content={termsModalContent}
+      trustName={termsModalTrustName}
+      loading={termsModalLoading}
+      error={termsModalError}
+    />
+  );
+
   const getVipConfig = (md) => {
     if (md?.vip_status === 'VVIP') return {
       label: 'VVIP Member', banner: 'VVIP Member',
@@ -468,6 +544,7 @@ function VIPLogin({ onNavigate, onLogout }) {
                 Regular Login
               </button>
             </p>
+            {termsPrompt}
           </div>
         </div>
       </div>
@@ -542,6 +619,7 @@ function VIPLogin({ onNavigate, onLogout }) {
                 Try again
               </button>
             </p>
+            {termsPrompt}
           </div>
         </div>
       </div>
@@ -634,6 +712,7 @@ function VIPLogin({ onNavigate, onLogout }) {
               <Home className="h-5 w-5 text-amber-500" />
               Go to Home
             </button>
+            {termsPrompt}
           </div>
         </div>
       </div>
@@ -833,6 +912,7 @@ function VIPLogin({ onNavigate, onLogout }) {
                 Go to Regular Login
               </button>
             </div>
+            {termsPrompt}
           </div>
         </div>
       </div>
@@ -849,6 +929,7 @@ function VIPLogin({ onNavigate, onLogout }) {
           <div className="w-12 h-12 border-4 border-slate-200 border-t-indigo-500 rounded-full animate-spin" />
           <p className="text-slate-400 text-sm font-medium">Loading your dashboard...</p>
         </div>
+        {termsPrompt}
       </div>
     );
   }
@@ -867,6 +948,7 @@ function VIPLogin({ onNavigate, onLogout }) {
           100% { transform: translateX(-100%); }
         }
       `}</style>
+      {termsPrompt}
 
       {/* ── Hero Profile Section (dark navy card) ── */}
       <div className="relative overflow-hidden px-0 pb-7 pt-3"

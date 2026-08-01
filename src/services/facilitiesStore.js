@@ -1,4 +1,4 @@
-import { checkVipFacilityEligibility, fetchFacilitiesPage, fetchFacilityById } from './communityService';
+import { fetchFacilitiesPage, fetchFacilityById } from './communityService';
 
 const FACILITIES_TTL_MS = 5 * 60 * 1000;
 const FACILITIES_CTX_TTL_MS = 5 * 60 * 1000;
@@ -69,10 +69,10 @@ const resolveCurrentMemberId = () => {
   }
 };
 
-const buildScopeKey = ({ trustId, memberId, vipEligible }) => {
+const buildScopeKey = ({ trustId, memberId }) => {
   const normalizedTrustId = normalizeId(trustId) || 'unknown-trust';
   const normalizedMemberId = normalizeId(memberId) || 'anon';
-  return `${normalizedTrustId}__${normalizedMemberId}__${vipEligible ? 'vip' : 'gen'}`;
+  return `${normalizedTrustId}__${normalizedMemberId}`;
 };
 
 const now = () => Date.now();
@@ -213,11 +213,11 @@ function getCachedPage(scopeKey, page) {
   };
 }
 
-async function resolveFacilitiesContext(trustId, trustName = null, forceRefresh = false) {
+async function resolveFacilitiesContext(trustId, _trustName = null, forceRefresh = false) {
   const normalizedTrustId = normalizeId(trustId);
   const memberId = resolveCurrentMemberId();
   if (!normalizedTrustId) {
-    return { trustId: null, memberId, vipEligible: false, regMemberMatch: null, scopeKey: null };
+    return { trustId: null, memberId, scopeKey: null };
   }
 
   const ctxKey = KEY_CONTEXT(normalizedTrustId, memberId);
@@ -225,31 +225,21 @@ async function resolveFacilitiesContext(trustId, trustName = null, forceRefresh 
   if (!forceRefresh && cached && isCtxFresh(cached.ts)) {
     const scopeKey = buildScopeKey({
       trustId: normalizedTrustId,
-      memberId,
-      vipEligible: Boolean(cached.vipEligible)
+      memberId
     });
     writeJson(KEY_ACTIVE_SCOPE(normalizedTrustId, memberId), scopeKey);
     return {
       trustId: normalizedTrustId,
       memberId,
-      vipEligible: Boolean(cached.vipEligible),
-      regMemberMatch: cached.regMemberMatch || null,
       scopeKey,
       fromCache: true
     };
   }
 
-  const eligibility = await checkVipFacilityEligibility({
-    trustId: normalizedTrustId,
-    trustName,
-    memberId
-  });
-  const vipEligible = Boolean(eligibility?.vipEligible);
-  const regMemberMatch = eligibility?.regMemberMatch || null;
-  const scopeKey = buildScopeKey({ trustId: normalizedTrustId, memberId, vipEligible });
-  writeJson(ctxKey, { vipEligible, regMemberMatch, ts: now() });
+  const scopeKey = buildScopeKey({ trustId: normalizedTrustId, memberId });
+  writeJson(ctxKey, { ts: now() });
   writeJson(KEY_ACTIVE_SCOPE(normalizedTrustId, memberId), scopeKey);
-  return { trustId: normalizedTrustId, memberId, vipEligible, regMemberMatch, scopeKey, fromCache: false };
+  return { trustId: normalizedTrustId, memberId, scopeKey, fromCache: false };
 }
 
 export async function loadFacilitiesPage({ trustId, trustName = null, page = 1, pageSize = facilitiesConfig.PAGE_SIZE, forceRefresh = false }) {
@@ -269,7 +259,7 @@ export async function loadFacilitiesPage({ trustId, trustName = null, page = 1, 
 
   const cache = getCachedPage(scopeKey, pageNo);
   if (!forceRefresh && cache.isFresh && cache.facilities.length > 0) {
-    console.log('[Facilities][Cache] hit trust=', normalizedTrustId, 'member=', context.memberId, 'vip=', context.vipEligible, 'page=', pageNo, 'count=', cache.facilities.length);
+    console.log('[Facilities][Cache] hit trust=', normalizedTrustId, 'member=', context.memberId, 'page=', pageNo, 'count=', cache.facilities.length);
     return { facilities: cache.facilities, hasMore: readState(scopeKey).hasMoreFacilities, fromCache: true };
   }
 
@@ -277,15 +267,12 @@ export async function loadFacilitiesPage({ trustId, trustName = null, page = 1, 
   if (inflight[inflightKey]) return inflight[inflightKey];
 
   writeState(scopeKey, { isFacilitiesLoading: true });
-  console.log('[Facilities][Cache] miss trust=', normalizedTrustId, 'member=', context.memberId, 'vip=', context.vipEligible, 'page=', pageNo, 'fetch=api');
+  console.log('[Facilities][Cache] miss trust=', normalizedTrustId, 'member=', context.memberId, 'page=', pageNo, 'fetch=api');
   inflight[inflightKey] = (async () => {
     try {
       const res = await fetchFacilitiesPage({
         trustId: normalizedTrustId,
         trustName,
-        memberId: context.memberId,
-        vipEligible: context.vipEligible,
-        regMemberMatch: context.regMemberMatch,
         page: pageNo,
         pageSize: limit
       });
@@ -337,10 +324,7 @@ export async function loadFacilityDetail({ trustId, trustName = null, facilityId
   const res = await fetchFacilityById({
     facilityId: normalizedFacilityId,
     trustId: normalizedTrustId,
-    trustName,
-    memberId: context.memberId,
-    vipEligible: context.vipEligible,
-    regMemberMatch: context.regMemberMatch
+    trustName
   });
 
   if (!res?.success) {

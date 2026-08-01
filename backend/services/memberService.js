@@ -2,6 +2,49 @@ import { supabase } from '../config/supabase.js';
 
 const normalizeMembershipNumber = (value) => String(value || '').trim();
 
+const normalizePriorityValue = (value) => {
+  const raw = String(value ?? '').trim();
+  if (!raw) return null;
+
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
+const comparePriorityValues = (a = {}, b = {}) => {
+  const priorityA = normalizePriorityValue(a?.priority);
+  const priorityB = normalizePriorityValue(b?.priority);
+  const hasPriorityA = priorityA !== null;
+  const hasPriorityB = priorityB !== null;
+
+  if (hasPriorityA || hasPriorityB) {
+    if (hasPriorityA !== hasPriorityB) return hasPriorityA ? -1 : 1;
+    if (priorityA !== priorityB) return priorityA - priorityB;
+  }
+
+  return 0;
+};
+
+const comparePriorityThenName = (a = {}, b = {}) => {
+  const priorityDiff = comparePriorityValues(a, b);
+  if (priorityDiff !== 0) return priorityDiff;
+
+  return String(a?.Name || a?.member_name_english || a?.title || '').localeCompare(
+    String(b?.Name || b?.member_name_english || b?.title || '')
+  );
+};
+
+const comparePriorityThenMembershipThenName = (a = {}, b = {}) => {
+  const priorityDiff = comparePriorityValues(a, b);
+  if (priorityDiff !== 0) return priorityDiff;
+
+  const aMembership = normalizeMembershipNumber(a?.['Membership number']);
+  const bMembership = normalizeMembershipNumber(b?.['Membership number']);
+  const aNum = Number.parseInt((aMembership.match(/\d+/g) || ['999999999']).join(''), 10);
+  const bNum = Number.parseInt((bMembership.match(/\d+/g) || ['999999999']).join(''), 10);
+  if (aNum !== bNum) return aNum - bNum;
+  return String(a?.Name || '').localeCompare(String(b?.Name || ''));
+};
+
 const mergeUniqueMembers = (rows = []) => {
   const seen = new Set();
   const output = [];
@@ -169,6 +212,120 @@ const getTrustMemberIdList = (trustMeta, preferMembership = false) => {
   return { field: null, values: [] };
 };
 
+const normalizeSearchText = (value) => String(value || '').trim().toLowerCase();
+
+const mapDirectoryMemberRow = (row = {}) => {
+  const joined = Array.isArray(row?.Members) ? row.Members[0] : row?.Members;
+
+  return {
+    id: row?.id || null,
+    reg_id: row?.id || null,
+    trust_id: row?.trust_id || null,
+    members_id: row?.members_id || joined?.members_id || null,
+    Name: joined?.Name || row?.Name || null,
+    Mobile: joined?.Mobile || row?.Mobile || null,
+    Email: joined?.Email || null,
+    role: row?.role || null,
+    type: row?.role || null,
+    'Membership number': normalizeMembershipNumber(row?.['Membership number']) || null,
+    'S. No.': joined?.['S.No.'] ?? joined?.['S. No.'] ?? `REG-${String(row?.id || '').slice(0, 8)}`,
+    'Company Name': joined?.['Company Name'] || null,
+    'Address Home': joined?.['Address Home'] || null,
+    'Address Office': joined?.['Address Office'] || null,
+    'Resident Landline': joined?.['Resident Landline'] || null,
+    'Office Landline': joined?.['Office Landline'] || null,
+    joined_date: row?.joined_date || null,
+    Privacy: joined?.Privacy ?? true,
+  };
+};
+
+const matchesDirectoryMember = (member, searchQuery, type = null) => {
+  const normalizedQuery = normalizeSearchText(searchQuery);
+  const normalizedType = normalizeSearchText(type);
+  const memberRole = normalizeSearchText(member?.role || member?.type);
+
+  if (normalizedType && normalizedType !== 'all' && memberRole !== normalizedType) {
+    return false;
+  }
+
+  if (!normalizedQuery) return true;
+
+  const haystack = [
+    member?.Name,
+    member?.role,
+    member?.type,
+    member?.Mobile,
+    member?.Email,
+    member?.['Membership number'],
+    member?.['Company Name'],
+    member?.['Address Home'],
+    member?.['Address Office'],
+    member?.['Resident Landline'],
+    member?.['Office Landline'],
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+
+  return haystack.includes(normalizedQuery);
+};
+
+const fetchTrustDirectoryMembers = async (trustId) => {
+  if (!trustId) return [];
+
+  const selectClause = `
+    id,
+    trust_id,
+    role,
+    joined_date,
+    is_active,
+    members_id,
+    "Membership number",
+    Members:members_id (
+      "S.No.",
+      "Name",
+      "Mobile",
+      "Email",
+      "Address Home",
+      "Company Name",
+      "Address Office",
+      "Resident Landline",
+      "Office Landline",
+      members_id,
+      "Privacy"
+    )
+  `;
+
+  const batchSize = 1000;
+  let from = 0;
+  let hasMore = true;
+  let allMembers = [];
+
+  while (hasMore) {
+    const query = supabase
+      .from('reg_members')
+      .select(selectClause)
+      .eq('trust_id', trustId)
+      .or('is_active.is.null,is_active.eq.true');
+
+    const { data, error } = await query
+      .order('joined_date', { ascending: false })
+      .range(from, from + batchSize - 1);
+
+    if (error) throw error;
+
+    allMembers = [...allMembers, ...(data || []).map(mapDirectoryMemberRow)];
+
+    if (!data || data.length < batchSize) {
+      hasMore = false;
+    } else {
+      from += batchSize;
+    }
+  }
+
+  return mergeUniqueMembers(allMembers);
+};
+
 const resolveMemberIdFieldOptions = (field) => {
   if (!field) return [];
   return [field];
@@ -291,10 +448,6 @@ export const getMembersByType = async (type, trustId = null) => {
         .select('*')
         .eq('type', type);
 
-      if (trustId) {
-        query = applyMemberScopeFilter(query, trustMeta);
-      }
-
       const { data, error } = await query
         .order('Name', { ascending: true })
         .range(from, from + batchSize - 1);
@@ -321,39 +474,36 @@ export const getMembersByType = async (type, trustId = null) => {
 };
 
 /**
- * Search members by name or company
+ * Search members for the directory
  */
 export const searchMembers = async (searchQuery, type = null, trustId = null) => {
   try {
     if (trustId) {
-      const trustedMembers = await getAllMembers(trustId);
-      const q = String(searchQuery || '').toLowerCase().trim();
-      return (trustedMembers || []).filter((member) => {
-        const name = String(member?.Name || '').toLowerCase();
-        const company = String(member?.['Company Name'] || '').toLowerCase();
-        const typeValue = String(member?.type || '').toLowerCase();
-        const typeMatch = type ? typeValue === String(type).toLowerCase().trim() : true;
-        const queryMatch = q ? (name.includes(q) || company.includes(q)) : true;
-        return typeMatch && queryMatch;
-      });
+      const trustedMembers = await fetchTrustDirectoryMembers(trustId);
+      const filtered = (trustedMembers || []).filter((member) => matchesDirectoryMember(member, searchQuery, type));
+      return [...filtered].sort((a, b) => String(a?.Name || '').localeCompare(String(b?.Name || '')));
     }
-
-    const trustMeta = await getTrustMembershipMeta(trustId);
 
     let query = supabase
       .from('Members')
       .select('*');
 
-    if (type) {
-      query = query.eq('type', type);
+    const normalizedType = normalizeSearchText(type);
+    if (normalizedType && normalizedType !== 'all') {
+      query = query.or(`role.ilike.%${normalizedType}%,type.ilike.%${normalizedType}%`);
     }
 
-    if (trustId) {
-      query = applyMemberScopeFilter(query, trustMeta);
-    }
-
-    if (searchQuery) {
-      query = query.or(`Name.ilike.%${searchQuery}%,"Company Name".ilike.%${searchQuery}%`);
+    const normalizedQuery = normalizeSearchText(searchQuery);
+    if (normalizedQuery) {
+      query = query.or(
+        `Name.ilike.%${normalizedQuery}%,` +
+        `"Company Name".ilike.%${normalizedQuery}%,` +
+        `Mobile.ilike.%${normalizedQuery}%,` +
+        `Email.ilike.%${normalizedQuery}%,` +
+        `"Membership number".ilike.%${normalizedQuery}%,` +
+        `role.ilike.%${normalizedQuery}%,` +
+        `type.ilike.%${normalizedQuery}%`
+      );
     }
 
     query = query.order('Name', { ascending: true });
@@ -361,8 +511,8 @@ export const searchMembers = async (searchQuery, type = null, trustId = null) =>
     const { data, error } = await query;
 
     if (error) throw error;
-    
-    return trustId ? enrichWithMembershipData(data || [], trustMeta) : (data || []);
+
+    return (data || []).filter((member) => matchesDirectoryMember(member, searchQuery, type));
   } catch (error) {
     console.error('Error searching members:', error);
     throw error;
@@ -652,6 +802,7 @@ export const getAllMembers = async (trustId = null) => {
             'Mobile': null, // No mobile in committee_members
             'Email': null, // No email in committee_members
             'type': committee.member_role,
+            'priority': committee.priority ?? null,
             'committee_name_hindi': committee.committee_name_hindi,
             'member_name_english': committee.member_name_english,
             'member_role': committee.member_role,
@@ -682,6 +833,10 @@ export const getAllMembers = async (trustId = null) => {
       }
     }
     
+    if (committeeData.length > 0) {
+      committeeData = [...committeeData].sort(comparePriorityThenName);
+    }
+
     // Combine members, doctors, and committee data
     const combinedData = includeExtras
       ? [...allData, ...doctorsData, ...committeeData]
@@ -1107,7 +1262,7 @@ export const getAllCommitteeMembers = async (trustId = null) => {
     while (hasMore) {
       const { data, error } = await supabase
         .from('member_roles')
-        .select('reg_id, role_type, title, subtitle, created_at, reg_members!inner(id, trust_id, members_id, "Membership number", is_active)')
+        .select('reg_id, role_type, title, subtitle, priority, privacy, created_at, reg_members!inner(id, trust_id, members_id, "Membership number", is_active)')
         .eq('role_type', 'committee')
         .eq('reg_members.trust_id', trustId)
         .or('is_active.is.null,is_active.eq.true', { foreignTable: 'reg_members' })
@@ -1156,6 +1311,8 @@ export const getAllCommitteeMembers = async (trustId = null) => {
         'role_type': 'committee',
         'title': r.title || null,
         'subtitle': r.subtitle || null,
+        'priority': r.priority ?? null,
+        'privacy': r.privacy ?? null,
         'committee_name_english': r.title || committeeName,
         'committee_name_hindi': r.subtitle || r.title || committeeName,
         'created_at': r.created_at || m?.created_at || null,
@@ -1163,7 +1320,7 @@ export const getAllCommitteeMembers = async (trustId = null) => {
       };
     });
 
-    const sorted = [...result].sort((a, b) => String(a?.Name || '').localeCompare(String(b?.Name || '')));
+    const sorted = [...result].sort(comparePriorityThenMembershipThenName);
     console.log(`✅ Total fetched: ${sorted.length} committee members (fallback)`);
     return sorted;
   };
@@ -1277,6 +1434,7 @@ export const getAllCommitteeMembers = async (trustId = null) => {
         'Resident Landline': member?.['Resident Landline'] || null,
         'Office Landline': member?.['Office Landline'] || null,
         'type': committee.member_role || member?.type || 'Committee',
+        'priority': committee.priority ?? null,
         'committee_name_hindi': committee.committee_name_hindi || null,
         'committee_name_english': committee.committee_name_english || null,
         'member_name_english': committee.member_name_english || null,
@@ -1293,7 +1451,7 @@ export const getAllCommitteeMembers = async (trustId = null) => {
       };
     });
 
-    const sorted = [...result].sort((a, b) => String(a?.Name || '').localeCompare(String(b?.Name || '')));
+    const sorted = [...result].sort(comparePriorityThenName);
     console.log(`✅ Total fetched: ${sorted.length} committee members (merged with Members)`);
     return sorted;
   } catch (error) {
@@ -1408,7 +1566,7 @@ export const getAllElectedMembers = async (trustId = null) => {
     while (hasMore) {
       const { data, error } = await supabase
         .from('member_roles')
-        .select('reg_id, role_type, title, subtitle, created_at, reg_members!inner(id, trust_id, members_id, "Membership number", is_active)')
+        .select('reg_id, role_type, title, subtitle, priority, created_at, reg_members!inner(id, trust_id, members_id, "Membership number", is_active)')
         .eq('role_type', 'elected')
         .eq('reg_members.trust_id', trustId)
         .or('is_active.is.null,is_active.eq.true', { foreignTable: 'reg_members' })
@@ -1455,12 +1613,13 @@ export const getAllElectedMembers = async (trustId = null) => {
         'role_type': 'elected',
         'title': r.title || null,
         'subtitle': r.subtitle || null,
+        'priority': r.priority ?? null,
         'created_at': r.created_at || m?.created_at || null,
         'is_elected_member': true
       };
     });
 
-    const sorted = [...result].sort((a, b) => String(a?.Name || '').localeCompare(String(b?.Name || '')));
+    const sorted = [...result].sort(comparePriorityThenMembershipThenName);
     console.log(`✅ Total fetched: ${sorted.length} elected members (trust filtered)`);
     return sorted;
   } catch (error) {

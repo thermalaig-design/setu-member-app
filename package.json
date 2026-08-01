@@ -1,5 +1,5 @@
 {
-  "name": "ek_udaan",
+  "name": "setu",
   "private": true,
   "version": "1.0.0",
   "type": "module",
@@ -8,10 +8,11 @@
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "resize-icon": "node resize_icon.js"
+    "resize-icon": "node resize_icon.js",
+    "test": "node --test"
   },
   "dependencies": {
-    "@capawesome/capacitor-app-update": "^7.0.1",
+    "@capacitor-community/facebook-login": "^8.0.0",
     "@capacitor/android": "^8.0.2",
     "@capacitor/app": "^8.0.1",
     "@capacitor/cli": "^8.0.2",
@@ -23,11 +24,13 @@
     "@capacitor/splash-screen": "^8.0.0",
     "@capacitor/status-bar": "^8.0.0",
     "@capacitor/toast": "^8.0.1",
+    "@capawesome/capacitor-app-update": "^7.0.1",
     "@supabase/supabase-js": "^2.89.0",
     "axios": "^1.13.2",
     "firebase": "^12.7.0",
     "lucide-react": "^0.562.0",
     "msg91-sms": "^1.0.1",
+    "pdfjs-dist": "^6.1.200",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "react-router-dom": "^7.11.0"

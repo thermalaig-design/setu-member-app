@@ -1,26 +1,34 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Home as HomeIcon, Mail, Menu, Phone, Search, User, Users, X } from 'lucide-react';
+import { ArrowUpDown, Building, Check, Home as HomeIcon, Mail, Menu, Search, User, Users, X } from 'lucide-react';
 import { useAppTheme } from './context/ThemeContext';
-import { getDirectoryMembers } from './services/supabaseService';
+import { getDirectoryMembers, getDirectoryViewRoles } from './services/supabaseService';
 import { getProfilePhotos } from './services/api';
-import { TRUST_VERSION_UPDATED_EVENT } from './services/trustVersionService';
 import { getNavbarThemeStyles } from './utils/themeUtils';
 import { applyOpacity } from './utils/colorUtils';
+import { MEMBER_PRIVACY_UPDATED_EVENT, matchesMemberIdentity } from './utils/memberIdentity';
 import Sidebar from './components/Sidebar';
 
 const MEMBERS_PER_PAGE = 20;
 const DIRECTORY_CACHE_TTL_MS = 10 * 60 * 1000;
-const ROLE_FILTERS = [
-  { id: 'all', label: 'All' },
-  { id: 'patron', label: 'Patron' },
-  { id: 'trustee', label: 'Trustee' },
-  { id: 'member', label: 'Member' },
-];
-
 const normalizeRole = (value) => String(value || '').trim().toLowerCase();
 const normalizeText = (value) => String(value || '').trim();
-const getDirectoryCacheKey = (trustId) => `directory_cache_v2_${trustId || 'global'}`;
+const getDirectoryCacheKey = (trustId) => `directory_cache_v3_${trustId || 'global'}`;
+const DIRECTORY_SORT_OPTIONS = [
+  { value: 'name-asc', label: 'Name: A-Z' },
+  { value: 'name-desc', label: 'Name: Z-A' },
+  { value: 'membership-asc', label: 'Membership No: Low to High' },
+  { value: 'membership-desc', label: 'Membership No: High to Low' },
+];
+
+const compareDirectoryText = (left, right) => {
+  const a = normalizeText(left);
+  const b = normalizeText(right);
+  if (!a && !b) return 0;
+  if (!a) return 1;
+  if (!b) return -1;
+  return a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
+};
 
 const readCurrentUserPhotoCache = () => {
   try {
@@ -63,14 +71,19 @@ const Directory = ({ onNavigate }) => {
   const [members, setMembers] = useState([]);
   const [profilePhotos, setProfilePhotos] = useState({});
   const [activeRole, setActiveRole] = useState('all');
+  const [configuredDirectoryRoles, setConfiguredDirectoryRoles] = useState([]);
+  const [sortMode, setSortMode] = useState('name-asc');
+  const [isSortMenuOpen, setIsSortMenuOpen] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const [totalCount, setTotalCount] = useState(0);
-  const [isPageLoading, setIsPageLoading] = useState(false);
-  const [loadedPages, setLoadedPages] = useState([]);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [currentUserPhoto] = useState(() => readCurrentUserPhotoCache());
   const [selectedTrustId, setSelectedTrustId] = useState(() => localStorage.getItem('selected_trust_id') || null);
   const [selectedTrustName, setSelectedTrustName] = useState(() => localStorage.getItem('selected_trust_name') || null);
+  const primaryColor = theme?.primary || 'var(--brand-red)';
+  const secondaryColor = theme?.secondary || 'var(--brand-navy)';
+  const sortMenuRef = useRef(null);
+  const selectedSortLabel = DIRECTORY_SORT_OPTIONS.find((option) => option.value === sortMode)?.label || 'Sort members';
 
   const resolveMemberPhotoUrl = (item) => {
     const candidateKeys = [
@@ -92,23 +105,6 @@ const Directory = ({ onNavigate }) => {
       || (isCurrentUser ? currentUserPhoto.photoUrl : '');
   };
 
-  const mergeMembersById = (existing, incoming) => {
-    const byKey = new Map();
-    const keyOf = (item) => String(item?.members_id || item?.['Membership number'] || item?.id || '').trim();
-    (existing || []).forEach((item) => {
-      const key = keyOf(item);
-      if (!key) return;
-      byKey.set(key, item);
-    });
-    (incoming || []).forEach((item) => {
-      const key = keyOf(item);
-      if (!key) return;
-      const prev = byKey.get(key) || {};
-      byKey.set(key, { ...prev, ...item });
-    });
-    return Array.from(byKey.values());
-  };
-
   useEffect(() => {
     const onTrustChanged = (event) => {
       const nextId = event?.detail?.trustId || localStorage.getItem('selected_trust_id') || null;
@@ -127,43 +123,37 @@ const Directory = ({ onNavigate }) => {
     const trustName = selectedTrustName || null;
     const cacheKey = getDirectoryCacheKey(trustId);
 
-    const fetchPage = async (pageNo, { background = false } = {}) => {
+    const fetchAllMembers = async ({ background = false } = {}) => {
       try {
-        if (!background) setIsPageLoading(true);
+        if (!background) setLoading(true);
         setError('');
-        const response = await getDirectoryMembers(trustId, trustName, { page: pageNo, limit: MEMBERS_PER_PAGE });
+        const response = await getDirectoryMembers(trustId, trustName, { fullList: true });
         if (!mounted) return;
         if (!response?.success) {
           setError(response?.error || 'Unable to load directory members.');
+          setMembers([]);
+          setTotalCount(0);
           return;
         }
-        const rows = Array.isArray(response?.data) ? response.data : [];
-        let nextMembers = [];
-        setMembers((prev) => {
-          nextMembers = mergeMembersById(prev, rows);
-          return nextMembers;
-        });
-        setTotalCount(Number(response?.totalCount || 0));
-        let nextLoadedPages = [];
-        setLoadedPages((prev) => {
-          nextLoadedPages = prev.includes(pageNo) ? prev : [...prev, pageNo];
-          return nextLoadedPages;
-        });
 
-        const snapshot = {
-          ts: Date.now(),
-          members: nextMembers,
-          totalCount: Number(response?.totalCount || 0),
-          loadedPages: nextLoadedPages
-        };
-        try { localStorage.setItem(cacheKey, JSON.stringify(snapshot)); } catch { /* ignore */ }
+        const rows = Array.isArray(response?.data) ? response.data : [];
+        setMembers(rows);
+        setTotalCount(Number(response?.totalCount || rows.length || 0));
+        try {
+          localStorage.setItem(cacheKey, JSON.stringify({
+            ts: Date.now(),
+            members: rows,
+            totalCount: Number(response?.totalCount || rows.length || 0)
+          }));
+        } catch {
+          // ignore cache write failure
+        }
       } catch (err) {
         if (!mounted) return;
         setError(err?.message || 'Unable to load directory members.');
       } finally {
         if (mounted && !background) {
           setLoading(false);
-          setIsPageLoading(false);
         }
       }
     };
@@ -172,16 +162,14 @@ const Directory = ({ onNavigate }) => {
       const cachedRaw = localStorage.getItem(cacheKey);
       if (cachedRaw) {
         const cached = JSON.parse(cachedRaw);
-        const hasCachedMembers = Array.isArray(cached?.members) && cached.members.length > 0;
         if (Array.isArray(cached?.members) && cached.members.length > 0) {
           setMembers(cached.members);
           setTotalCount(Number(cached?.totalCount || cached.members.length || 0));
-          setLoadedPages(Array.isArray(cached?.loadedPages) ? cached.loadedPages : [1]);
           setLoading(false);
-        }
-        if (hasCachedMembers && Number(cached?.ts) > 0 && (Date.now() - Number(cached.ts)) < DIRECTORY_CACHE_TTL_MS) {
-          void fetchPage(1, { background: true });
-          return () => { mounted = false; };
+          if (Number(cached?.ts) > 0 && (Date.now() - Number(cached.ts)) < DIRECTORY_CACHE_TTL_MS) {
+            void fetchAllMembers({ background: true });
+            return () => { mounted = false; };
+          }
         }
       }
     } catch {
@@ -189,16 +177,89 @@ const Directory = ({ onNavigate }) => {
     }
 
     setMembers([]);
-    setLoadedPages([]);
     setTotalCount(0);
     setLoading(true);
-    void fetchPage(1);
+    void fetchAllMembers();
     return () => { mounted = false; };
   }, [selectedTrustId, selectedTrustName]);
 
   useEffect(() => {
+    let active = true;
+
+    const loadDirectoryViewRoles = async () => {
+      const trustId = selectedTrustId || null;
+      if (!trustId) {
+        if (active) setConfiguredDirectoryRoles([]);
+        return;
+      }
+
+      const response = await getDirectoryViewRoles(trustId);
+      if (!active) return;
+
+      if (!response?.success) {
+        setConfiguredDirectoryRoles([]);
+        return;
+      }
+
+      const normalizedRoles = (response.data || [])
+        .map((item) => {
+          const label = normalizeText(item?.role);
+          const id = normalizeRole(label);
+          if (!label || !id) return null;
+          return { id, label };
+        })
+        .filter(Boolean)
+        .filter((item, index, list) => list.findIndex((entry) => entry.id === item.id) === index);
+
+      setConfiguredDirectoryRoles(normalizedRoles);
+    };
+
+    void loadDirectoryViewRoles();
+    return () => {
+      active = false;
+    };
+  }, [selectedTrustId]);
+
+  useEffect(() => {
+    const onPrivacyUpdated = (event) => {
+      const detail = event?.detail || {};
+      setMembers((prev) => prev.map((item) => (
+        matchesMemberIdentity(item, detail) ? { ...item, Privacy: Boolean(detail.privacy) } : item
+      )));
+    };
+    window.addEventListener(MEMBER_PRIVACY_UPDATED_EVENT, onPrivacyUpdated);
+    return () => window.removeEventListener(MEMBER_PRIVACY_UPDATED_EVENT, onPrivacyUpdated);
+  }, []);
+
+  useEffect(() => {
     setCurrentPage(1);
-  }, [query, activeRole]);
+  }, [query, activeRole, sortMode]);
+
+  useEffect(() => {
+    if (!isSortMenuOpen) return;
+
+    const handlePointerDown = (event) => {
+      if (sortMenuRef.current && !sortMenuRef.current.contains(event.target)) {
+        setIsSortMenuOpen(false);
+      }
+    };
+
+    const handleKeyDown = (event) => {
+      if (event.key === 'Escape') {
+        setIsSortMenuOpen(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handlePointerDown);
+    document.addEventListener('touchstart', handlePointerDown);
+    document.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      document.removeEventListener('mousedown', handlePointerDown);
+      document.removeEventListener('touchstart', handlePointerDown);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isSortMenuOpen]);
 
   useEffect(() => {
     let active = true;
@@ -245,20 +306,35 @@ const Directory = ({ onNavigate }) => {
     };
   }, [members]);
 
-  const roleAvailability = useMemo(() => {
-    const available = new Set();
+  const roleCounts = useMemo(() => {
+    const counts = new Map();
     members.forEach((item) => {
-      const role = normalizeRole(item?.role || item?.type);
-      if (role.includes('patron')) available.add('patron');
-      else if (role.includes('trustee')) available.add('trustee');
-      else available.add('member');
+      const rawRole = normalizeText(item?.role || item?.type);
+      const roleKey = normalizeRole(rawRole) || 'member';
+      counts.set(roleKey, {
+        id: roleKey,
+        label: rawRole || 'Member',
+        count: (counts.get(roleKey)?.count || 0) + 1,
+      });
     });
-    return available;
+    return counts;
   }, [members]);
 
   const visibleRoleFilters = useMemo(() => {
-    return ROLE_FILTERS.filter((role) => role.id === 'all' || roleAvailability.has(role.id));
-  }, [roleAvailability]);
+    if (configuredDirectoryRoles.length > 0) {
+      return [
+        { id: 'all', label: 'All' },
+        ...configuredDirectoryRoles,
+      ];
+    }
+
+    const roles = Array.from(roleCounts.values())
+      .sort((a, b) => a.label.localeCompare(b.label));
+    return [
+      { id: 'all', label: 'All' },
+      ...roles,
+    ];
+  }, [configuredDirectoryRoles, roleCounts]);
 
   useEffect(() => {
     if (!visibleRoleFilters.some((item) => item.id === activeRole)) {
@@ -272,10 +348,8 @@ const Directory = ({ onNavigate }) => {
 
     if (activeRole !== 'all') {
       roleFiltered = members.filter((item) => {
-        const role = normalizeRole(item?.role || item?.type);
-        if (activeRole === 'patron') return role.includes('patron');
-        if (activeRole === 'trustee') return role.includes('trustee');
-        return !role.includes('patron') && !role.includes('trustee');
+        const role = normalizeRole(item?.role || item?.type) || 'member';
+        return role === activeRole;
       });
     }
 
@@ -284,6 +358,7 @@ const Directory = ({ onNavigate }) => {
     return roleFiltered.filter((item) => {
       const haystack = [
         item?.Name,
+        item?.['Company Name'],
         item?.role,
         item?.type,
         item?.Mobile,
@@ -297,10 +372,28 @@ const Directory = ({ onNavigate }) => {
     });
   }, [members, query, activeRole]);
 
+  const sortedMembers = useMemo(() => {
+    const items = [...filteredMembers];
+    const isDesc = sortMode.endsWith('-desc');
+    const isMembershipSort = sortMode.startsWith('membership');
+    const sortField = isMembershipSort ? 'Membership number' : 'Name';
+
+    items.sort((left, right) => {
+      const primary = compareDirectoryText(left?.[sortField], right?.[sortField]);
+      if (primary !== 0) {
+        return isDesc ? -primary : primary;
+      }
+      const fallback = compareDirectoryText(left?.Name, right?.Name);
+      return isDesc ? -fallback : fallback;
+    });
+
+    return items;
+  }, [filteredMembers, sortMode]);
+
   const isSearchActive = Boolean(String(query || '').trim()) || activeRole !== 'all';
   const effectiveTotalForPagination = isSearchActive
-    ? filteredMembers.length
-    : Math.max(totalCount, filteredMembers.length);
+    ? sortedMembers.length
+    : Math.max(totalCount, sortedMembers.length);
   const totalPages = Math.max(1, Math.ceil(effectiveTotalForPagination / MEMBERS_PER_PAGE));
 
   useEffect(() => {
@@ -311,67 +404,11 @@ const Directory = ({ onNavigate }) => {
 
   const paginatedMembers = useMemo(() => {
     const start = (currentPage - 1) * MEMBERS_PER_PAGE;
-    return filteredMembers.slice(start, start + MEMBERS_PER_PAGE);
-  }, [filteredMembers, currentPage]);
-
-  const ensurePageLoaded = async (pageNo) => {
-    const trustId = selectedTrustId || null;
-    const trustName = selectedTrustName || null;
-    if (!trustId && !trustName) return;
-    if (loadedPages.includes(pageNo)) return;
-    try {
-      setIsPageLoading(true);
-      const response = await getDirectoryMembers(trustId, trustName, { page: pageNo, limit: MEMBERS_PER_PAGE });
-      if (!response?.success) return;
-      const rows = Array.isArray(response?.data) ? response.data : [];
-      let nextMembers = [];
-      setMembers((prev) => {
-        nextMembers = mergeMembersById(prev, rows);
-        return nextMembers;
-      });
-      setTotalCount(Number(response?.totalCount || 0));
-      let nextLoaded = [];
-      setLoadedPages((prev) => {
-        nextLoaded = prev.includes(pageNo) ? prev : [...prev, pageNo];
-        return nextLoaded;
-      });
-      try {
-        localStorage.setItem(getDirectoryCacheKey(trustId), JSON.stringify({
-          ts: Date.now(),
-          members: nextMembers,
-          totalCount: Number(response?.totalCount || 0),
-          loadedPages: nextLoaded
-        }));
-      } catch {
-        // ignore cache write failure
-      }
-    } catch {
-      // ignore page fetch failures silently
-    } finally {
-      setIsPageLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    const onFocus = () => {
-      if (!selectedTrustId) return;
-      void ensurePageLoaded(1);
-    };
-    const onTrustVersionUpdated = (event) => {
-      const changedTrustId = String(event?.detail?.trustId || '').trim();
-      const selected = String(selectedTrustId || '').trim();
-      if (!changedTrustId || !selected || changedTrustId !== selected) return;
-      void ensurePageLoaded(1);
-    };
-    window.addEventListener('focus', onFocus);
-    window.addEventListener(TRUST_VERSION_UPDATED_EVENT, onTrustVersionUpdated);
-    return () => {
-      window.removeEventListener('focus', onFocus);
-      window.removeEventListener(TRUST_VERSION_UPDATED_EVENT, onTrustVersionUpdated);
-    };
-  }, [selectedTrustId, loadedPages]);
+    return sortedMembers.slice(start, start + MEMBERS_PER_PAGE);
+  }, [sortedMembers, currentPage]);
 
   const openMemberDetails = (item) => {
+    if (item?.Privacy === true) return;
     const resolvedPhotoUrl = resolveMemberPhotoUrl(item);
     const memberData = {
       'S. No.': item?.['S. No.'] || item?.id || 'N/A',
@@ -448,20 +485,73 @@ const Directory = ({ onNavigate }) => {
       )}
       <Sidebar isOpen={isMenuOpen} onClose={() => setIsMenuOpen(false)} onNavigate={onNavigate} currentPage="directory" />
 
-      <div className="px-4 pt-4">
-        <div className="rounded-2xl p-3 flex items-center gap-2" style={{ background: 'var(--advertisement-card-bg)', border: '1px solid var(--advertisement-card-border)' }}>
-          <Search className="h-4 w-4" style={{ color: 'var(--advertisement-subtitle)' }} />
+      {/* <div className="px-4 pt-4 grid grid-cols-1 gap-2 sm:grid-cols-[1fr_220px]"> */}
+      <div className="px-4 pt-4 flex items-center gap-2 w-full justify-between">
+        <div className="rounded-2xl p-3 flex items-center gap-2 w-full" style={{ background: applyOpacity(primaryColor, 0.08), border: '1px solid var(--advertisement-card-border)'  }}>
+          <Search className="h-4 w-4" style={{ color: 'var(--advertisement-card-bg)' }} />
           <input
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search by name, role, membership, mobile"
+            placeholder="Search by name, company, role, membership, mobile"
             className="w-full bg-transparent outline-none text-sm"
             style={{ color: 'var(--advertisement-description)' }}
           />
         </div>
+
+        <div ref={sortMenuRef} className="relative">
+          <button
+            type="button"
+            onClick={() => setIsSortMenuOpen((prev) => !prev)}
+            className="h-full w-full rounded-2xl p-3 flex items-center justify-center gap-2 transition-colors"
+            style={{ background: `color-mix(in srgb, var(--brand-navy-dark) 100%, transparent)`, border: '1px solid var(--advertisement-card-border)' }}
+            aria-haspopup="menu"
+            aria-expanded={isSortMenuOpen}
+            aria-label={`Sort members. Current sort: ${selectedSortLabel}`}
+            title={selectedSortLabel}
+          >
+            <ArrowUpDown className="h-4 w-4 shrink-0" style={{ color: 'var(--advertisement-description)' }} />
+          </button>
+
+          {isSortMenuOpen && (
+            <div
+              className="absolute right-0 top-full z-30 mt-2 w-56 overflow-hidden rounded-2xl border shadow-lg"
+              style={{
+                background: 'var(--surface-color)',
+                borderColor: 'var(--advertisement-card-border)',
+                boxShadow: '0 14px 40px rgba(0, 0, 0, 0.14)',
+              }}
+              role="menu"
+              aria-label="Sort members"
+            >
+              {DIRECTORY_SORT_OPTIONS.map((option) => {
+                const isActive = sortMode === option.value;
+                return (
+                  <button
+                    key={option.value}
+                    type="button"
+                    onClick={() => {
+                      setSortMode(option.value);
+                      setIsSortMenuOpen(false);
+                    }}
+                    className="w-full px-4 py-3 flex items-center justify-between text-left text-sm font-semibold transition-colors"
+                    style={{
+                      color: isActive ? theme.primary || 'var(--brand-red)' : theme.primary ,
+                      background: isActive ? applyOpacity(theme.primary, 0.08) : 'transparent',
+                    }}
+                    role="menuitem"
+                  >
+                    <span>{option.label}</span>
+                    {isActive ? <Check className="h-4 w-4 shrink-0" /> : null}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
       </div>
 
+      
       <div className="px-4 mt-4 flex gap-2 overflow-x-auto">
         {visibleRoleFilters.map((item) => {
           const isActive = activeRole === item.id;
@@ -473,16 +563,16 @@ const Directory = ({ onNavigate }) => {
               className="px-3 py-2 rounded-xl text-xs font-bold whitespace-nowrap"
               style={isActive
                 ? {
-                    background: `linear-gradient(135deg, ${theme.primary || 'var(--brand-red)'}, ${theme.secondary || 'var(--brand-navy)'})`,
-                    color: 'var(--surface-color)',
-                    border: '1px solid color-mix(in srgb, var(--brand-navy) 18%, transparent)',
-                    boxShadow: '0 4px 10px color-mix(in srgb, var(--brand-navy) 20%, transparent)'
-                  }
+                  background: `linear-gradient(135deg, ${theme.primary || 'var(--brand-red)'}, ${theme.secondary || 'var(--brand-navy)'})`,
+                  color: 'var(--surface-color)',
+                  border: '1px solid color-mix(in srgb, var(--brand-navy) 18%, transparent)',
+                  boxShadow: '0 4px 10px color-mix(in srgb, var(--brand-navy) 20%, transparent)'
+                }
                 : {
-                    background: 'var(--advertisement-card-bg)',
-                    color: 'var(--advertisement-description)',
-                    border: '1px solid var(--advertisement-card-border)'
-                  }}
+                  background: 'var(--advertisement-card-bg)',
+                  color: 'var(--advertisement-description)',
+                  border: '1px solid var(--advertisement-card-border)'
+                }}
             >
               {item.label}
             </button>
@@ -511,7 +601,8 @@ const Directory = ({ onNavigate }) => {
                 type="button"
                 key={item?.id || item?.reg_id || item?.['S. No.']}
                 onClick={() => openMemberDetails(item)}
-                className="w-full text-left rounded-2xl overflow-hidden"
+                disabled={item?.Privacy === true}
+                className="w-full text-left rounded-2xl overflow-hidden disabled:cursor-default"
                 style={{
                   background: 'var(--advertisement-card-bg)',
                   border: '1px solid var(--advertisement-card-border)',
@@ -557,7 +648,9 @@ const Directory = ({ onNavigate }) => {
                       {item?.Name || 'N/A'}
                     </h3>
 
-                    <div className="flex items-center gap-2 mt-1 flex-wrap">
+                    <div className="flex items-center gap-[0.25rem] mt-1 flex-wrap">
+
+
                       {item?.['Membership number'] ? (
                         <span
                           className="text-[10px] font-bold px-2 py-0.5 rounded-full"
@@ -571,10 +664,10 @@ const Directory = ({ onNavigate }) => {
                         </span>
                       ) : null}
 
-                      {item?.Mobile ? (
-                        <span className="inline-flex items-center gap-1 text-[11px]" style={{ color: 'var(--advertisement-description)' }}>
-                          <Phone className="h-3 w-3" />
-                          {item.Mobile}
+                      {item?.['Company Name'] ? (
+                        <span className="inline-flex items-center gap-[0.1rem] text-[11px]" style={{ color: 'var(--advertisement-description)' }}>
+                          <Building className="h-3 w-3" />
+                          {item['Company Name']}
                         </span>
                       ) : null}
                     </div>
@@ -582,26 +675,43 @@ const Directory = ({ onNavigate }) => {
                     {item?.Email ? (
                       <span className="inline-flex items-center gap-1 text-[10px] mt-0.5 truncate" style={{ color: 'var(--advertisement-subtitle)' }}>
                         <Mail className="h-3 w-3" />
-                        {item.Email}
+                        {item.Email !== null && item.Email !== undefined && item.Email !== 'null' ? item.Email.toLowerCase() : <i>No email provided</i>}
                       </span>
-                    ) : null}
+                    ) :<span className="inline-flex w-full items-center gap-1 text-[10px] mt-0.5 truncate" style={{ color: 'var(--advertisement-subtitle)' }}>
+                        <Mail className="h-3 w-" />
+                        <i>No email provided</i>
+                      </span>}
                   </div>
 
+
+                  {item?.Privacy === true ? (
+                    <span
+                      className="shrink-0 rounded-full px-2 py-1 text-[10px] font-semibold relative top-[-20px] "
+                      style={{
+                        background: applyOpacity(primaryColor, 0.28),
+                        color: secondaryColor,
+                        border: `1px solid ${applyOpacity(secondaryColor, 0.32)}`,
+                      }}
+                    >
+                      Private
+                    </span>
+                  ) : null}
+
                   {/* Arrow */}
-                  <span className="text-lg font-bold shrink-0" style={{ color: applyOpacity(theme.primary, 0.5) }}>›</span>
+                  {item?.Privacy !== true && <span className="text-lg font-bold shrink-0" style={{ color: applyOpacity(theme.primary, 0.5) }}>›</span>}
+
                 </div>
               </button>
             ))}
 
             <div className="mt-2 pt-2 flex items-center justify-between gap-2">
-              <button
+                  <button
                 type="button"
                 onClick={async () => {
                   const nextPage = Math.max(1, currentPage - 1);
-                  await ensurePageLoaded(nextPage);
                   setCurrentPage(nextPage);
                 }}
-                disabled={currentPage <= 1 || isPageLoading}
+                disabled={currentPage <= 1}
                 className="px-3 py-1.5 rounded-lg text-xs font-bold disabled:opacity-50 disabled:cursor-not-allowed"
                 style={{
                   background: applyOpacity(theme.secondary, 0.14),
@@ -613,16 +723,14 @@ const Directory = ({ onNavigate }) => {
               </button>
               <span className="text-xs font-semibold" style={{ color: 'var(--advertisement-subtitle)' }}>
                 Page {currentPage} of {totalPages}
-                {isPageLoading ? ' • Syncing...' : ''}
               </span>
               <button
                 type="button"
                 onClick={async () => {
                   const nextPage = Math.min(totalPages, currentPage + 1);
-                  await ensurePageLoaded(nextPage);
                   setCurrentPage(nextPage);
                 }}
-                disabled={currentPage >= totalPages || isPageLoading}
+                disabled={currentPage >= totalPages}
                 className="px-3 py-1.5 rounded-lg text-xs font-bold disabled:opacity-50 disabled:cursor-not-allowed"
                 style={{
                   background: applyOpacity(theme.primary, 0.16),

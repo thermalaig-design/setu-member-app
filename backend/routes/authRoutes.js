@@ -1,5 +1,5 @@
 import express from 'express';
-import { checkPhone, verifyOTPController, specialLogin } from '../controllers/authController.js';
+import { checkPhone, verifyOTPController, specialLogin, logSessionEvent } from '../controllers/authController.js';
 
 const router = express.Router();
 
@@ -11,5 +11,8 @@ router.post('/check-phone', checkPhone);
 
 // Verify OTP
 router.post('/verify-otp', verifyOTPController);
+
+// Store session audit events through the backend service role
+router.post('/session-event', logSessionEvent);
 
 export default router;

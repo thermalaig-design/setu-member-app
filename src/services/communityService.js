@@ -85,14 +85,6 @@ const isDateValidForToday = (row, todayYmd) => {
   return startOk && endOk;
 };
 
-const normalizeNoticeType = (value) => {
-  const raw = String(value || '').trim().toLowerCase();
-  if (!raw) return '';
-  if (raw === 'vip') return 'vip';
-  if (raw === 'gen' || raw === 'general') return 'gen';
-  return raw;
-};
-
 const isActiveLikeStatus = (value) => {
   const raw = String(value ?? '').trim().toLowerCase();
   return raw === 'active' || raw === '1' || raw === 'true' || raw === 'enabled' || raw === 'published';
@@ -178,29 +170,12 @@ export const checkVipNoticeEligibility = async ({ trustId = null, trustName = nu
 export const fetchNoticeboardPage = async ({
   trustId = null,
   trustName = null,
-  memberId = null,
-  vipEligible = null,
-  regMemberMatch = null,
   page = 1,
   pageSize = 10
 } = {}) => {
   try {
     const resolvedTrustId = await resolveTrustId(trustId, trustName);
     if (!resolvedTrustId) return { success: true, data: [], debug: { reason: 'No trust_id resolved' } };
-
-    const resolvedMemberId = memberId ? String(memberId).trim() : resolveCurrentMemberId();
-    let resolvedVipEligible = typeof vipEligible === 'boolean' ? vipEligible : false;
-    let resolvedRegMemberMatch = regMemberMatch || null;
-    if (typeof vipEligible !== 'boolean') {
-      const eligibility = await checkVipNoticeEligibility({
-        trustId: resolvedTrustId,
-        memberId: resolvedMemberId
-      });
-      resolvedVipEligible = Boolean(eligibility?.vipEligible);
-      resolvedRegMemberMatch = eligibility?.regMemberMatch || null;
-    }
-    const allowedTypes = resolvedVipEligible ? ['gen', 'vip'] : ['gen'];
-    const allowedTypeSet = new Set(allowedTypes);
 
     const today = todayIsoDate();
     const pageNo = Number(page) > 0 ? Number(page) : 1;
@@ -211,18 +186,14 @@ export const fetchNoticeboardPage = async ({
     const shouldVerboseDebug = String(import.meta.env.VITE_NOTICEBOARD_VERBOSE_DEBUG || '').toLowerCase() === 'true';
     const debug = {
       trustId: String(resolvedTrustId),
-      memberId: resolvedMemberId || null,
-      vipEligible: resolvedVipEligible,
-      regMemberMatch: resolvedRegMemberMatch,
       statusFilter: 'active',
-      typeFilter: allowedTypes.join(','),
+      typeFilter: 'all',
       today,
       page: pageNo,
       pageSize: limit,
       counts: {
         trustRows: null,
         activeRows: null,
-        genRows: null,
         beforeDateFilterRows: 0,
         afterDateFilterRows: 0
       },
@@ -241,19 +212,15 @@ export const fetchNoticeboardPage = async ({
     if (error) throw error;
 
     const rowsBeforeDate = Array.isArray(data) ? data : [];
-    const rowsAfterStatusAndType = rowsBeforeDate.filter((row) => {
-      const statusOk = isActiveLikeStatus(row?.status);
-      const typeOk = allowedTypeSet.has(normalizeNoticeType(row?.type));
-      return statusOk && typeOk;
-    });
-    debug.counts.beforeDateFilterRows = rowsAfterStatusAndType.length;
+    const rowsAfterStatus = rowsBeforeDate.filter((row) => isActiveLikeStatus(row?.status));
+    debug.counts.beforeDateFilterRows = rowsAfterStatus.length;
 
     // Client-side date filter removed — we trust DB's status='active' as source of truth.
     // Notices with expired end_date should be deactivated at DB level by admin.
-    const rowsAfterDate = rowsAfterStatusAndType.filter((row) => isDateValidForToday(row, today));
+    const rowsAfterDate = rowsAfterStatus.filter((row) => isDateValidForToday(row, today));
     debug.counts.afterDateFilterRows = rowsAfterDate.length;
-    const effectiveRows = rowsAfterDate.length > 0 ? rowsAfterDate : rowsAfterStatusAndType;
-    if (rowsAfterDate.length === 0 && rowsAfterStatusAndType.length > 0) {
+    const effectiveRows = rowsAfterDate.length > 0 ? rowsAfterDate : rowsAfterStatus;
+    if (rowsAfterDate.length === 0 && rowsAfterStatus.length > 0) {
       debug.dateFilterFallbackApplied = true;
     }
 
@@ -285,40 +252,15 @@ export const fetchNoticeboardPage = async ({
         .select('id', { count: 'exact', head: true })
         .eq('trust_id', resolvedTrustId)
         .eq('status', 'active');
-      const { count: genRowsCount } = await supabase
-        .from('noticeboard')
-        .select('id', { count: 'exact', head: true })
-        .eq('trust_id', resolvedTrustId)
-        .eq('status', 'active')
-        .eq('type', 'gen');
-      let vipRowsCount = null;
-      if (resolvedVipEligible) {
-        const { count } = await supabase
-          .from('noticeboard')
-          .select('id', { count: 'exact', head: true })
-          .eq('trust_id', resolvedTrustId)
-          .eq('status', 'active')
-          .eq('type', 'vip');
-        vipRowsCount = Number.isFinite(Number(count)) ? Number(count) : null;
-      }
       debug.counts.trustRows = Number.isFinite(Number(trustRowsCount)) ? Number(trustRowsCount) : null;
       debug.counts.activeRows = Number.isFinite(Number(activeRowsCount)) ? Number(activeRowsCount) : null;
-      debug.counts.genRows = Number.isFinite(Number(genRowsCount)) ? Number(genRowsCount) : null;
-      debug.counts.vipRows = vipRowsCount;
     }
 
     if (shouldDebug) {
       console.log('[Noticeboard][Debug] selected_trust_id=', debug.trustId);
-      console.log('[Noticeboard][Debug] logged_member_id=', debug.memberId);
-      console.log('[Noticeboard][Debug] vip_eligible=', debug.vipEligible);
-      console.log('[Noticeboard][Debug] reg_member_match=', debug.regMemberMatch ? debug.regMemberMatch.id : null);
       console.log('[Noticeboard][Debug] page=', pageNo, 'pageSize=', limit);
       console.log('[Noticeboard][Debug] trust_rows=', debug.counts.trustRows);
       console.log('[Noticeboard][Debug] active_rows=', debug.counts.activeRows);
-      console.log('[Noticeboard][Debug] gen_rows=', debug.counts.genRows);
-      if (Object.prototype.hasOwnProperty.call(debug.counts, 'vipRows')) {
-        console.log('[Noticeboard][Debug] vip_rows=', debug.counts.vipRows);
-      }
       console.log('[Noticeboard][Debug] rows_before_date_filter=', debug.counts.beforeDateFilterRows);
       console.log('[Noticeboard][Debug] rows_after_date_filter=', debug.counts.afterDateFilterRows);
       if (debug.dateFilterFallbackApplied) {
@@ -354,9 +296,6 @@ export const fetchNoticeboardById = async ({
   noticeId,
   trustId = null,
   trustName = null,
-  memberId = null,
-  vipEligible = null,
-  regMemberMatch = null
 } = {}) => {
   try {
     const normalizedNoticeId = String(noticeId || '').trim();
@@ -367,20 +306,6 @@ export const fetchNoticeboardById = async ({
     const resolvedTrustId = await resolveTrustId(trustId, trustName);
     if (!resolvedTrustId) return { success: true, data: null };
 
-    const resolvedMemberId = memberId ? String(memberId).trim() : resolveCurrentMemberId();
-    let resolvedVipEligible = typeof vipEligible === 'boolean' ? vipEligible : false;
-    let resolvedRegMemberMatch = regMemberMatch || null;
-    if (typeof vipEligible !== 'boolean') {
-      const eligibility = await checkVipNoticeEligibility({
-        trustId: resolvedTrustId,
-        memberId: resolvedMemberId
-      });
-      resolvedVipEligible = Boolean(eligibility?.vipEligible);
-      resolvedRegMemberMatch = eligibility?.regMemberMatch || null;
-    }
-    const allowedTypes = resolvedVipEligible ? ['gen', 'vip'] : ['gen'];
-    const allowedTypeSet = new Set(allowedTypes);
-
     const { data, error } = await supabase
       .from('noticeboard')
       .select('id, trust_id, type, name, description, attachments, start_date, end_date, status, created_at, updated_at')
@@ -390,17 +315,13 @@ export const fetchNoticeboardById = async ({
       .maybeSingle();
 
     if (error) throw error;
-    const typeOk = allowedTypeSet.has(normalizeNoticeType(data?.type));
     const statusOk = isActiveLikeStatus(data?.status);
-    if (!data || !statusOk || !typeOk || !isDateValidForToday(data, todayIsoDate())) {
+    if (!data || !statusOk || !isDateValidForToday(data, todayIsoDate())) {
       return {
         success: true,
         data: null,
         debug: {
-          trustId: String(resolvedTrustId),
-          memberId: resolvedMemberId || null,
-          vipEligible: resolvedVipEligible,
-          regMemberMatch: resolvedRegMemberMatch
+          trustId: String(resolvedTrustId)
         }
       };
     }
@@ -433,28 +354,12 @@ export const checkVipFacilityEligibility = async ({ trustId = null, trustName = 
 export const fetchFacilitiesPage = async ({
   trustId = null,
   trustName = null,
-  memberId = null,
-  vipEligible = null,
-  regMemberMatch = null,
   page = 1,
   pageSize = 10
 } = {}) => {
   try {
     const resolvedTrustId = await resolveTrustId(trustId, trustName);
     if (!resolvedTrustId) return { success: true, data: [], debug: { reason: 'No trust_id resolved' } };
-
-    const resolvedMemberId = memberId ? String(memberId).trim() : resolveCurrentMemberId();
-    let resolvedVipEligible = typeof vipEligible === 'boolean' ? vipEligible : false;
-    let resolvedRegMemberMatch = regMemberMatch || null;
-    if (typeof vipEligible !== 'boolean') {
-      const eligibility = await checkVipFacilityEligibility({
-        trustId: resolvedTrustId,
-        memberId: resolvedMemberId
-      });
-      resolvedVipEligible = Boolean(eligibility?.vipEligible);
-      resolvedRegMemberMatch = eligibility?.regMemberMatch || null;
-    }
-    const allowedTypes = resolvedVipEligible ? ['gen', 'vip'] : ['gen'];
 
     const pageNo = Number(page) > 0 ? Number(page) : 1;
     const limit = Number(pageSize) > 0 ? Number(pageSize) : 10;
@@ -465,17 +370,13 @@ export const fetchFacilitiesPage = async ({
 
     const debug = {
       trustId: String(resolvedTrustId),
-      memberId: resolvedMemberId || null,
-      vipEligible: resolvedVipEligible,
-      regMemberMatch: resolvedRegMemberMatch,
       statusFilter: 'active',
-      typeFilter: allowedTypes.join(','),
+      typeFilter: 'all',
       page: pageNo,
       pageSize: limit,
       counts: {
         trustRows: null,
-        activeRows: null,
-        genRows: null,
+        activeRows: null
       },
       finalFacilityIds: []
     };
@@ -485,7 +386,6 @@ export const fetchFacilitiesPage = async ({
       .select('id, trust_id, type, name, description, attachments, status, created_by, created_at, updated_at')
       .eq('trust_id', resolvedTrustId)
       .eq('status', 'active')
-      .in('type', allowedTypes)
       .order('created_at', { ascending: false })
       .order('updated_at', { ascending: false })
       .order('id', { ascending: true })
@@ -520,40 +420,15 @@ export const fetchFacilitiesPage = async ({
         .select('id', { count: 'exact', head: true })
         .eq('trust_id', resolvedTrustId)
         .eq('status', 'active');
-      const { count: genRowsCount } = await supabase
-        .from('facilities')
-        .select('id', { count: 'exact', head: true })
-        .eq('trust_id', resolvedTrustId)
-        .eq('status', 'active')
-        .eq('type', 'gen');
-      let vipRowsCount = null;
-      if (resolvedVipEligible) {
-        const { count } = await supabase
-          .from('facilities')
-          .select('id', { count: 'exact', head: true })
-          .eq('trust_id', resolvedTrustId)
-          .eq('status', 'active')
-          .eq('type', 'vip');
-        vipRowsCount = Number.isFinite(Number(count)) ? Number(count) : null;
-      }
       debug.counts.trustRows = Number.isFinite(Number(trustRowsCount)) ? Number(trustRowsCount) : null;
       debug.counts.activeRows = Number.isFinite(Number(activeRowsCount)) ? Number(activeRowsCount) : null;
-      debug.counts.genRows = Number.isFinite(Number(genRowsCount)) ? Number(genRowsCount) : null;
-      debug.counts.vipRows = vipRowsCount;
     }
 
     if (shouldDebug) {
       console.log('[Facilities][Debug] selected_trust_id=', debug.trustId);
-      console.log('[Facilities][Debug] logged_member_id=', debug.memberId);
-      console.log('[Facilities][Debug] vip_eligible=', debug.vipEligible);
-      console.log('[Facilities][Debug] reg_member_match=', debug.regMemberMatch ? debug.regMemberMatch.id : null);
       console.log('[Facilities][Debug] page=', pageNo, 'pageSize=', limit);
       console.log('[Facilities][Debug] trust_rows=', debug.counts.trustRows);
       console.log('[Facilities][Debug] active_rows=', debug.counts.activeRows);
-      console.log('[Facilities][Debug] gen_rows=', debug.counts.genRows);
-      if (Object.prototype.hasOwnProperty.call(debug.counts, 'vipRows')) {
-        console.log('[Facilities][Debug] vip_rows=', debug.counts.vipRows);
-      }
       console.log('[Facilities][Debug] final_facility_ids=', debug.finalFacilityIds);
       console.log('[Facilities][Debug] final_facility_types=', finalRows.map((item) => item.type));
     }
@@ -574,9 +449,6 @@ export const fetchFacilityById = async ({
   facilityId,
   trustId = null,
   trustName = null,
-  memberId = null,
-  vipEligible = null,
-  regMemberMatch = null
 } = {}) => {
   try {
     const normalizedFacilityId = String(facilityId || '').trim();
@@ -586,19 +458,6 @@ export const fetchFacilityById = async ({
 
     const resolvedTrustId = await resolveTrustId(trustId, trustName);
     if (!resolvedTrustId) return { success: true, data: null };
-
-    const resolvedMemberId = memberId ? String(memberId).trim() : resolveCurrentMemberId();
-    let resolvedVipEligible = typeof vipEligible === 'boolean' ? vipEligible : false;
-    let resolvedRegMemberMatch = regMemberMatch || null;
-    if (typeof vipEligible !== 'boolean') {
-      const eligibility = await checkVipFacilityEligibility({
-        trustId: resolvedTrustId,
-        memberId: resolvedMemberId
-      });
-      resolvedVipEligible = Boolean(eligibility?.vipEligible);
-      resolvedRegMemberMatch = eligibility?.regMemberMatch || null;
-    }
-    const allowedTypes = resolvedVipEligible ? ['gen', 'vip'] : ['gen'];
 
     const { data, error } = await supabase
       .from('facilities')
@@ -614,10 +473,7 @@ export const fetchFacilityById = async ({
         success: true,
         data: null,
         debug: {
-          trustId: String(resolvedTrustId),
-          memberId: resolvedMemberId || null,
-          vipEligible: resolvedVipEligible,
-          regMemberMatch: resolvedRegMemberMatch
+          trustId: String(resolvedTrustId)
         }
       };
     }

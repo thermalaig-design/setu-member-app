@@ -58,8 +58,6 @@ export const initPushNotifications = async () => {
 
     // Listen for push notifications arriving while the app is in the foreground
     const foregroundListener = await PushNotifications.addListener('pushNotificationReceived', (notification) => {
-      console.log('📬 Push notification received in foreground:', notification);
-      
       // Emit a custom event to notify Home.jsx (and other components) to refetch notifications
       const event = new CustomEvent('pushNotificationArrived', {
         detail: {
@@ -82,16 +80,12 @@ export const initPushNotifications = async () => {
         sessionStorage.setItem('openNotificationId', String(notificationId));
       }
       localStorage.setItem('openNotificationsFromPush', '1');
-      
-      // ✅ NEW: Trigger notification fetch when push is clicked
-      console.log('📬 Push notification clicked - triggering notification fetch');
       window.dispatchEvent(new CustomEvent('pushNotificationClicked'));
     });
 
     // ✅ NEW: Listen for app resume/focus
     // This ensures notifications are fetched when user opens the app after receiving a push
     const resumeListener = await App.addListener('appStateChange', (state) => {
-      console.log('📱 App state changed. isActive:', state.isActive);
       if (state.isActive) {
         // App is now in foreground - refetch notifications to sync with database
         window.dispatchEvent(new CustomEvent('appResumed'));

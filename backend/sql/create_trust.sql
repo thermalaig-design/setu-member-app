@@ -50,6 +50,11 @@ CREATE TABLE IF NOT EXISTS public.feature_flags (
   name text NULL,
   description text NULL,
   trust_name text NULL,
+  display_name text NULL,
+  tagline text NULL,
+  icon_url text NULL,
+  route text NULL,
+  quick_order integer NULL,
   CONSTRAINT feature_flags_pkey PRIMARY KEY (id),
   CONSTRAINT feature_flags_unique UNIQUE (features_id, trust_id, tier),
   CONSTRAINT feature_flags_features_id_fkey FOREIGN KEY (features_id) REFERENCES public.features (id) ON DELETE CASCADE,
@@ -73,6 +78,8 @@ VALUES
   ('feature_share_app', 'Share App', 'Controls share app action'),
   ('feature_profile', 'Profile', 'Controls profile route'),
   ('feature_developer_info', 'Developer Info', 'Controls developer details route'),
+  ('feature_add_community', 'Add Community', 'Controls add community sidebar item and route'),
+  ('feature_nomination_details', 'Nomination Details', 'Controls nomination details sidebar item and route'),
   ('feature_doctors', 'Doctors', 'Controls doctor directory tab'),
   ('feature_hospitals', 'Hospitals', 'Controls hospital directory tab'),
   ('feature_committee', 'Committee', 'Controls committee directory tab'),
@@ -98,3 +105,33 @@ WHERE NOT EXISTS (
     AND ff.trust_id = t.id
     AND ff.tier = 'general'
 );
+
+-- Nomination Details should exist for every trust but stay enabled only for Udaan.
+UPDATE public.feature_flags ff
+SET
+  is_enabled = CASE
+    WHEN t.name ILIKE '%udaan%' THEN true
+    ELSE false
+  END,
+  display_name = COALESCE(ff.display_name, 'Nomination Details'),
+  description = COALESCE(ff.description, 'Sidebar feature for nomination details'),
+  route = COALESCE(ff.route, 'nomination-details'),
+  updated_at = now()
+FROM public.features f
+JOIN public."Trust" t
+  ON t.id = ff.trust_id
+WHERE ff.features_id = f.id
+  AND f.name = 'feature_nomination_details'
+  AND ff.tier = 'general';
+
+UPDATE public.feature_flags ff
+SET
+  display_name = COALESCE(ff.display_name, 'Add Community'),
+  description = COALESCE(ff.description, 'Sidebar feature for add community'),
+  route = COALESCE(ff.route, 'add-community'),
+  quick_order = COALESCE(ff.quick_order, 45),
+  updated_at = now()
+FROM public.features f
+WHERE ff.features_id = f.id
+  AND f.name = 'feature_add_community'
+  AND ff.tier = 'general';

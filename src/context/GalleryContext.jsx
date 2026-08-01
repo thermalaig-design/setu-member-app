@@ -33,7 +33,7 @@ const resolveCacheKey = (trustId) => `${GALLERY_CACHE_KEY_PREFIX}:${normalizeTru
 
 const logGalleryTrust = (...args) => {
   if (!ENABLE_GALLERY_TRUST_DEBUG) return;
-  console.log('[Gallery][Trust]', ...args);
+  // console.log('[Gallery][Trust]', ...args);
 };
 
 const isFresh = (timestamp, ttlMs) => {

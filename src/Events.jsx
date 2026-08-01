@@ -1,6 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Calendar, CheckCircle2, ChevronRight, Clock3, FileText, Home as HomeIcon, MapPin, Menu, X, Zap } from 'lucide-react';
+import { Calendar, CheckCircle2, ChevronRight, Clock3, Download, Eye, FileText, Home as HomeIcon, Loader2, MapPin, Menu, X, Zap } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import * as pdfjsLib from 'pdfjs-dist/build/pdf.mjs';
+import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import Sidebar from './components/Sidebar';
 import { useAppTheme } from './context/ThemeContext';
 import { supabase } from './services/supabaseClient';
@@ -15,8 +17,11 @@ import {
 import { formatEventDate, formatTimeRange } from './services/eventsService';
 import { applyOpacity } from './utils/colorUtils';
 
+pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
+
 const EVENTS_SCROLL_KEY = 'events_scroll_y';
 const EVENTS_ACTIVE_TAB_KEY = 'events_active_tab';
+const LEGACY_ATTACHMENT_SEPARATOR = '||::||';
 
 const CATEGORY_META = {
   current: { label: 'Current', icon: Zap },
@@ -25,11 +30,43 @@ const CATEGORY_META = {
 };
 
 const isLikelyUrl = (value) => /^https?:\/\//i.test(String(value || '').trim());
+const isDataUrl = (value) => /^data:/i.test(String(value || '').trim());
+
+const sanitizeFileName = (value) => String(value || '')
+  .trim()
+  .replace(/[<>:"/\\|?*]/g, '_')
+  .replace(/\s+/g, ' ')
+  .replace(/\.+$/g, '')
+  .slice(0, 120) || 'attachment';
+
+const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
+
+const getTouchDistance = (touches) => {
+  if (!touches || touches.length < 2) return 0;
+  const [first, second] = touches;
+  const dx = Number(second?.clientX || 0) - Number(first?.clientX || 0);
+  const dy = Number(second?.clientY || 0) - Number(first?.clientY || 0);
+  return Math.hypot(dx, dy);
+};
 
 const getAttachmentUrl = (attachment) => {
-  if (typeof attachment === 'string') return attachment.trim();
+  if (typeof attachment === 'string') {
+    const value = attachment.trim();
+    if (!value) return '';
+    if (value.includes(LEGACY_ATTACHMENT_SEPARATOR)) {
+      const [, payload = ''] = value.split(LEGACY_ATTACHMENT_SEPARATOR);
+      return String(payload || '').trim();
+    }
+    return value;
+  }
   if (!attachment || typeof attachment !== 'object') return '';
-  return String(attachment.url || attachment.path || attachment.href || '').trim();
+  const value = String(attachment.url || attachment.path || attachment.href || '').trim();
+  if (!value) return '';
+  if (value.includes(LEGACY_ATTACHMENT_SEPARATOR)) {
+    const [, payload = ''] = value.split(LEGACY_ATTACHMENT_SEPARATOR);
+    return String(payload || '').trim();
+  }
+  return value;
 };
 
 const getAttachmentLabel = (attachment, idx) => {
@@ -40,6 +77,7 @@ const getAttachmentLabel = (attachment, idx) => {
 
   const url = getAttachmentUrl(attachment);
   if (!url) return `Attachment ${idx + 1}`;
+  if (isDataUrl(url)) return `Attachment ${idx + 1}`;
 
   try {
     const parsed = new URL(url);
@@ -51,10 +89,327 @@ const getAttachmentLabel = (attachment, idx) => {
 };
 
 const getAttachmentType = (url) => {
-  const clean = String(url || '').toLowerCase().split('?')[0].split('#')[0];
+  const value = String(url || '').toLowerCase();
+  const clean = value.split('?')[0].split('#')[0];
+  if (value.startsWith('data:image/')) return 'image';
+  if (value.startsWith('data:application/pdf')) return 'pdf';
   if (/\.(png|jpe?g|gif|webp|bmp|svg)$/.test(clean)) return 'image';
   if (/\.pdf$/.test(clean)) return 'pdf';
   return 'other';
+};
+
+const getFileExtensionFromUrl = (url) => {
+  const clean = String(url || '').split('?')[0].split('#')[0].trim();
+  const match = clean.match(/\.([a-z0-9]{2,5})$/i);
+  return match ? `.${match[1].toLowerCase()}` : '';
+};
+
+const getAttachmentDownloadName = (attachment, idx) => {
+  const label = sanitizeFileName(getAttachmentLabel(attachment, idx));
+  const url = getAttachmentUrl(attachment);
+  const type = getAttachmentType(url);
+  const hasExtension = /\.[a-z0-9]{1,5}$/i.test(label);
+  if (hasExtension) return label;
+
+  const extension = getFileExtensionFromUrl(url) || (type === 'pdf' ? '.pdf' : '');
+  return extension ? `${label}${extension}` : label;
+};
+
+const MIN_PDF_SCALE = 0.75;
+const MAX_PDF_SCALE = 2.25;
+const PDF_SCALE_STEP = 0.15;
+
+const buildPdfFallbackSrc = (url, scale) => {
+  const zoom = Math.round(clamp(scale, MIN_PDF_SCALE, MAX_PDF_SCALE) * 100);
+  const joiner = String(url || '').includes('#') ? '&' : '#';
+  return `${url}${joiner}toolbar=0&navpanes=0&view=FitH&zoom=${zoom}`;
+};
+
+const PdfPage = ({ pdfDocument, pageNumber, scale }) => {
+  const canvasRef = useRef(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    let renderTask = null;
+
+    const renderPage = async () => {
+      if (!pdfDocument || !canvasRef.current) return;
+
+      try {
+        const page = await pdfDocument.getPage(pageNumber);
+        if (cancelled || !canvasRef.current) return;
+
+        const canvas = canvasRef.current;
+        const context = canvas.getContext('2d', { alpha: false });
+        if (!context) return;
+
+        const outputScale = window.devicePixelRatio || 1;
+        const viewport = page.getViewport({ scale });
+        const renderViewport = page.getViewport({ scale: scale * outputScale });
+
+        canvas.width = Math.floor(renderViewport.width);
+        canvas.height = Math.floor(renderViewport.height);
+        canvas.style.width = `${Math.floor(viewport.width)}px`;
+        canvas.style.height = `${Math.floor(viewport.height)}px`;
+
+        renderTask = page.render({
+          canvasContext: context,
+          viewport: renderViewport
+        });
+        await renderTask.promise;
+      } catch (error) {
+        if (!cancelled) {
+          console.error('Error rendering PDF page:', error);
+        }
+      }
+    };
+
+    renderPage();
+
+    return () => {
+      cancelled = true;
+      if (renderTask) renderTask.cancel();
+    };
+  }, [pdfDocument, pageNumber, scale]);
+
+  return (
+    <canvas
+      ref={canvasRef}
+      className="mx-auto block max-w-full rounded-2xl shadow-lg"
+      style={{
+        background: 'var(--surface-color)',
+        boxShadow: '0 16px 40px rgba(15, 23, 42, 0.12)'
+      }}
+    />
+  );
+};
+
+const PdfPreviewModal = ({ attachment, theme, onClose, onDownload }) => {
+  const [pdfDocument, setPdfDocument] = useState(null);
+  const [pageCount, setPageCount] = useState(0);
+  const [loadingPdf, setLoadingPdf] = useState(true);
+  const [loadError, setLoadError] = useState('');
+  const [scale, setScale] = useState(1);
+  const pinchStartRef = useRef({ distance: 0, scale: 1 });
+  const scaleRef = useRef(1);
+
+  useEffect(() => {
+    scaleRef.current = scale;
+  }, [scale]);
+
+  useEffect(() => {
+    if (!attachment?.url) return undefined;
+
+    const scrollY = window.scrollY;
+    document.documentElement.style.overflow = 'hidden';
+    document.body.style.overflow = 'hidden';
+    document.body.style.position = 'fixed';
+    document.body.style.width = '100%';
+    document.body.style.top = `-${scrollY}px`;
+    document.body.style.touchAction = 'none';
+
+    const onKeyDown = (event) => {
+      if (event.key === 'Escape') onClose();
+    };
+
+    window.addEventListener('keydown', onKeyDown);
+
+    return () => {
+      document.documentElement.style.overflow = 'unset';
+      document.body.style.overflow = 'unset';
+      document.body.style.position = 'unset';
+      document.body.style.width = 'unset';
+      document.body.style.top = 'unset';
+      document.body.style.touchAction = 'auto';
+      window.removeEventListener('keydown', onKeyDown);
+      window.scrollTo(0, scrollY);
+    };
+  }, [attachment?.url, onClose]);
+
+  useEffect(() => {
+    if (!attachment?.url) return undefined;
+
+    let active = true;
+    const loadingTask = pdfjsLib.getDocument({ url: attachment.url });
+
+    loadingTask.promise
+      .then((doc) => {
+        if (!active) {
+          doc.destroy?.();
+          return;
+        }
+        setPdfDocument(doc);
+        setPageCount(doc.numPages || 0);
+        setLoadingPdf(false);
+      })
+      .catch((error) => {
+        if (!active) return;
+        console.error('Failed to load PDF preview:', error);
+        setLoadError(error?.message || 'Failed to load PDF preview');
+        setLoadingPdf(false);
+      });
+
+    return () => {
+      active = false;
+      loadingTask.destroy?.();
+    };
+  }, [attachment?.url]);
+
+  useEffect(() => () => {
+    pdfDocument?.destroy?.();
+  }, [pdfDocument]);
+
+  const adjustScale = (nextScale) => {
+    setScale((current) => {
+      const value = typeof nextScale === 'function' ? nextScale(current) : nextScale;
+      return clamp(value, MIN_PDF_SCALE, MAX_PDF_SCALE);
+    });
+  };
+
+  const handleWheel = (event) => {
+    event.preventDefault();
+    const delta = event.deltaY > 0 ? -PDF_SCALE_STEP : PDF_SCALE_STEP;
+    adjustScale((current) => current + delta);
+  };
+
+  const handleTouchStart = (event) => {
+    if (event.touches?.length !== 2) return;
+    pinchStartRef.current = {
+      distance: getTouchDistance(event.touches),
+      scale: scaleRef.current
+    };
+  };
+
+  const handleTouchMove = (event) => {
+    if (event.touches?.length !== 2 || !pinchStartRef.current.distance) return;
+    event.preventDefault();
+    const currentDistance = getTouchDistance(event.touches);
+    if (!currentDistance) return;
+    const nextScale = pinchStartRef.current.scale * (currentDistance / pinchStartRef.current.distance);
+    setScale(clamp(nextScale, MIN_PDF_SCALE, MAX_PDF_SCALE));
+  };
+
+  const handleTouchEnd = (event) => {
+    if ((event.touches?.length || 0) < 2) {
+      pinchStartRef.current = { distance: 0, scale: scaleRef.current };
+    }
+  };
+
+  const pdfSrc = loadError ? buildPdfFallbackSrc(attachment?.url, scale) : attachment?.url;
+
+  return (
+    <div className="fixed inset-0 z-[999] flex items-stretch justify-center px-0 py-0 backdrop-blur-[2px] sm:items-center sm:px-3 sm:py-4" style={{ background: 'color-mix(in srgb, var(--brand-navy-dark) 82%, transparent)' }} onClick={onClose}>
+      <div
+        className="flex h-full w-full max-w-6xl flex-col overflow-hidden rounded-none border shadow-2xl sm:h-auto sm:max-h-[94vh] sm:rounded-3xl"
+        style={{
+          background: 'var(--advertisement-card-bg)',
+          borderColor: 'var(--advertisement-card-border)',
+          boxShadow: '0 28px 80px rgba(2, 6, 23, 0.35)'
+        }}
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div
+          className="sticky top-0 z-10 flex flex-col gap-3 border-b px-3 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5"
+          style={{
+            background: 'color-mix(in srgb, var(--advertisement-card-bg) 90%, var(--app-accent-bg))',
+            borderColor: 'var(--advertisement-card-border)'
+          }}
+        >
+          <div className="min-w-0">
+            <p className="text-[10px] font-bold uppercase tracking-[0.18em]" style={{ color: theme.primary }}>
+              PDF Preview
+            </p>
+            <h3 className="truncate text-sm font-bold sm:text-base" style={{ color: 'var(--advertisement-title)' }}>
+              {attachment?.label || 'Document'}
+            </h3>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => onDownload(attachment)}
+              className="inline-flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold transition-all active:scale-[0.98]"
+              style={{ background: 'var(--app-button-bg)', color: 'var(--app-button-text)' }}
+              aria-label={`Download ${attachment?.label}`}
+            >
+              <Download className="h-4 w-4" />
+              Download
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              className="inline-flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold transition-all active:scale-[0.98]"
+              style={{ background: 'color-mix(in srgb, var(--surface-color) 90%, var(--app-accent-bg))', color: 'var(--advertisement-title)' }}
+              aria-label="Close preview"
+            >
+              <X className="h-4 w-4" />
+              Close
+            </button>
+          </div>
+        </div>
+
+        <div
+          className="max-h-[82vh] overflow-y-auto overscroll-contain px-3 py-4 sm:px-5"
+          onWheel={handleWheel}
+          onTouchStart={handleTouchStart}
+          onTouchMove={handleTouchMove}
+          onTouchEnd={handleTouchEnd}
+          onTouchCancel={handleTouchEnd}
+          style={{
+            touchAction: 'pan-y',
+            background: 'color-mix(in srgb, var(--surface-color) 88%, var(--app-accent-bg))'
+          }}
+        >
+          {loadingPdf && !loadError && (
+            <div
+              className="flex min-h-[42vh] items-center justify-center rounded-2xl border border-dashed"
+              style={{
+                background: 'color-mix(in srgb, var(--surface-color) 86%, var(--app-accent-bg))',
+                borderColor: 'var(--advertisement-card-border)'
+              }}
+            >
+              <div className="flex items-center gap-3 text-sm font-semibold" style={{ color: 'var(--advertisement-subtitle)' }}>
+                <Loader2 className="h-5 w-5 animate-spin" />
+                Loading PDF
+              </div>
+            </div>
+          )}
+
+          {!loadingPdf && loadError && (
+            <div className="overflow-hidden rounded-2xl border" style={{ background: 'var(--surface-color)', borderColor: 'var(--advertisement-card-border)' }}>
+              <iframe
+                title={attachment?.label || 'PDF preview'}
+                src={pdfSrc}
+                className="h-[70vh] w-full border-0"
+              />
+            </div>
+          )}
+
+          {!loadingPdf && !loadError && pdfDocument && (
+            <div className="space-y-5">
+              {Array.from({ length: pageCount }, (_, index) => (
+                <div key={`${attachment?.id || 'pdf'}_page_${index + 1}`} className="rounded-2xl bg-white p-3 shadow-sm">
+                  <div className="mb-3 flex items-center justify-between gap-3 px-1">
+                    <span className="text-xs font-semibold uppercase tracking-[0.18em]" style={{ color: theme.primary }}>
+                      Page {index + 1}
+                    </span>
+                  </div>
+                  <PdfPage pdfDocument={pdfDocument} pageNumber={index + 1} scale={scale} />
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const AttachmentPreviewModal = (props) => {
+  if (props?.attachment?.type === 'pdf') {
+    return <PdfPreviewModal key={props?.attachment?.url || props?.attachment?.id || 'pdf'} {...props} />;
+  }
+  return null;
 };
 
 const Events = ({ onNavigate }) => {
@@ -74,6 +429,7 @@ const Events = ({ onNavigate }) => {
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState('');
   const [selectedTrustId, setSelectedTrustId] = useState(() => localStorage.getItem('selected_trust_id') || '');
+  const [previewAttachment, setPreviewAttachment] = useState(null);
 
   const activeTabRef = useRef(activeTab);
   activeTabRef.current = activeTab;
@@ -287,6 +643,45 @@ const Events = ({ onNavigate }) => {
     });
   };
 
+  const openAttachmentPreview = (attachment) => {
+    if (!attachment?.url) return;
+    setPreviewAttachment(attachment);
+  };
+
+  const closeAttachmentPreview = () => {
+    setPreviewAttachment(null);
+  };
+
+  const downloadAttachment = async (attachment) => {
+    const url = attachment?.url;
+    if (!url) return;
+
+    const fileName = attachment?.downloadName || getAttachmentDownloadName(attachment, attachment?.index || 0);
+
+    try {
+      const response = await fetch(url, { credentials: 'omit' });
+      if (!response.ok) throw new Error('Download failed');
+      const blob = await response.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = blobUrl;
+      link.download = fileName;
+      link.rel = 'noreferrer';
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(blobUrl), 1500);
+    } catch {
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = fileName;
+      link.rel = 'noreferrer';
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+    }
+  };
+
   const openEventDetail = (eventId) => {
     sessionStorage.setItem(EVENTS_SCROLL_KEY, String(window.scrollY || 0));
     sessionStorage.setItem(EVENTS_ACTIVE_TAB_KEY, activeTab);
@@ -437,24 +832,36 @@ const Events = ({ onNavigate }) => {
             const normalizedAttachments = rawAttachments
               .map((attachment, idx) => {
                 const url = getAttachmentUrl(attachment);
-                if (!isLikelyUrl(url)) return null;
+                if (!url || (!isLikelyUrl(url) && !isDataUrl(url))) return null;
                 return {
                   id: `${event.id}_att_${idx}`,
                   url,
                   label: getAttachmentLabel(attachment, idx),
+                  downloadName: getAttachmentDownloadName(attachment, idx),
                   type: getAttachmentType(url),
+                  index: idx,
                 };
               })
               .filter(Boolean);
             const attachCount = normalizedAttachments.length;
             const firstAttachment = attachCount > 0 ? normalizedAttachments[0] : null;
-            const extraAttachmentCount = attachCount > 1 ? attachCount - 1 : 0;
+            const actionAttachments = normalizedAttachments.filter((attachment) => attachment.type !== 'image');
 
             return (
-              <button
+              <div
                 key={event.id}
                 onClick={() => openEventDetail(event.id)}
-                className="w-full text-left rounded-2xl overflow-hidden transition-all active:scale-[0.995] shadow-sm"
+                role="button"
+                tabIndex={0}
+                aria-label={`Open event details for ${event.title}`}
+                onKeyDown={(e) => {
+                  if (e.target !== e.currentTarget) return;
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    openEventDetail(event.id);
+                  }
+                }}
+                className="w-full text-left rounded-2xl overflow-hidden transition-all active:scale-[0.995] shadow-sm cursor-pointer"
                 style={{
                   background: 'var(--advertisement-card-bg)',
                   border: '1px solid var(--advertisement-card-border)',
@@ -488,7 +895,7 @@ const Events = ({ onNavigate }) => {
                       }
                     >
                       <TabIcon style={{ width: 10, height: 10 }} />
-                      {isPast ? 'Completed' : isOngoing ? 'Ongoing' : event.type || 'Upcoming'}
+                      {isPast ? 'Completed' : isOngoing ? 'Ongoing' : 'Upcoming'}
                     </span>
                   </div>
                 ) : null}
@@ -515,7 +922,7 @@ const Events = ({ onNavigate }) => {
                         }
                       >
                         <TabIcon style={{ width: 10, height: 10 }} />
-                        {isPast ? 'Completed' : isOngoing ? 'Ongoing' : event.type || 'Upcoming'}
+                        {isPast ? 'Completed' : isOngoing ? 'Ongoing' : 'Upcoming'}
                       </span>
                     )}
                     {dateLabel && (
@@ -568,8 +975,94 @@ const Events = ({ onNavigate }) => {
                       Tap to view details <ChevronRight style={{ width: 13, height: 13 }} />
                     </div>
                   </div>
+
+                  {actionAttachments.length > 0 && (
+                    <div
+                      className="mt-3 pt-3 space-y-3"
+                      style={{ borderTop: '1px solid color-mix(in srgb, var(--brand-navy) 8%, transparent)' }}
+                    >
+                      <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest" style={{ color: theme.primary }}>
+                        <FileText className="h-3.5 w-3.5" />
+                        Attachments ({actionAttachments.length})
+                      </div>
+
+                      <div className="space-y-3">
+                        {actionAttachments.map((attachment) => (
+                          <div
+                            key={attachment.id}
+                            className="rounded-xl border overflow-hidden"
+                            style={{
+                              background: 'var(--advertisement-card-bg)',
+                              borderColor: 'var(--surface-color)'
+                            }}
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <div className="p-4 sm:p-4">
+                              <div className="flex items-start gap-3">
+                                <div
+                                  className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl"
+                                  style={{ background: 'color-mix(in srgb, var(--app-button-bg) 16%, var(--surface-color))' }}
+                                >
+                                  <FileText className="h-5 w-5" style={{ color: 'var(--app-button-icon)' }} />
+                                </div>
+                                <div className="min-w-0 flex-1">
+                                  <p className="truncate text-sm font-bold" style={{ color: 'var(--advertisement-title)' }}>
+                                    {attachment.label}
+                                  </p>
+                                  <p className="mt-1 text-xs font-medium" style={{ color: 'var(--advertisement-subtitle)' }}>
+                                    {attachment.type === 'pdf' ? 'PDF document' : 'Document file'}
+                                  </p>
+                                </div>
+                              </div>
+
+                              <div className="mt-4 flex flex-wrap gap-2">
+                                {attachment.type === 'pdf' && (
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      openAttachmentPreview(attachment);
+                                    }}
+                                    className="inline-flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold transition-all active:scale-[0.98]"
+                                    style={{ background: 'var(--app-button-bg)', color: 'var(--app-button-text)' }}
+                                    aria-label={`Open ${attachment.label}`}
+                                  >
+                                    <Eye className="h-4 w-4" />
+                                    Open
+                                  </button>
+                                )}
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    downloadAttachment(attachment);
+                                  }}
+                                  className="inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-xs font-semibold transition-all active:scale-[0.98]"
+                                  style={attachment.type === 'pdf'
+                                    ? {
+                                        background: 'var(--surface-color)',
+                                        color: 'var(--advertisement-title)',
+                                        borderColor: 'var(--advertisement-card-border)'
+                                      }
+                                    : {
+                                        background: 'var(--app-button-bg)',
+                                        color: 'var(--app-button-text)',
+                                        borderColor: 'transparent'
+                                      }}
+                                  aria-label={`Download ${attachment.label}`}
+                                >
+                                  <Download className="h-4 w-4" />
+                                  Download
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
-              </button>
+              </div>
             );
           })}
 
@@ -593,6 +1086,15 @@ const Events = ({ onNavigate }) => {
             </div>
           )}
         </div>
+      )}
+
+      {previewAttachment && (
+        <AttachmentPreviewModal
+          attachment={previewAttachment}
+          theme={theme}
+          onClose={closeAttachmentPreview}
+          onDownload={downloadAttachment}
+        />
       )}
     </div>
   );

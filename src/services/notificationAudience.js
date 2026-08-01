@@ -55,17 +55,21 @@ const getMemberTypeVariants = (rawType) => {
 export const getCurrentNotificationContext = () => {
   const userRaw = localStorage.getItem('user');
   const user = userRaw ? JSON.parse(userRaw) : null;
-  const userId = user
-    ? user.Mobile ||
-      user.mobile ||
-      user.phone ||
-      user['Membership number'] ||
-      user.membership_number ||
-      user.user_identifier ||
-      user.id ||
-      user.Name ||
-      user.name
-    : null;
+
+  const idFields = [
+    ['Mobile', user?.Mobile],
+    ['mobile', user?.mobile],
+    ['phone', user?.phone],
+    ['Membership number', user?.['Membership number']],
+    ['membership_number', user?.membership_number],
+    ['user_identifier', user?.user_identifier],
+    ['id', user?.id],
+    ['Name', user?.Name],
+    ['name', user?.name],
+  ];
+  const matchedField = idFields.find(([, value]) => Boolean(value));
+  const userId = matchedField ? matchedField[1] : null;
+
   const userIdVariants = getIdentityVariants(
     user?.Mobile,
     user?.mobile,

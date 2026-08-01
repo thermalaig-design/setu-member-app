@@ -6,6 +6,7 @@ import { fetchDirectoryData } from './services/directoryService';
 import { fetchMemberTrustMemberships, fetchTrustById } from './services/trustService';
 import { logUserSessionEvent } from './services/sessionAuditService';
 import { persistUserSession } from './utils/storageUtils';
+import { setLoginTermsPromptPending } from './utils/legalContent';
 
 const TRUST_ID = import.meta.env.VITE_DEFAULT_TRUST_ID || '';
 const LOGIN_TRUST_CACHE_KEY = 'cached_base_trust_info';
@@ -212,6 +213,7 @@ function OTPVerification() {
 
     try { sessionStorage.removeItem('trust_selected_in_session'); } catch { /* ignore */ }
     try { sessionStorage.removeItem(OTP_FLOW_KEY); } catch { /* ignore */ }
+    setLoginTermsPromptPending();
 
     navigate('/', { replace: true });
     return true;

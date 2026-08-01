@@ -1,4 +1,5 @@
 import { supabase } from '../config/supabase.js';
+import { isDateValidForToday, isFresh, isRowActive } from '../../src/services/sponsorRules.js';
 
 const CACHE_TTL_MS = 120 * 1000;
 const DEFAULT_CAROUSEL_LIMIT = 6;
@@ -31,45 +32,13 @@ const getTodayLocalYmd = () => {
   return formatter.format(new Date());
 };
 
-const toYmdOnly = (value) => {
-  if (value === null || value === undefined) return null;
-  const raw = String(value).trim();
-  if (!raw) return null;
-  const ymdMatch = raw.match(/^(\d{4}-\d{2}-\d{2})/);
-  if (ymdMatch) return ymdMatch[1];
-  const date = new Date(raw);
-  if (Number.isNaN(date.getTime())) return null;
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
-};
-
-const isDateValidForToday = (row, todayYmd) => {
-  const startYmd = toYmdOnly(row?.start_date);
-  const endYmd = toYmdOnly(row?.end_date);
-  const startOk = Boolean(startYmd) && startYmd <= todayYmd;
-  const endOk = !endYmd || endYmd >= todayYmd;
-  return startOk && endOk;
-};
-
-const isRowActive = (row) => {
-  const value = row?.is_active;
-  if (value === undefined || value === null) return true;
-  if (typeof value === 'boolean') return value;
-  if (typeof value === 'number') return value === 1;
-  const normalized = String(value).trim().toLowerCase();
-  if (!normalized) return true;
-  return !['false', '0', 'no', 'inactive'].includes(normalized);
-};
-
 const makeCacheKey = ({ trustId, today, view, page, limit, offset, all }) =>
   `${trustId || 'none'}|${today || 'no-date'}|${view}|${page}|${limit}|${offset}|${all ? 'all' : 'paged'}`;
 
 const readCache = (key) => {
   const entry = sponsorCache.get(key);
   if (!entry) return null;
-  if (Date.now() - entry.ts > CACHE_TTL_MS) {
+  if (!isFresh(entry.ts, CACHE_TTL_MS)) {
     sponsorCache.delete(key);
     return null;
   }
@@ -180,7 +149,7 @@ const buildSponsorPayload = async ({ trustId, today, view, page, limit, offset, 
 
     sponsorsById = (Array.isArray(sponsorRows) ? sponsorRows : []).reduce((acc, sponsor) => {
       const sid = sanitizeId(sponsor?.id);
-      if (sid && isRowActive(sponsor)) acc[sid] = sponsor;
+      if (sid) acc[sid] = sponsor;
       return acc;
     }, {});
   }
@@ -258,6 +227,7 @@ export const getSponsors = async (req, res) => {
 
     const view = String(rawView || 'carousel').toLowerCase() === 'list' ? 'list' : 'carousel';
     const all = String(allRaw || '').toLowerCase() === 'true';
+    const force = String(req.query.force || '').toLowerCase() === 'true';
     const pageNo = toPositiveInt(page, 1);
     const pageLimit = toPositiveInt(limit, view === 'carousel' ? DEFAULT_CAROUSEL_LIMIT : DEFAULT_LIST_LIMIT);
     const offsetNo = Number.isFinite(Number(offset)) ? Math.max(0, Math.floor(Number(offset))) : null;
@@ -273,17 +243,27 @@ export const getSponsors = async (req, res) => {
       all
     });
 
-    const result = await getOrCompute(cacheKey, async () =>
-      buildSponsorPayload({
-        trustId,
-        today,
-        view,
-        page: pageNo,
-        limit: pageLimit,
-        offset: offsetNo,
-        all
-      })
-    );
+    const result = force
+      ? await buildSponsorPayload({
+          trustId,
+          today,
+          view,
+          page: pageNo,
+          limit: pageLimit,
+          offset: offsetNo,
+          all
+        })
+      : await getOrCompute(cacheKey, async () =>
+          buildSponsorPayload({
+            trustId,
+            today,
+            view,
+            page: pageNo,
+            limit: pageLimit,
+            offset: offsetNo,
+            all
+          })
+        );
 
     return res.status(200).json({
       success: true,
@@ -351,13 +331,6 @@ export const getSponsorById = async (req, res) => {
     if (error) throw error;
 
     if (!data) {
-      return res.status(404).json({
-        success: false,
-        message: 'Sponsor not found'
-      });
-    }
-
-    if (!isRowActive(data)) {
       return res.status(404).json({
         success: false,
         message: 'Sponsor not found'

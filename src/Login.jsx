@@ -322,7 +322,7 @@ const styles = {
     transition: 'border-color 0.15s',
   },
   inputRowFocus: {
-    borderColor: '#d4af37',
+    border: '1px solid #d4af37',
     background: '#242424',
   },
   codeBox: {

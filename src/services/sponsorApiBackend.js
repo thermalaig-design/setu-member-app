@@ -3,6 +3,7 @@ import {
   getSponsors as getSponsorsDirect
 } from './api';
 import { supabase } from './supabaseClient.js';
+import { isDateValidForToday, isRowActive, toYmdOnly } from './sponsorRules.js';
 
 const inFlight = new Map();
 
@@ -30,38 +31,6 @@ const shouldFallbackToDirectFetch = (error) => {
   const status = Number(error?.response?.status || 0);
   if ([500, 502, 503, 504].includes(status)) return true;
   return !error?.response;
-};
-
-const toYmdOnly = (value) => {
-  if (value === null || value === undefined) return null;
-  const raw = String(value).trim();
-  if (!raw) return null;
-  const ymdMatch = raw.match(/^(\d{4}-\d{2}-\d{2})/);
-  if (ymdMatch) return ymdMatch[1];
-  const date = new Date(raw);
-  if (Number.isNaN(date.getTime())) return null;
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
-};
-
-const isDateValidForToday = (row, todayYmd) => {
-  const startYmd = toYmdOnly(row?.start_date);
-  const endYmd = toYmdOnly(row?.end_date);
-  const startOk = Boolean(startYmd) && startYmd <= todayYmd;
-  const endOk = !endYmd || endYmd >= todayYmd;
-  return startOk && endOk;
-};
-
-const isRowActive = (row) => {
-  const value = row?.is_active;
-  if (value === undefined || value === null) return true;
-  if (typeof value === 'boolean') return value;
-  if (typeof value === 'number') return value === 1;
-  const normalized = String(value).trim().toLowerCase();
-  if (!normalized) return true;
-  return !['false', '0', 'no', 'inactive'].includes(normalized);
 };
 
 const getSponsorByIdDirect = async (id, trustId = null) => {
@@ -114,7 +83,7 @@ const getSponsorByIdDirect = async (id, trustId = null) => {
 export const getSponsors = async (
   trustId = null,
   trustName = null,
-  { page = 1, limit = null, offset = null, view = 'carousel', all = false } = {}
+  { page = 1, limit = null, offset = null, view = 'carousel', all = false, force = false } = {}
 ) => {
   const normalizedTrustId = normalizeTrustId(trustId);
   const normalizedTrustName = String(trustName || '').trim() || null;
@@ -123,6 +92,7 @@ export const getSponsors = async (
   const offsetNo = Number.isFinite(Number(offset)) ? Math.max(0, Math.floor(Number(offset))) : null;
   const normalizedView = String(view || 'carousel').toLowerCase() === 'list' ? 'list' : 'carousel';
   const normalizedAll = Boolean(all);
+  const normalizedForce = Boolean(force);
 
   const requestKey = [
     'sponsors',
@@ -132,7 +102,8 @@ export const getSponsors = async (
     pageNo,
     limitNo === null ? 'auto' : limitNo,
     offsetNo === null ? 'auto' : offsetNo,
-    normalizedAll ? 'all' : 'paged'
+    normalizedAll ? 'all' : 'paged',
+    normalizedForce ? 'force' : 'cache'
   ].join('|');
 
   return runDedupe(requestKey, async () => {
@@ -142,6 +113,7 @@ export const getSponsors = async (
     if (limitNo !== null) params.limit = limitNo;
     if (offsetNo !== null) params.offset = offsetNo;
     if (normalizedAll) params.all = 'true';
+    if (normalizedForce) params.force = 'true';
 
     try {
       const response = await api.get('/sponsors/active', { params });

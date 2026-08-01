@@ -2,9 +2,10 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   ArrowLeft, Users, Plus, X, CheckCircle, Menu, Home as HomeIcon,
-  AlertCircle, Building2, Hash, Tag, FileText, Loader2, Save
+  AlertCircle, Building2, Hash, Tag, FileText, Loader2, Save, ChevronRight, BadgeCheck
 } from 'lucide-react';
 import Sidebar from './components/Sidebar';
+import TrustIdCard from './TrustIdCard';
 import { useAppTheme } from './context/ThemeContext';
 import { applyOpacity } from './utils/colorUtils';
 import { getNavbarThemeStyles, getThemeToken } from './utils/themeUtils';
@@ -14,6 +15,65 @@ import { getNavbarThemeStyles, getThemeToken } from './utils/themeUtils';
 const getSupabase = async () => {
   const { supabase } = await import('./services/supabaseClient.js');
   return supabase;
+};
+
+const getMobileVariants = (value) => {
+  const digits = String(value || '').replace(/\D/g, '');
+  if (!digits) return [];
+
+  const variants = new Set([digits]);
+  if (digits.length >= 10) variants.add(digits.slice(-10));
+  if (!digits.startsWith('91') && digits.length === 10) {
+    variants.add(`91${digits}`);
+    variants.add(`+91${digits}`);
+  }
+  variants.add(`+${digits}`);
+  variants.add(`0${digits.slice(-10)}`);
+  return [...variants].filter(Boolean);
+};
+
+const resolveOtherMembershipMemberId = async (parsedUser = {}) => {
+  const supabase = await getSupabase();
+
+  const directCandidates = [
+    parsedUser?.members_id,
+    parsedUser?.member_id,
+    parsedUser?.id,
+  ]
+    .map(normalizeText)
+    .filter(Boolean);
+
+  for (const candidate of directCandidates) {
+    const { data, error } = await supabase
+      .from('Members')
+      .select('members_id')
+      .eq('members_id', candidate)
+      .limit(1)
+      .maybeSingle();
+
+    if (!error && data?.members_id) {
+      return normalizeText(data.members_id);
+    }
+  }
+
+  const mobileCandidates = getMobileVariants(
+    parsedUser?.Mobile || parsedUser?.mobile || parsedUser?.phone || ''
+  );
+
+  for (const mobile of mobileCandidates) {
+    const { data, error } = await supabase
+      .from('Members')
+      .select('members_id')
+      .eq('Mobile', mobile)
+      .limit(1)
+      .maybeSingle();
+
+    if (!error && data?.members_id) {
+      return normalizeText(data.members_id);
+    }
+  }
+
+  return '';
 };
 
 // Fetch existing other_memberships for a member
@@ -103,6 +163,14 @@ const normalizeText = (value) => String(value || '').trim();
 
 const normalizeId = (value) => normalizeText(value).toLowerCase();
 
+const pickFirstText = (...values) => {
+  for (const value of values) {
+    const text = normalizeText(value);
+    if (text) return text;
+  }
+  return '';
+};
+
 const getStoredUser = () => {
   try {
     return JSON.parse(localStorage.getItem('user') || '{}');
@@ -111,8 +179,66 @@ const getStoredUser = () => {
   }
 };
 
+const getMemberProfileFields = (parsedUser = {}) => {
+  const bloodGroup = pickFirstText(
+    parsedUser?.blood_group,
+    parsedUser?.bloodGroup,
+    parsedUser?.['Blood Group']
+  );
+  const addressHome = pickFirstText(
+    parsedUser?.address_home,
+    parsedUser?.['Address Home'],
+    parsedUser?.home_address
+  );
+  const addressOffice = pickFirstText(
+    parsedUser?.address_office,
+    parsedUser?.['Address Office'],
+    parsedUser?.office_address
+  );
+  const address = pickFirstText(
+    parsedUser?.address,
+    parsedUser?.member_address,
+    addressHome,
+    addressOffice
+  );
+
+  return {
+    blood_group: bloodGroup || null,
+    address: address || null,
+    address_home: addressHome || null,
+    address_office: addressOffice || null,
+  };
+};
+
+const enrichTrustCardData = (link = {}, parsedUser = getStoredUser()) => {
+  const cardData = { ...(link && typeof link === 'object' ? link : {}) };
+  const profileFields = getMemberProfileFields(parsedUser);
+
+  if (!normalizeText(cardData.blood_group) && profileFields.blood_group) {
+    cardData.blood_group = profileFields.blood_group;
+  }
+  if (!normalizeText(cardData.address) && profileFields.address) {
+    cardData.address = profileFields.address;
+  }
+  if (!normalizeText(cardData.address_home) && profileFields.address_home) {
+    cardData.address_home = profileFields.address_home;
+  }
+  if (!normalizeText(cardData.address_office) && profileFields.address_office) {
+    cardData.address_office = profileFields.address_office;
+  }
+  if (!normalizeText(cardData.joined_date) && normalizeText(parsedUser?.joined_date)) {
+    cardData.joined_date = parsedUser.joined_date;
+  }
+  if (!normalizeText(cardData.valid_till) && normalizeText(parsedUser?.valid_till)) {
+    cardData.valid_till = parsedUser.valid_till;
+  }
+
+  return cardData;
+};
+
 const TRUST_LINKS_CACHE_KEY_PREFIX = 'other_memberships_trust_links_v1_';
 const TRUST_LINKS_LAST_CACHE_KEY = 'other_memberships_trust_links_v1_last';
+const TRUST_ID_CARD_CACHE_KEY = 'trust_id_card_payload_v1';
 
 const getTrustLinksCacheKey = (memberId) => `${TRUST_LINKS_CACHE_KEY_PREFIX}${normalizeText(memberId || 'anonymous')}`;
 
@@ -145,11 +271,27 @@ const writeTrustLinksCache = (memberId, links) => {
 const buildTrustLinksFromUserPayload = (parsedUser = {}) => {
   const selectedTrustId = normalizeText(localStorage.getItem('selected_trust_id'));
   const selectedTrustName = normalizeText(localStorage.getItem('selected_trust_name'));
+  const memberName = normalizeText(
+    parsedUser?.Name
+    || parsedUser?.name
+    || parsedUser?.full_name
+  );
+  const memberPhone = normalizeText(
+    parsedUser?.Mobile
+    || parsedUser?.mobile
+    || parsedUser?.phone
+    || parsedUser?.Phone
+  );
+  const memberPhotoUrl = normalizeText(
+    parsedUser?.profile_photo_url
+    || parsedUser?.profilePhotoUrl
+  );
   const selectedTrustMembershipNo = normalizeText(
     parsedUser?.['Membership number']
     || parsedUser?.membership_number
     || parsedUser?.membershipNumber
   );
+  const memberProfileFields = getMemberProfileFields(parsedUser);
 
   const hospitalMemberships = Array.isArray(parsedUser?.hospital_memberships)
     ? parsedUser.hospital_memberships
@@ -176,6 +318,12 @@ const buildTrustLinksFromUserPayload = (parsedUser = {}) => {
       remark2: null,
       is_active: hm.is_active !== false,
       role: hm.role || null,
+      joined_date: hm.joined_date || hm.created_at || null,
+      valid_till: hm.valid_till || hm.expiry_date || hm.expires_at || null,
+      ...memberProfileFields,
+      member_name: memberName || null,
+      member_phone: memberPhone || null,
+      member_photo_url: memberPhotoUrl || null,
       source: 'reg_members',
       is_vip: true,
       is_current_trust: isCurrentTrust,
@@ -199,6 +347,12 @@ const buildTrustLinksFromUserPayload = (parsedUser = {}) => {
       remark2: null,
       is_active: true,
       role: null,
+      joined_date: parsedUser?.joined_date || parsedUser?.created_at || null,
+      valid_till: parsedUser?.valid_till || parsedUser?.expiry_date || parsedUser?.expires_at || null,
+      ...memberProfileFields,
+      member_name: memberName || null,
+      member_phone: memberPhone || null,
+      member_photo_url: memberPhotoUrl || null,
       source: 'reg_members',
       is_vip: true,
       is_current_trust: true,
@@ -253,10 +407,8 @@ const OtherMemberships = ({ onNavigate }) => {
   const [trustLinks, setTrustLinks] = useState(initialTrustLinks); // from reg_members-backed user payload
   const [otherMems, setOtherMems] = useState([]);        // from other_memberships table
   const [loading, setLoading] = useState(initialTrustLinks.length === 0);
-  const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState('');
   const [memberName, setMemberName] = useState('');
-  const [memberPhone, setMemberPhone] = useState('');
 
   // Add-form state
   const [showForm, setShowForm] = useState(false);
@@ -265,6 +417,8 @@ const OtherMemberships = ({ onNavigate }) => {
   const [submitError, setSubmitError] = useState('');
   const [submitSuccess, setSubmitSuccess] = useState('');
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [trustCardModalData, setTrustCardModalData] = useState(null);
+  const [resolvedMemberId, setResolvedMemberId] = useState('');
 
   // Delete state
   const [deletingId, setDeletingId] = useState(null);
@@ -276,15 +430,19 @@ const OtherMemberships = ({ onNavigate }) => {
   const loadData = useCallback(async (opts = {}) => {
     const { silent = false } = opts;
     if (!silent) setLoading(true);
-    if (silent) setIsRefreshing(true);
     setError('');
     try {
       const parsedUser = getStoredUser();
-      const id = parsedUser?.members_id || parsedUser?.id;
+      const resolvedId = await resolveOtherMembershipMemberId(parsedUser);
+      const id = resolvedId || normalizeText(parsedUser?.members_id);
+      if (!id) {
+        setError('Member ID not found. Please re-login.');
+        setLoading(false);
+        return;
+      }
+      setResolvedMemberId(id);
       const name = parsedUser?.Name || parsedUser?.name || parsedUser?.full_name || '';
-      const phone = parsedUser?.Mobile || parsedUser?.mobile || parsedUser?.phone || parsedUser?.Phone || '';
       setMemberName(name);
-      setMemberPhone(phone);
 
       const merged = buildTrustLinksFromUserPayload(parsedUser);
 
@@ -292,27 +450,22 @@ const OtherMemberships = ({ onNavigate }) => {
       writeTrustLinksCache(id || 'anonymous', merged);
 
       // ── other_memberships table ──
-      if (id) {
-        try {
-          const otherMemsData = await fetchOtherMemberships(id);
-          setOtherMems((prev) => {
-            const next = otherMemsData || [];
-            return areMembershipCollectionsEqual(prev, next) ? prev : next;
-          });
-        } catch (e) {
-          console.warn('other_memberships fetch failed:', e);
-        }
+      try {
+        const otherMemsData = await fetchOtherMemberships(id);
+        setOtherMems((prev) => {
+          const next = otherMemsData || [];
+          return areMembershipCollectionsEqual(prev, next) ? prev : next;
+        });
+      } catch (e) {
+        console.warn('other_memberships fetch failed:', e);
       }
-
-      if (merged.length === 0 && !id) setError('Member ID not found. Please re-login.');
     } catch (err) {
       console.error('OtherMemberships load error:', err);
       setError('Something went wrong. Please try again.');
     } finally {
       if (!silent) setLoading(false);
-      setIsRefreshing(false);
     }
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, []);
 
   // Clear any temporary global scroll-lock styles left by previous screens.
   useEffect(() => {
@@ -341,6 +494,28 @@ const OtherMemberships = ({ onNavigate }) => {
     }
     return () => Object.assign(document.body.style, { overflow: '', position: '', width: '', top: '' });
   }, [isMenuOpen]);
+
+  useEffect(() => {
+    if (!trustCardModalData) return undefined;
+
+    const y = window.scrollY;
+    Object.assign(document.body.style, { overflow: 'hidden', position: 'fixed', width: '100%', top: `-${y}px` });
+
+    const handleKeyDown = (event) => {
+      if (event.key === 'Escape') {
+        setTrustCardModalData(null);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      const restoredY = parseInt(document.body.style.top || '0', 10) * -1;
+      Object.assign(document.body.style, { overflow: '', position: '', width: '', top: '' });
+      window.scrollTo(0, Number.isFinite(restoredY) ? restoredY : 0);
+    };
+  }, [trustCardModalData]);
 
   useEffect(() => {
     if (!isMenuOpen) return undefined;
@@ -374,11 +549,11 @@ const OtherMemberships = ({ onNavigate }) => {
 
     setSubmitting(true);
     try {
-      const id = user?.members_id || user?.id;
+      const id = normalizeText(resolvedMemberId) || await resolveOtherMembershipMemberId(user);
       const payload = {
         member_id: id || null,
         member_name: memberName || null,
-        member_phone: memberPhone || null,
+        member_phone: null,
         trust_id: null,
         organisation_name: form.organisation_name.trim() || null,
         membership_no: form.membership_no.trim(),
@@ -413,6 +588,17 @@ const OtherMemberships = ({ onNavigate }) => {
     }
   };
 
+  const openTrustIdCard = (link) => {
+    const cardData = enrichTrustCardData(link);
+    try {
+      sessionStorage.setItem(TRUST_ID_CARD_CACHE_KEY, JSON.stringify(cardData));
+    } catch {
+      // Ignore storage failures and continue with the modal.
+    }
+    setIsMenuOpen(false);
+    setTrustCardModalData(cardData);
+  };
+
   // ── render helpers ──
   const TrustAvatar = ({ trust, size = 44 }) => {
     const name = (typeof trust === 'string' ? trust : trust?.name) || 'T';
@@ -429,20 +615,51 @@ const OtherMemberships = ({ onNavigate }) => {
     );
   };
 
-  const MembershipCard = ({ m, index, showGoldenMembershipBadge = false }) => {
+  const MembershipCard = ({ m, showGoldenMembershipBadge = false, clickable = false, onClick = null }) => {
     const trustName = m.Trust?.name || m.organisation_name || '—';
     const isVip = m.source === 'reg_members' || m.is_vip;
     const showDelete = !isVip;
     const membershipLabel = 'Membership No.';
     const membershipNoText = normalizeText(m.membership_no) || '-';
     const membershipTypeText = normalizeText(m.membership_type || m.role).toUpperCase();
+    const showSetuVerifiedBadge = showGoldenMembershipBadge && (m.source === 'reg_members' || m.is_vip !== false);
     const shouldShowMembershipRow = !showGoldenMembershipBadge;
     const shouldShowOrganisationRow = Boolean(m.organisation_name && m.organisation_name !== trustName);
     const shouldShowRemarkRow = Boolean(m.remark);
     const showDetailsPanel = shouldShowMembershipRow || shouldShowOrganisationRow || shouldShowRemarkRow;
+    const handleKeyDown = (event) => {
+      if (!clickable) return;
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        onClick?.();
+      }
+    };
 
     return (
-      <div key={m.id} style={{ background: colors.card, borderRadius: '24px', border: `1.5px solid ${colors.border}`, boxShadow: `0 14px 34px ${applyOpacity(colors.secondary, 0.1)}`, overflow: 'hidden' }}>
+      <div
+        key={m.id}
+        role={clickable ? 'button' : undefined}
+        tabIndex={clickable ? 0 : undefined}
+        onClick={clickable ? onClick : undefined}
+        onKeyDown={handleKeyDown}
+        style={{
+          background: colors.card,
+          borderRadius: '24px',
+          border: `1.5px solid ${colors.border}`,
+          boxShadow: `0 14px 34px ${applyOpacity(colors.secondary, 0.1)}`,
+          overflow: 'hidden',
+          cursor: clickable ? 'pointer' : 'default',
+          transition: 'transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease',
+        }}
+        onMouseEnter={(event) => {
+          if (!clickable) return;
+          event.currentTarget.style.transform = 'translateY(-1px)';
+        }}
+        onMouseLeave={(event) => {
+          if (!clickable) return;
+          event.currentTarget.style.transform = 'translateY(0)';
+        }}
+      >
         <div style={{ height: '3px', background: isVip ? colors.vipBg : `linear-gradient(90deg, ${colors.primary}, ${colors.accent})` }} />
         <div style={{ padding: '16px 16px 14px' }}>
           {/* Header row */}
@@ -452,8 +669,12 @@ const OtherMemberships = ({ onNavigate }) => {
               <h3 style={{ fontSize: '15px', fontWeight: 800, color: 'var(--heading-color)', margin: '0 0 5px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 {trustName}
               </h3>
-              {showGoldenMembershipBadge && (
+              {showSetuVerifiedBadge && (
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '7px', marginTop: '2px' }}>
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '10px', fontWeight: 800, color: '#fff', background: `linear-gradient(135deg, ${colors.primary} 0%, ${colors.secondary} 100%)`, border: `1px solid ${applyOpacity(colors.primary, 0.4)}`, padding: '3px 10px 3px 8px', borderRadius: '999px', letterSpacing: '0.06em', boxShadow: `0 2px 6px ${applyOpacity(colors.primary, 0.35)}` }}>
+                    <BadgeCheck size={11} strokeWidth={2.5} />
+                    Setu verified
+                  </span>
                   <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', fontSize: '10px', fontWeight: 800, color: '#FFF8E1', background: 'linear-gradient(135deg, #6E5300 0%, #B8860B 45%, #D4AF37 100%)', border: '1px solid #E2C66C', padding: '3px 10px', borderRadius: '999px', letterSpacing: '0.08em' }}>
                     {membershipNoText}
                   </span>
@@ -465,6 +686,18 @@ const OtherMemberships = ({ onNavigate }) => {
                 </div>
               )}
             </div>
+            {clickable ? (
+              <div
+                className="flex h-8 w-8 items-center justify-center rounded-xl"
+                style={{
+                  background: 'color-mix(in srgb, var(--surface-color) 82%, var(--app-accent-bg))',
+                  color: colors.primary,
+                  flexShrink: 0,
+                }}
+              >
+                <ChevronRight className="h-4 w-4" />
+              </div>
+            ) : null}
             {/* Delete button */}
             {showDelete && (
               <button
@@ -722,7 +955,14 @@ const OtherMemberships = ({ onNavigate }) => {
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                   {trustLinks.map((link, index) => (
-                    <MembershipCard key={link.id || index} m={link} index={index} showGoldenMembershipBadge />
+                    <MembershipCard
+                      key={link.id || index}
+                      m={link}
+                      index={index}
+                      showGoldenMembershipBadge
+                      clickable
+                      onClick={() => openTrustIdCard(link)}
+                    />
                   ))}
                 </div>
               </div>
@@ -762,6 +1002,83 @@ const OtherMemberships = ({ onNavigate }) => {
             )}
           </>
         )}
+
+      {trustCardModalData && (
+        <div
+          data-sidebar-overlay="true"
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 1200,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '16px',
+            // background: applyOpacity(colors.secondary, 0.78),
+            backdropFilter: 'blur(10px)',
+            WebkitBackdropFilter: 'blur(10px)',
+          }}
+          onClick={() => setTrustCardModalData(null)}
+        >
+                        <button
+                type="button"
+                onClick={() => setTrustCardModalData(null)}
+                className="absolute right-2 top-2 rounded-full"
+                style={{
+                  width: 33,
+                  height: 36,
+                  border: 'none',
+                  background: 'color-mix(in srgb, var(--surface-color) 82%, var(--app-accent-bg))',
+                  color: colors.primary,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  cursor: 'pointer',
+                }}
+                aria-label="Close trust card"
+              >
+                <X size={16} />
+              </button>
+          <div
+            onClick={(event) => event.stopPropagation()}
+            style={{
+              width: '100%',
+              maxWidth: '680px',
+              maxHeight: '92vh',
+              overflow: 'hidden',
+              borderRadius: '28px',
+              // border: `1px solid ${applyOpacity(colors.primary, 0.18)}`,
+              // background: 'var(--surface-color)',
+              // boxShadow: `0 24px 60px color-mix(in srgb, var(--brand-navy-dark) 96%, transparent)`,
+            }}
+          >
+            {/* <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: '12px',
+                padding: '14px 16px',
+                // borderBottom: `1px solid ${applyOpacity(colors.secondary, 0.08)}`,
+                // background: 'color-mix(in srgb, var(--surface-color) 88%, var(--app-accent-bg))',
+              }}
+            >
+              <div>
+                 <p style={{ margin: 0, fontSize: '11px', fontWeight: 800, letterSpacing: '0.18em', textTransform: 'uppercase', color: colors.primary }}>
+                  Trust ID Card
+                </p>
+                <p style={{ margin: '4px 0 0', fontSize: '12px', color: 'var(--advertisement-subtitle)' }}>
+                  Tap outside or press Esc to close
+                </p> 
+              </div>
+
+            </div> */}
+            <div style={{ maxHeight: 'calc(92vh - 66px)', overflow: 'auto' }}>
+              <TrustIdCard embedded cardData={trustCardModalData} onNavigate={onNavigate} />
+            </div>
+          </div>
+        </div>
+      )}
       </div>
 
       <style>{`
@@ -780,4 +1097,3 @@ const OtherMemberships = ({ onNavigate }) => {
 };
 
 export default OtherMemberships;
-

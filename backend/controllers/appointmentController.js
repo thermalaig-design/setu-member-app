@@ -1,4 +1,5 @@
 import { supabase } from '../config/supabase.js';
+import { createCompatibleNotification } from '../services/notificationCompatibilityService.js';
 
 // Helper: Insert in-app notification
 const sendInAppNotification = async ({ user_id, title, message, type = 'appointment_update' }) => {
@@ -18,17 +19,14 @@ const sendInAppNotification = async ({ user_id, title, message, type = 'appointm
       created_at: new Date().toISOString(),
     };
 
-    const { data, error } = await supabase
-      .from('notifications')
-      .insert([notificationData])
-      .select();
+    const compatibilityResult = await createCompatibleNotification(notificationData);
 
-    if (error) {
-      console.error('Notification insert failed:', error.message);
-      return { success: false, error: error.message, details: error.details };
+    if (!compatibilityResult.success) {
+      console.error('Notification insert failed:', compatibilityResult.legacyError);
+      return { success: false, error: compatibilityResult.legacyError };
     }
 
-    return { success: true, data };
+    return { success: true, data: compatibilityResult.legacyNotification };
   } catch (err) {
     console.error('Exception in sendInAppNotification:', err.message);
     return { success: false, error: err.message, exception: true };

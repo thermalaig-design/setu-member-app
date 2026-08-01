@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import {
   AlertCircle,
   ArrowLeft,
@@ -51,6 +52,8 @@ const toFormState = (member = {}) => ({
 
 const MyFamily = ({ onNavigate }) => {
   const theme = useAppTheme();
+  const location = useLocation();
+  const navigate = useNavigate();
   const navbarTheme = getNavbarThemeStyles(theme);
   const navbarTextColor = navbarTheme?.textColor || 'var(--navbar-text)';
   const mainContainerRef = useRef(null);
@@ -65,6 +68,7 @@ const MyFamily = ({ onNavigate }) => {
   const [screen, setScreen] = useState('list');
   const [expandedMemberId, setExpandedMemberId] = useState(null);
   const [formState, setFormState] = useState(createDraftMember());
+  const returnToRoute = location.state?.returnTo || '';
 
   useEffect(() => {
     if (isMenuOpen) {
@@ -182,6 +186,11 @@ const MyFamily = ({ onNavigate }) => {
         open: true,
         text: isCreate ? 'Family member added successfully.' : 'Family member updated successfully.'
       });
+      if (returnToRoute) {
+        setTimeout(() => {
+          navigate(returnToRoute, { replace: true });
+        }, 700);
+      }
     } catch (error) {
       setMessage({ type: 'error', text: error?.message || 'Failed to save family member.' });
     } finally {

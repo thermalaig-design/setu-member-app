@@ -1,8 +1,8 @@
-import { supabase } from './supabaseClient';
-
 const EVENT_TYPES = new Set(['login', 'logout', 'autologout']);
 const LOGIN_METHODS = new Set(['otp', 'secret_code']);
 const LAST_LOGIN_METHOD_KEY = 'last_login_method';
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
+const AUTH_API_URL = import.meta.env.VITE_AUTH_API_URL || (API_BASE_URL ? `${String(API_BASE_URL).replace(/\/$/, '')}/auth` : '');
 
 const normalize = (value) => String(value || '').trim();
 const canUseStorage = () => typeof window !== 'undefined' && typeof window.localStorage !== 'undefined';
@@ -28,6 +28,28 @@ const writeStoredLoginMethod = (loginMethod) => {
   } catch {
     // ignore storage issues
   }
+};
+
+const postAuthJson = async (endpoint, payload) => {
+  const base = String(AUTH_API_URL || '').trim().replace(/\/$/, '');
+  if (!base) {
+    throw new Error('Missing VITE_AUTH_API_URL');
+  }
+
+  const url = `${base}${endpoint}`;
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload || {}),
+    keepalive: true
+  });
+
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || data?.success === false) {
+    throw new Error(data?.message || 'Session event request failed');
+  }
+
+  return data;
 };
 
 const getStorageTrustId = () => {
@@ -93,17 +115,13 @@ const buildPayload = (user = {}, actionType = 'login', extra = {}) => {
 export const logUserSessionEvent = async ({ user, actionType, extra = {} }) => {
   try {
     const payload = buildPayload(user, actionType, extra);
-    const { error } = await supabase.from('member_session').insert(payload);
-    if (error) {
-      console.warn('[SessionAudit] insert failed:', error.message || error);
-      return { success: false, error };
-    }
+    await postAuthJson('/session-event', payload);
     if (payload.action_type === 'login' && payload.login_method) {
       writeStoredLoginMethod(payload.login_method);
     }
     return { success: true };
   } catch (error) {
-    console.warn('[SessionAudit] unexpected error:', error?.message || error);
+    console.warn('[SessionAudit] request failed:', error?.message || error);
     return { success: false, error };
   }
 };

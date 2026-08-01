@@ -11,6 +11,8 @@ const FAST2SMS_API_KEY = process.env.FAST2SMS_API_KEY;
 const OTP_SERVICE_PREFERENCE = process.env.OTP_SERVICE_PREFERENCE || 'fast2sms'; // 'fast2sms' or 'msg91'
 const OTP_EXPIRY_MINUTES = parseInt(process.env.OTP_EXPIRY_MINUTES) || 5;
 const NODE_ENV = process.env.NODE_ENV || 'production';
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const isUuid = (value) => UUID_RE.test(String(value || '').trim());
 
 // In-memory OTP storage (for production, use Redis or database)
 const otpStore = new Map();
@@ -258,7 +260,11 @@ export const checkPhoneExists = async (phoneNumber) => {
     // (1) Check in new Members table
     let memberData = [];
     let memberError = null;
+    let memberSearchCondition = '';
     if (numericMobileCandidates.length > 0) {
+      memberSearchCondition = numericMobileCandidates
+        .flatMap((candidate) => [`Mobile.eq.${candidate}`, `contact.eq.${candidate}`])
+        .join(',');
       const memberQuery = await supabase
         .from('Members')
         .select(`
@@ -273,7 +279,7 @@ export const checkPhoneExists = async (phoneNumber) => {
           "Email",
           members_id
         `)
-        .in('Mobile', numericMobileCandidates)
+        .or(memberSearchCondition)
         .limit(1);
       memberData = memberQuery.data || [];
       memberError = memberQuery.error || null;
@@ -282,10 +288,53 @@ export const checkPhoneExists = async (phoneNumber) => {
     if (memberError) {
       console.error('âŒ Error querying Members:', memberError);
     }
-    
+
+    if ((!memberData || memberData.length === 0) && numericMobileCandidates.length > 0 && !memberError) {
+      const primaryMobile = numericMobileCandidates[0].slice(-10);
+      const memberSelectColumns = `
+          "S.No.",
+          "Name",
+          "Address Home",
+          "Company Name",
+          "Address Office",
+          "Resident Landline",
+          "Office Landline",
+          "Mobile",
+          "Email",
+          members_id
+        `;
+
+      const { data: insertedMember, error: insertError } = await supabase
+        .from('Members')
+        .insert({ Mobile: primaryMobile, contact: primaryMobile })
+        .select(memberSelectColumns)
+        .maybeSingle();
+
+      if (insertError) {
+        if (insertError.code === '23505') {
+          console.warn('Duplicate mobile on insert, refetching existing member');
+          const { data: existingMembers, error: refetchError } = await supabase
+            .from('Members')
+            .select(memberSelectColumns)
+            .or(memberSearchCondition)
+            .order('"S.No."', { ascending: false })
+            .limit(1);
+
+          if (!refetchError && existingMembers && existingMembers.length > 0) {
+            memberData = existingMembers;
+          }
+        } else {
+          console.error('Failed to create guest member during phone auth:', insertError);
+        }
+      } else if (insertedMember) {
+        memberData = [insertedMember];
+      }
+    }
+
     if (memberData && memberData.length > 0) {
       console.log('âœ… Phone found in Members');
       const member = memberData[0];
+      const memberUuid = isUuid(member.members_id) ? member.members_id : null;
       
       const mergedUser = {
         'S. No.': member['S.No.'],
@@ -298,16 +347,16 @@ export const checkPhoneExists = async (phoneNumber) => {
         'Office Landline': member['Office Landline'],
         'Mobile': member['Mobile'],
         'Email': member['Email'],
-        'type': null,                      // Will be populated from reg_members
+        'type': 'Guest',                   // Will be populated from reg_members
         id: member['S.No.'],
         name: member['Name'],
         mobile: member['Mobile'],
-        members_id: member.members_id,
+        members_id: memberUuid,
         membership_number: null
       };
 
       // â”€â”€ (2) Fetch trust memberships from reg_members â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-      if (member.members_id) {
+      if (memberUuid) {
         const { data: regMemberships, error: membershipError } = await supabase
           .from('reg_members')
           .select(`
@@ -324,7 +373,7 @@ export const checkPhoneExists = async (phoneNumber) => {
               remark
             )
           `)
-          .eq('members_id', member.members_id);
+          .eq('members_id', memberUuid);
 
         if (membershipError) {
           console.warn('Could not fetch reg_member memberships:', membershipError);
@@ -452,6 +501,10 @@ export const initializePhoneAuth = async (phoneNumber) => {
       phoneCheck = await checkPhoneExists(phoneNumber);
     } catch (lookupError) {
       console.warn('Phone lookup skipped:', lookupError?.message || lookupError);
+    }
+
+    if (!phoneCheck?.user) {
+      throw new Error('Unable to register number. Please try again.');
     }
     
     // Format phone number for MSG91

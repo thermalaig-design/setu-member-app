@@ -35,8 +35,32 @@ const getMembershipSortMeta = (member) => {
   return { hasMembership: true, numericPart, textPart: text.toLowerCase() };
 };
 
+const getPrioritySortMeta = (member) => {
+  const rawPriority = String(member?.priority ?? '').trim();
+  if (!rawPriority) return { hasPriority: false, numericPart: MAX_ORDER_VALUE };
+
+  const numericPart = Number(rawPriority);
+  if (!Number.isFinite(numericPart)) {
+    return { hasPriority: false, numericPart: MAX_ORDER_VALUE };
+  }
+
+  return { hasPriority: true, numericPart };
+};
+
 const sortMembersByMembershipNumber = (members = []) => {
   return [...members].sort((a, b) => {
+    const priorityA = getPrioritySortMeta(a);
+    const priorityB = getPrioritySortMeta(b);
+
+    if (priorityA.hasPriority || priorityB.hasPriority) {
+      if (priorityA.hasPriority !== priorityB.hasPriority) {
+        return priorityA.hasPriority ? -1 : 1;
+      }
+      if (priorityA.numericPart !== priorityB.numericPart) {
+        return priorityA.numericPart - priorityB.numericPart;
+      }
+    }
+
     const metaA = getMembershipSortMeta(a);
     const metaB = getMembershipSortMeta(b);
 

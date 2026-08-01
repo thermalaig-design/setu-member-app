@@ -24,6 +24,10 @@ const FEATURE_KEY_ALIASES = {
   nomination_details: 'feature_nomination_details',
   'nomination-details': 'feature_nomination_details',
   feature_nomination_details: 'feature_nomination_details',
+  addcommunity: 'feature_add_community',
+  add_community: 'feature_add_community',
+  'add-community': 'feature_add_community',
+  feature_add_community: 'feature_add_community',
 };
 
 export const normalizeFeatureKey = (...values) => {

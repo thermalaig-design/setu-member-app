@@ -2,7 +2,9 @@
 import { Bell, ChevronRight, Home as HomeIcon, Menu, X, Check, Calendar, User, Stethoscope, Clock, MapPin, Building2, FileText } from 'lucide-react';
 import { getUserNotifications, markNotificationAsRead, markAllNotificationsAsRead, deleteNotification } from './services/api';
 import { supabase } from './services/supabaseClient';
+import { readNotificationCache, writeNotificationCache } from './services/notificationCache';
 import { getCurrentNotificationContext, matchesNotificationForContext } from './services/notificationAudience';
+import { tryNavigateNotificationRoute } from './services/notificationRedirectService';
 import Sidebar from './components/Sidebar';
 import { useAppTheme } from './context/ThemeContext';
 
@@ -23,6 +25,21 @@ const dedupeNotificationsByContent = (notifications) => {
     seen.add(key);
     return true;
   });
+};
+
+const upsertNotificationById = (notifications, incomingNotification) => {
+  const nextNotifications = [...(notifications || [])];
+  const existingIndex = nextNotifications.findIndex((notification) => notification.id === incomingNotification.id);
+
+  if (existingIndex >= 0) {
+    nextNotifications[existingIndex] = {
+      ...nextNotifications[existingIndex],
+      ...incomingNotification,
+    };
+    return nextNotifications;
+  }
+
+  return dedupeNotificationsByContent([incomingNotification, ...nextNotifications]);
 };
 
 const Notifications = ({ onNavigate }) => {
@@ -87,28 +104,46 @@ const Notifications = ({ onNavigate }) => {
 
   // Load notifications on component mount and subscribe to realtime
   useEffect(() => {
-    fetchNotifications();
-    subscribeToNotifications();
+    const trustKey = String(localStorage.getItem('selected_trust_id') || '').trim();
+    const cachedNotifications = readNotificationCache(trustKey);
+    if (cachedNotifications) {
+      setNotifications(cachedNotifications.notifications || []);
+      setLoading(false);
+    }
+
+    const syncNotifications = (options = {}) => {
+      fetchNotifications(options);
+
+      if (channelRef.current) {
+        supabase.removeChannel(channelRef.current);
+        channelRef.current = null;
+      }
+      subscribeToNotifications();
+    };
 
     // âœ… NEW: Add event listeners for notification updates
     const handlePushNotificationArrived = () => {
-      console.log('ðŸ“¬ Push notification arrived - Notifications page will refetch');
-      fetchNotifications();
+      syncNotifications({ showLoader: false });
     };
 
     const handlePushNotificationClicked = () => {
-      console.log('ðŸ”” Push notification clicked - Notifications page refetching');
-      fetchNotifications();
+      syncNotifications({ showLoader: false });
     };
 
     const handleAppResumed = () => {
-      console.log('ðŸ“± App resumed - Notifications page refetching');
-      fetchNotifications();
+      syncNotifications({ showLoader: false });
+    };
+
+    const handleTrustChanged = () => {
+      syncNotifications({ showLoader: false });
     };
 
     window.addEventListener('pushNotificationArrived', handlePushNotificationArrived);
     window.addEventListener('pushNotificationClicked', handlePushNotificationClicked);
     window.addEventListener('appResumed', handleAppResumed);
+    window.addEventListener('trust-changed', handleTrustChanged);
+
+    syncNotifications({ showLoader: !cachedNotifications });
 
     return () => {
       if (channelRef.current) {
@@ -118,6 +153,7 @@ const Notifications = ({ onNavigate }) => {
       window.removeEventListener('pushNotificationArrived', handlePushNotificationArrived);
       window.removeEventListener('pushNotificationClicked', handlePushNotificationClicked);
       window.removeEventListener('appResumed', handleAppResumed);
+      window.removeEventListener('trust-changed', handleTrustChanged);
     };
   }, []);
 
@@ -134,8 +170,42 @@ const Notifications = ({ onNavigate }) => {
           const newNotif = payload.new;
           const isForMe = matchesNotificationForContext(newNotif, notificationContext);
           if (isForMe) {
-            setNotifications((prev) => dedupeNotificationsByContent([newNotif, ...prev]));
+            const trustKey = String(localStorage.getItem('selected_trust_id') || '').trim();
+            setNotifications((prev) => {
+              const next = upsertNotificationById(prev, newNotif);
+              writeNotificationCache(trustKey, next);
+              return next;
+            });
           }
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'notifications' },
+        (payload) => {
+          const updatedNotif = payload.new;
+          const isForMe = matchesNotificationForContext(updatedNotif, notificationContext);
+          if (isForMe) {
+            const trustKey = String(localStorage.getItem('selected_trust_id') || '').trim();
+            setNotifications((prev) => {
+              const next = upsertNotificationById(prev, updatedNotif);
+              writeNotificationCache(trustKey, next);
+              return next;
+            });
+          }
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: 'DELETE', schema: 'public', table: 'notifications' },
+        (payload) => {
+          const deletedNotif = payload.old;
+          const trustKey = String(localStorage.getItem('selected_trust_id') || '').trim();
+          setNotifications((prev) => {
+            const next = prev.filter((notification) => notification.id !== deletedNotif.id);
+            writeNotificationCache(trustKey, next);
+            return next;
+          });
         }
       )
       .subscribe();
@@ -161,20 +231,41 @@ const Notifications = ({ onNavigate }) => {
     }
   }, []);
 
-  const fetchNotifications = async () => {
+  const fetchNotifications = async ({ showLoader = true } = {}) => {
+    const trustKey = String(localStorage.getItem('selected_trust_id') || '').trim();
+    const cachedNotifications = readNotificationCache(trustKey);
+
+    if (cachedNotifications) {
+      setNotifications(cachedNotifications.notifications || []);
+      setError('');
+    }
+
     try {
-      setLoading(true);
+      if (showLoader) {
+        setLoading(true);
+      }
       const response = await getUserNotifications();
       if (response.success) {
-        setNotifications(response.data || []);
+        const nextNotifications = response.data || [];
+        setError('');
+        setNotifications(nextNotifications);
+        writeNotificationCache(trustKey, nextNotifications);
       } else {
-        setError(response.message || 'Failed to fetch notifications');
+        if (!cachedNotifications) {
+          setNotifications([]);
+          setError(response.message || 'Failed to fetch notifications');
+        }
       }
     } catch (err) {
       console.error('Error fetching notifications:', err);
-      setError('Failed to fetch notifications');
+      if (!cachedNotifications) {
+        setNotifications([]);
+        setError('Failed to fetch notifications');
+      }
     } finally {
-      setLoading(false);
+      if (showLoader) {
+        setLoading(false);
+      }
     }
   };
 
@@ -182,11 +273,14 @@ const Notifications = ({ onNavigate }) => {
     try {
       await markNotificationAsRead(id);
       // Update the notification locally
-      setNotifications(prev =>
-        prev.map(notif =>
+      const trustKey = String(localStorage.getItem('selected_trust_id') || '').trim();
+      setNotifications((prev) => {
+        const next = prev.map((notif) => (
           notif.id === id ? { ...notif, is_read: true } : notif
-        )
-      );
+        ));
+        writeNotificationCache(trustKey, next);
+        return next;
+      });
     } catch (err) {
       console.error('Error marking notification as read:', err);
     }
@@ -197,26 +291,37 @@ const Notifications = ({ onNavigate }) => {
       // Mark as read when clicked
       if (!notification.is_read) {
         await markNotificationAsRead(notification.id);
-        setNotifications(prev =>
-          prev.map(notif =>
+        const trustKey = String(localStorage.getItem('selected_trust_id') || '').trim();
+        setNotifications((prev) => {
+          const next = (Array.isArray(prev) ? prev : []).map((notif) => (
             notif.id === notification.id ? { ...notif, is_read: true } : notif
-          )
-        );
+          ));
+          writeNotificationCache(trustKey, next);
+          return next;
+        });
       }
 
-      // Extract appointment ID from notification message
-      const appointmentId = extractAppointmentId(notification.message);
+      const hasRedirectRoute = await tryNavigateNotificationRoute({
+        notification,
+        navigate: onNavigate ? (route) => onNavigate(route) : null,
+        fallback: () => {
+          const appointmentId = extractAppointmentId(notification.message);
+          setSelectedNotification({ ...notification, appointmentId });
+          setShowDetailModal(true);
+        },
+      });
 
-      // Show detailed modal
-      setSelectedNotification({ ...notification, appointmentId });
-      setShowDetailModal(true);
+      if (hasRedirectRoute) {
+        return;
+      }
     } catch (err) {
       console.error('Error handling notification click:', err);
     }
   };
 
   const extractAppointmentId = (message) => {
-    const match = message.match(/appointment #([0-9]+)/i);
+    const text = String(message || '');
+    const match = text.match(/appointment #([0-9]+)/i);
     return match ? match[1] : null;
   };
 
@@ -241,7 +346,12 @@ const Notifications = ({ onNavigate }) => {
     e.stopPropagation();
     try {
       // Optimistically remove from UI
-      setNotifications(prev => prev.filter(n => n.id !== id));
+      const trustKey = String(localStorage.getItem('selected_trust_id') || '').trim();
+      setNotifications((prev) => {
+        const next = prev.filter((n) => n.id !== id);
+        writeNotificationCache(trustKey, next);
+        return next;
+      });
       // Call backend
       await deleteNotification(id);
     } catch (err) {
@@ -255,9 +365,12 @@ const Notifications = ({ onNavigate }) => {
     try {
       await markAllNotificationsAsRead();
       // Update all notifications locally
-      setNotifications(prev =>
-        prev.map(notif => ({ ...notif, is_read: true }))
-      );
+      const trustKey = String(localStorage.getItem('selected_trust_id') || '').trim();
+      setNotifications((prev) => {
+        const next = prev.map((notif) => ({ ...notif, is_read: true }));
+        writeNotificationCache(trustKey, next);
+        return next;
+      });
     } catch (err) {
       console.error('Error marking all notifications as read:', err);
     }
@@ -623,13 +736,6 @@ const extractDepartment = (message) => {
   const emojiMatch = message.match(/ðŸ¥\s*Department:\s*([^\n]+)/i);
   if (emojiMatch) return emojiMatch[1].trim();
   
-  return null;
-};
-
-const extractCategory = (message) => {
-  // Pattern: ðŸ“‹ Category: [Category]
-  const match = message.match(/ðŸ“‹\s*Category:\s*([^\n]+)/i);
-  if (match) return match[1].trim();
   return null;
 };
 

@@ -52,7 +52,7 @@ export const fetchContactTrustRows = async (trustId, opts = {}) => {
 
   const { data, error } = await supabase
     .from('ContactTrust')
-    .select('id, trust_id, facility_name, contact_number, email_id, contact_person, created_at, updated_at')
+    .select('id, trust_id, facility_name, contact_number, whatsapp_number, email_id, contact_person, created_at, updated_at')
     .eq('trust_id', trustId)
     .order('facility_name', { ascending: true });
 

@@ -50,6 +50,7 @@ const ROUTE_HIERARCHY = {
   '/developers': { parent: '/', label: 'Developers' },
   '/gallery': { parent: '/', label: 'Gallery' },
   '/nomination-details': { parent: '/', label: 'Nomination Details' },
+  '/add-community': { parent: '/', label: 'Add Community' },
   '/terms-and-conditions': { parent: '/', label: 'Terms & Conditions' },
   '/privacy-policy': { parent: '/', label: 'Privacy Policy' },
 };

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, memo } from 'react';
 import { User, Users, Clock, FileText, UserPlus, Bell, ChevronRight, Heart, Shield, Plus, ArrowRight, Pill, ShoppingCart, Calendar, Stethoscope, Building2, QrCode, Monitor, Brain, Package, FileCheck, Search, Filter, Star, HelpCircle, BookOpen, Video, Headphones, Menu, X, Home as HomeIcon, Settings, UserCircle, Image, Trash2, Code, FolderOpen, Crown } from 'lucide-react';
 import Sidebar from './components/Sidebar';
 import TermsModal from './components/TermsModal';
@@ -8,6 +8,8 @@ import { useGalleryContext } from './context/GalleryContext';
 import { useAppTheme } from './context/ThemeContext';
 import { registerSidebarState, useTrustDataVersion } from './hooks';
 import { supabase } from './services/supabaseClient';
+import { clearLoginTermsPromptPending, isLoginTermsPromptPending, resolveLegalTrustId } from './utils/legalContent';
+import { readNotificationCache, writeNotificationCache } from './services/notificationCache';
 import { getCurrentNotificationContext, matchesNotificationForContext } from './services/notificationAudience';
 import { fetchFeatureFlags, subscribeFeatureFlags, isFeatureEnabled } from './services/featureFlags';
 import { fetchMemberTrusts, fetchTrustById, fetchDefaultTrust } from './services/trustService';
@@ -32,11 +34,12 @@ import {
   normalizeHomeLayout
 } from './utils/themeUtils';
 import { applyOpacity } from './utils/colorUtils';
+import { resolveNotificationRedirectRoute } from './services/notificationRedirectService';
 
 const DEFAULT_TRUST_NAME = import.meta.env.VITE_DEFAULT_TRUST_NAME || 'Trust';
-const DEFAULT_TRUST_LOGO = '/new_logo.png';
 const SPONSOR_CHUNK_SIZE = sponsorConfig.CAROUSEL_BATCH_SIZE;
 const LAST_SELECTED_TRUST_ID_KEY = 'last_selected_trust_id';
+const POWERED_BY_URL = 'https://teiltd.in';
 const getInitialSponsorTrustId = () =>
   localStorage.getItem('selected_trust_id') || import.meta.env.VITE_DEFAULT_TRUST_ID || '';
 const BASE_TRUST_ID = String(import.meta.env.VITE_DEFAULT_TRUST_ID || '').trim();
@@ -121,8 +124,8 @@ const mergeTrustsWithExistingVisuals = (incomingTrusts = [], existingTrusts = []
     if (!existing) return trust;
     return {
       ...trust,
-      // Prefer fresh incoming visuals; keep cache only as fallback.
-      name: existing?.name || trust?.name || null,
+      // Prefer fresh incoming data; keep cache only as fallback.
+      name: trust?.name || existing?.name || null,
       icon_url: trust?.icon_url || existing?.icon_url || null,
       remark: trust?.remark || existing?.remark || null,
     };
@@ -168,49 +171,34 @@ const resolveTrustIconToken = (trust, fallback = '1') =>
     fallback
   );
 
-const TrustChipIcon = ({ iconUrl, altText, versionToken }) => {
+const TrustChipIcon = memo(({ iconUrl, altText, versionToken, state }) => {
   const [failedSrc, setFailedSrc] = useState('');
 
   const src = buildCacheBustedIconUrl(iconUrl, versionToken);
-  useEffect(() => {
-    setFailedSrc('');
-  }, [src]);
+
   const hasValidIcon = Boolean(src) && failedSrc !== src;
 
   if (!hasValidIcon) {
-    return <Building2 className="h-4 w-4" style={{ color: 'var(--body-text-color)' }} />;
+    return <Building2 className="h-7 w-7" style={{ color: 'var(--body-text-color)' }} />;
   }
 
   return (
     <img
       src={src}
       alt={altText || 'Trust'}
-      className="w-7 h-7 object-contain"
+      className="w-10 h-10 object-contain rounded-full"
       loading="eager"
       decoding="async"
       onError={() => setFailedSrc(src)}
+      style={state ? {} : { filter: 'grayscale(30%)', opacity: 0.7 }}
     />
   );
-};
-
-// Ensure default/base trust is always in the list
-const ensureDefaultTrustIncluded = (trustList, defaultTrust) => {
-  if (!trustList || trustList.length === 0) {
-    return defaultTrust ? [defaultTrust] : [];
-  }
-
-  const defaultId = String(defaultTrust?.id || '').trim();
-  if (!defaultId) return trustList;
-  const list = Array.isArray(trustList) ? trustList : [];
-  const defaultFromList = list.find((t) => String(t?.id || '').trim() === defaultId);
-  const pinnedDefault = defaultFromList || defaultTrust || null;
-  if (!pinnedDefault) return list;
-
-  const withoutDefault = list.filter((t) => String(t?.id || '').trim() !== defaultId);
-  // Always keep base/default trust at first position.
-  return [pinnedDefault, ...withoutDefault];
-};
-
+}, (prevProps, nextProps) => (
+  prevProps.iconUrl === nextProps.iconUrl
+  && prevProps.altText === nextProps.altText
+  && prevProps.versionToken === nextProps.versionToken
+  && prevProps.state === nextProps.state
+));
 
 const normalizeMemberName = (value) => {
   const raw = String(value || '').trim();
@@ -252,8 +240,7 @@ const getCachedUserProfileSnapshot = () => {
   }
 };
 
-/* eslint-disable react-refresh/only-export-components */
-const Home = ({ onNavigate, onLogout, isMember }) => {
+const Home = ({ onNavigate, onLogout }) => {
   const { displayTrustVersion } = useTrustDataVersion();
   const normalizeTrustId = (id) => {
     if (id === null || id === undefined) return '';
@@ -266,6 +253,11 @@ const Home = ({ onNavigate, onLogout, isMember }) => {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const mainContainerRef = useRef(null);
   const channelRef = useRef(null);
+  const latestNotificationsFetchRef = useRef(0);
+  const trustListScrollRef = useRef(null);
+  const trustChipRefs = useRef({});
+  const trustSwitchAnimationTimerRef = useRef(null);
+  const previousSelectedTrustIdRef = useRef('');
 
   // Welcome strip: initialize from localStorage instantly to avoid delay
   const [userProfile, setUserProfile] = useState(() => getCachedUserProfileSnapshot());
@@ -327,10 +319,17 @@ const Home = ({ onNavigate, onLogout, isMember }) => {
     } catch { /* ignore */ }
     return null;
   });
-  const [showTermsModal, setShowTermsModal] = useState(false);
+  const [showTermsModal, setShowTermsModal] = useState(() => isLoginTermsPromptPending());
+  const [termsModalContent, setTermsModalContent] = useState('');
+  const [termsModalTrustName, setTermsModalTrustName] = useState('');
+  const [termsModalLoading, setTermsModalLoading] = useState(() => isLoginTermsPromptPending());
+  const [termsModalError, setTermsModalError] = useState('');
   const [notifications, setNotifications] = useState([]);
   const [unreadCount, setUnreadCount] = useState(0);
+  const [unreadCountByTrust, setUnreadCountByTrust] = useState({});
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
+  const [isNotificationsLoading, setIsNotificationsLoading] = useState(false);
+  const [animatingTrustId, setAnimatingTrustId] = useState('');
   const [marqueeUpdates, setMarqueeUpdates] = useState(() => {
     try {
       const trustId = localStorage.getItem('selected_trust_id') || import.meta.env.VITE_DEFAULT_TRUST_ID || '';
@@ -374,13 +373,12 @@ const Home = ({ onNavigate, onLogout, isMember }) => {
     () => sponsorOrder.map((id) => sponsorsById[id]).filter(Boolean),
     [sponsorOrder, sponsorsById]
   );
-  const initialFlagsCacheRef = useRef(
-    readInitialFeatureFlagsCache(
-      selectedTrustId || localStorage.getItem('selected_trust_id') || trustInfo?.id || ''
-    )
-  );
-  const [featureFlags, setFeatureFlags] = useState(() => initialFlagsCacheRef.current.flags || {});
-  const [flagsData, setFlagsData] = useState(() => initialFlagsCacheRef.current.flagsData || {}); // full metadata: { feature_key: { display_name, tagline, icon_url } }
+  const [featureFlags, setFeatureFlags] = useState(() => readInitialFeatureFlagsCache(
+    selectedTrustId || localStorage.getItem('selected_trust_id') || trustInfo?.id || ''
+  ).flags || {});
+  const [flagsData, setFlagsData] = useState(() => readInitialFeatureFlagsCache(
+    selectedTrustId || localStorage.getItem('selected_trust_id') || trustInfo?.id || ''
+  ).flagsData || {}); // full metadata: { feature_key: { display_name, tagline, icon_url } }
   const [trustIconVersionById, setTrustIconVersionById] = useState({});
   const [trustIconUrlById, setTrustIconUrlById] = useState(() => readTrustIconUrlCache());
   const hasLoadedMemberTrusts = useRef(false);
@@ -481,15 +479,6 @@ const Home = ({ onNavigate, onLogout, isMember }) => {
     registerSidebarState(isMenuOpen, () => setIsMenuOpen(false));
   }, [isMenuOpen]);
 
-  const getSessionSelectionFlag = () => {
-    if (typeof window === 'undefined') return false;
-    try {
-      return sessionStorage.getItem('trust_selected_in_session') === 'true';
-    } catch {
-      return false;
-    }
-  };
-
   const setSessionSelectionFlag = () => {
     if (typeof window === 'undefined') return;
     try {
@@ -551,6 +540,7 @@ const Home = ({ onNavigate, onLogout, isMember }) => {
     };
     loadDefaultTrust();
     return () => { isActive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: run once on mount, selectedTrustId only read as an initial fallback
   }, []);
   // Close sidebar when clicking outside
   useEffect(() => {
@@ -783,7 +773,7 @@ const Home = ({ onNavigate, onLogout, isMember }) => {
       // Preserve known icon_url/name from cache so trust chips don't flash placeholders.
       mergedTrusts = mergeTrustsWithExistingVisuals(mergedTrusts, readCachedTrustList());
       mergedTrusts = pinBaseTrustFirst(mergedTrusts);
-      
+
       setTrustList(mergedTrusts);
       try { localStorage.setItem('trust_list_cache', JSON.stringify(mergedTrusts)); } catch { /* ignore */ }
 
@@ -823,6 +813,7 @@ const Home = ({ onNavigate, onLogout, isMember }) => {
     } catch (error) {
       console.warn('Could not parse user trust info:', error);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: re-run only when defaultTrust id changes; selectedTrustId/defaultTrust read fresh from localStorage/closure each run
   }, [defaultTrust?.id]);
 
   // Hydrate trust visuals from Trust table so stale membership/cache values are corrected.
@@ -1000,7 +991,7 @@ const Home = ({ onNavigate, onLogout, isMember }) => {
     if (!user) return;
     let parsedUser = null;
     try { parsedUser = JSON.parse(user); } catch { return; }
-    
+
     const userDerivedTrusts = Array.isArray(parsedUser?.hospital_memberships)
       ? parsedUser.hospital_memberships.map((m) => ({
         id: m?.trust_id || m?.id || null,
@@ -1010,9 +1001,9 @@ const Home = ({ onNavigate, onLogout, isMember }) => {
         is_active: m?.is_active
       }))
       : [];
-    
+
     console.log('📋 User derived trusts from hospital_memberships:', userDerivedTrusts.length, userDerivedTrusts.map(t => t.name).join(', '));
-    
+
     const fallbackIdsFromMemberships = Array.isArray(parsedUser?.hospital_memberships)
       ? parsedUser.hospital_memberships.map((m) => m?.members_id).filter(Boolean)
       : [];
@@ -1048,7 +1039,7 @@ const Home = ({ onNavigate, onLogout, isMember }) => {
     const loadMemberTrusts = async () => {
       try {
         console.log('🔍 Fetching member trusts for IDs:', membersIds.join(', '));
-        
+
         const membershipResults = await Promise.all(
           membersIds.map((memberId) => fetchMemberTrusts(memberId).catch(() => []))
         );
@@ -1064,12 +1055,12 @@ const Home = ({ onNavigate, onLogout, isMember }) => {
             membership_number: trust.membership_number || trust['Membership number'] || null,
             members_id: trust.members_id || trust.member_id || null,
           }));
-        
+
         console.log('📊 Membership trusts found:', membershipTrusts.length, membershipTrusts.map(t => t.name).join(', '));
 
         const uniqueTrusts = mergeUniqueTrusts(userDerivedTrusts, membershipTrusts);
         console.log('✨ Total unique trusts:', uniqueTrusts.length, uniqueTrusts.map(t => t.name).join(', '));
-        
+
         if (uniqueTrusts.length === 0) return;
 
         const primaryTrust = parsedUser?.primary_trust || uniqueTrusts.find((t) => t.is_active) || uniqueTrusts[0];
@@ -1146,8 +1137,9 @@ const Home = ({ onNavigate, onLogout, isMember }) => {
 
   const handleTrustSelect = async (trustId) => {
     const normalizedId = normalizeTrustId(trustId);
+    if (normalizedId === normalizeTrustId(selectedTrustId)) return;
     console.log(`🔄 Switching trust from "${selectedTrustId}" to "${normalizedId}"`);
-    
+
     // Force reload by resetting heavy modules; keep marquee visible from cache
     // so trust switch does not blank the updates strip.
     try {
@@ -1162,32 +1154,31 @@ const Home = ({ onNavigate, onLogout, isMember }) => {
     setSponsorsById({});
     setSponsorOrder([]);
     setSponsorIndex(0);
-    setNotifications([]);
-    setUnreadCount(0);
+    setIsNotificationsLoading(true);
     setSponsorFetchSettledTrustId(''); // Force sponsor refetch
-    
+
     // Clear localStorage caches for this operation to force refresh
     try {
       localStorage.removeItem(`sponsor_carousel_index_${normalizedId}`);
     } catch { /* ignore */ }
-    
+
     // Update selected trust
     setSelectedTrustId(normalizedId);
     localStorage.setItem('selected_trust_id', normalizedId);
     localStorage.setItem(LAST_SELECTED_TRUST_ID_KEY, normalizedId);
     setSessionSelectionFlag();
-    
+
     const selected = trustList.find((t) => normalizeTrustId(t.id) === normalizedId) || null;
     setTrustInfo(selected);
     if (selected?.name) {
       localStorage.setItem('selected_trust_name', selected.name);
       console.log(`✓ Trust switched to: ${selected.name}`);
     }
-    
-    window.dispatchEvent(new CustomEvent('trust-changed', { 
-      detail: { trustId: normalizedId, trustName: selected?.name || null } 
+
+    window.dispatchEvent(new CustomEvent('trust-changed', {
+      detail: { trustId: normalizedId, trustName: selected?.name || null }
     }));
-    
+
     // Fetch and update fresh trust details
     try {
       const freshTrust = await fetchTrustById(normalizedId);
@@ -1218,6 +1209,55 @@ const Home = ({ onNavigate, onLogout, isMember }) => {
     } catch (err) {
       console.warn('Failed to refresh trust details:', err?.message);
     }
+  };
+
+  const handleTrustChipClick = async (trust) => {
+    const trustId = normalizeTrustId(trust?.id);
+    const trustUnreadCount = Number(unreadCountByTrust[trustId] || 0);
+
+    if (trustId && trustUnreadCount > 0) {
+      try {
+        const response = await getUserNotifications(trustId);
+        const trustNotifications = Array.isArray(response?.data) ? response.data : [];
+        const unreadNotifications = trustNotifications
+          .filter((notification) => !notification?.is_read)
+          .sort((a, b) => {
+            const aTime = Date.parse(a?.created_at || '') || 0;
+            const bTime = Date.parse(b?.created_at || '') || 0;
+            return bTime - aTime;
+          });
+
+        for (const notification of unreadNotifications) {
+          const redirectRoute = await resolveNotificationRedirectRoute(notification);
+          if (!redirectRoute) continue;
+
+          try {
+            await markNotificationAsRead(notification.id);
+            setNotifications((prev) => prev.map((item) => (
+              item.id === notification.id ? { ...item, is_read: true } : item
+            )));
+            setUnreadCount((prev) => Math.max(0, prev - 1));
+            setUnreadCountByTrust((prev) => ({
+              ...prev,
+              [trustId]: Math.max(0, Number(prev[trustId] || 0) - 1),
+            }));
+          } catch {
+            // Redirect should still work even if read-state sync fails.
+          }
+
+          if (typeof onNavigate === 'function') {
+            onNavigate(redirectRoute);
+          } else {
+            window.location.href = redirectRoute;
+          }
+          return;
+        }
+      } catch (error) {
+        console.warn('Failed to resolve trust notification redirect:', error?.message || error);
+      }
+    }
+
+    await handleTrustSelect(trust?.id);
   };
 
   // Marquee updates
@@ -1298,7 +1338,7 @@ const Home = ({ onNavigate, onLogout, isMember }) => {
           syncSponsorStoreSnapshot(trustId);
           setSponsorFetchSettledTrustId(trustId);
         })
-        .catch(() => {});
+        .catch(() => { });
     } else {
       setIsSponsorsLoading(true);
       setIsCarouselReady(false);
@@ -1514,7 +1554,7 @@ const Home = ({ onNavigate, onLogout, isMember }) => {
     if (sponsorListPreloadRef.current[trustId]) return;
 
     const timer = setTimeout(() => {
-      preloadSponsorListFirstPage(trustId).catch(() => {});
+      preloadSponsorListFirstPage(trustId).catch(() => { });
       sponsorListPreloadRef.current[trustId] = true;
     }, 250);
     return () => clearTimeout(timer);
@@ -1525,32 +1565,101 @@ const Home = ({ onNavigate, onLogout, isMember }) => {
   // Notifications
   useEffect(() => {
     if (import.meta.env.VITE_DISABLE_NOTIFICATIONS === 'true') return;
-    const fetchNotifications = async () => {
+    const selectedTrustKey = normalizeTrustId(
+      localStorage.getItem('selected_trust_id') ||
+      selectedTrustId ||
+      trustInfo?.id ||
+      ''
+    );
+    const cachedNotifications = readNotificationCache(selectedTrustKey);
+
+    if (cachedNotifications) {
+      setNotifications(cachedNotifications.notifications || []);
+      setUnreadCount((cachedNotifications.notifications || []).filter((n) => !n.is_read).length);
+      setIsNotificationsLoading(false);
+    }
+
+    const fetchNotifications = async ({ showLoader = true } = {}) => {
+      const fetchId = latestNotificationsFetchRef.current + 1;
+      latestNotificationsFetchRef.current = fetchId;
+
+      const requestedTrustId = selectedTrustKey;
+
+      if (showLoader) {
+        setIsNotificationsLoading(true);
+      }
+
+      const isStaleFetch = () => {
+        const currentTrustId = normalizeTrustId(
+          localStorage.getItem('selected_trust_id') ||
+          selectedTrustId ||
+          trustInfo?.id ||
+          ''
+        );
+        return latestNotificationsFetchRef.current !== fetchId || currentTrustId !== requestedTrustId;
+      };
+
       try {
         const response = await getUserNotifications();
+        if (isStaleFetch()) return;
+
         if (response.success) {
-          setNotifications(response.data || []);
-          setUnreadCount((response.data || []).filter(n => !n.is_read).length);
+          const nextNotifications = response.data || [];
+          setNotifications(nextNotifications);
+          setUnreadCount(nextNotifications.filter(n => !n.is_read).length);
+          writeNotificationCache(requestedTrustId, nextNotifications);
         }
+
+        const trustIds = [...new Set((trustList || [])
+          .map((trust) => normalizeTrustId(trust?.id))
+          .filter(Boolean))];
+
+        if (trustIds.length === 0) {
+          setUnreadCountByTrust({});
+          return;
+        }
+
+        const unreadResults = await Promise.all(
+          trustIds.map(async (trustId) => {
+            try {
+              const trustResponse = await getUserNotifications(trustId);
+              const trustUnreadCount = trustResponse.success
+                ? (trustResponse.data || []).filter((notification) => !notification.is_read).length
+                : 0;
+              return [trustId, trustUnreadCount];
+            } catch {
+              return [trustId, 0];
+            }
+          })
+        );
+
+        if (isStaleFetch()) return;
+        setUnreadCountByTrust(Object.fromEntries(unreadResults));
       } catch (error) {
+        if (isStaleFetch()) return;
         console.error('Error fetching notifications:', error);
+      } finally {
+        if (!isStaleFetch() && showLoader) {
+          setIsNotificationsLoading(false);
+        }
       }
     };
-    const handleBirthdayInserted = () => fetchNotifications();
+    const handleBirthdayInserted = () => fetchNotifications({ showLoader: false });
     window.addEventListener('birthdayNotifInserted', handleBirthdayInserted);
-    const handlePushNotificationArrived = () => fetchNotifications();
+    const handlePushNotificationArrived = () => fetchNotifications({ showLoader: false });
     window.addEventListener('pushNotificationArrived', handlePushNotificationArrived);
-    const handlePushNotificationClicked = () => fetchNotifications();
+    const handlePushNotificationClicked = () => fetchNotifications({ showLoader: false });
     window.addEventListener('pushNotificationClicked', handlePushNotificationClicked);
-    const handleAppResumed = () => fetchNotifications();
+    const handleAppResumed = () => fetchNotifications({ showLoader: false });
     window.addEventListener('appResumed', handleAppResumed);
 
     // Trust switch should reflect notifications immediately.
-    setNotifications([]);
-    setUnreadCount(0);
-    fetchNotifications();
-    const warmRetry = setTimeout(fetchNotifications, 700);
-    const interval = setInterval(fetchNotifications, 30000);
+    if (!cachedNotifications) {
+      setIsNotificationsLoading(true);
+    }
+    fetchNotifications({ showLoader: !cachedNotifications });
+    const warmRetry = setTimeout(() => fetchNotifications({ showLoader: false }), 700);
+    const interval = setInterval(() => fetchNotifications({ showLoader: false }), 30000);
     return () => {
       clearInterval(interval);
       clearTimeout(warmRetry);
@@ -1559,7 +1668,7 @@ const Home = ({ onNavigate, onLogout, isMember }) => {
       window.removeEventListener('pushNotificationClicked', handlePushNotificationClicked);
       window.removeEventListener('appResumed', handleAppResumed);
     };
-  }, [selectedTrustId]);
+  }, [selectedTrustId, trustList]);
 
   // Real-time notifications
   useEffect(() => {
@@ -1573,12 +1682,20 @@ const Home = ({ onNavigate, onLogout, isMember }) => {
           const newNotif = payload.new;
           const isForMe = matchesNotificationForContext(newNotif, notificationContext);
           if (isForMe) {
+            const currentTrustKey = normalizeTrustId(
+              localStorage.getItem('selected_trust_id') ||
+              selectedTrustId ||
+              trustInfo?.id ||
+              ''
+            );
             setNotifications((prev) => {
               const existingKeys = new Set(prev.map(buildNotificationContentKey));
               const newKey = buildNotificationContentKey(newNotif);
               if (existingKeys.has(newKey)) return prev;
+              const next = [newNotif, ...prev];
               if (!newNotif.is_read) setUnreadCount((count) => count + 1);
-              return [newNotif, ...prev];
+              writeNotificationCache(currentTrustKey, next);
+              return next;
             });
           }
         })
@@ -1586,8 +1703,25 @@ const Home = ({ onNavigate, onLogout, isMember }) => {
           const updatedNotif = payload.new;
           const isForMe = matchesNotificationForContext(updatedNotif, notificationContext);
           if (isForMe) {
-            setNotifications((prev) => prev.map((n) => (n.id === updatedNotif.id ? updatedNotif : n)));
-            if (payload.old?.is_read === false && updatedNotif.is_read === true) setUnreadCount((prev) => Math.max(0, prev - 1));
+            let shouldDecrementUnread = false;
+            const currentTrustKey = normalizeTrustId(
+              localStorage.getItem('selected_trust_id') ||
+              selectedTrustId ||
+              trustInfo?.id ||
+              ''
+            );
+            setNotifications((prev) => {
+              const next = prev.map((n) => {
+                if (n.id !== updatedNotif.id) return n;
+                if (!n.is_read && updatedNotif.is_read) shouldDecrementUnread = true;
+                return updatedNotif;
+              });
+              writeNotificationCache(currentTrustKey, next);
+              return next;
+            });
+            if (shouldDecrementUnread) {
+              setUnreadCount((prev) => Math.max(0, prev - 1));
+            }
           }
         })
         .subscribe();
@@ -1605,46 +1739,128 @@ const Home = ({ onNavigate, onLogout, isMember }) => {
   const handleMarkAsRead = async (id) => {
     try {
       await markNotificationAsRead(id);
-      setNotifications(prev => prev.map(n => n.id === id ? { ...n, is_read: true } : n));
-      setUnreadCount(prev => Math.max(0, prev - 1));
+      let shouldDecrementUnread = false;
+      const currentTrustKey = normalizeTrustId(
+        localStorage.getItem('selected_trust_id') ||
+        selectedTrustId ||
+        trustInfo?.id ||
+        ''
+      );
+      setNotifications((prev) => {
+        const next = prev.map((n) => {
+          if (n.id !== id) return n;
+          if (!n.is_read) shouldDecrementUnread = true;
+          return n.is_read ? n : { ...n, is_read: true };
+        });
+        writeNotificationCache(currentTrustKey, next);
+        return next;
+      });
+      if (shouldDecrementUnread) {
+        setUnreadCount((prev) => Math.max(0, prev - 1));
+      }
     } catch (error) { console.error('Error marking notification as read:', error); }
   };
 
   const handleMarkAllAsRead = async () => {
     try {
       await markAllNotificationsAsRead();
-      setNotifications(prev => prev.map(n => ({ ...n, is_read: true })));
+      const currentTrustKey = normalizeTrustId(
+        localStorage.getItem('selected_trust_id') ||
+        selectedTrustId ||
+        trustInfo?.id ||
+        ''
+      );
+      setNotifications((prev) => {
+        const next = prev.map(n => ({ ...n, is_read: true }));
+        writeNotificationCache(currentTrustKey, next);
+        return next;
+      });
       setUnreadCount(0);
     } catch (error) { console.error('Error marking all notifications as read:', error); }
   };
 
   const handleDismissNotification = async (id) => {
     try {
-      setNotifications(prev => prev.filter(n => n.id !== id));
-      setUnreadCount(prev => {
-        const dismissed = notifications.find(n => n.id === id);
-        return dismissed && !dismissed.is_read ? Math.max(0, prev - 1) : prev;
+      let removedUnread = false;
+      const currentTrustKey = normalizeTrustId(
+        localStorage.getItem('selected_trust_id') ||
+        selectedTrustId ||
+        trustInfo?.id ||
+        ''
+      );
+      setNotifications((prev) => {
+        const dismissed = prev.find((n) => n.id === id);
+        removedUnread = Boolean(dismissed && !dismissed.is_read);
+        const next = prev.filter((n) => n.id !== id);
+        writeNotificationCache(currentTrustKey, next);
+        return next;
       });
+      if (removedUnread) {
+        setUnreadCount((prev) => Math.max(0, prev - 1));
+      }
       try { await deleteNotification(id); } catch (apiError) { console.error('Error deleting notification from backend:', apiError); }
     } catch (error) { console.error('Error dismissing notification:', error); }
   };
 
   const handleClearAll = async () => {
     const toDelete = [...notifications];
+    const currentTrustKey = normalizeTrustId(
+      localStorage.getItem('selected_trust_id') ||
+      selectedTrustId ||
+      trustInfo?.id ||
+      ''
+    );
     setNotifications([]);
+    writeNotificationCache(currentTrustKey, []);
     setUnreadCount(0);
     setIsNotificationsOpen(false);
     try { await Promise.all(toDelete.map(n => deleteNotification(n.id))); } catch (error) { console.error('Error clearing notifications:', error); }
   };
 
   useEffect(() => {
-    const termsAccepted = localStorage.getItem('terms_accepted');
-    if (!termsAccepted) setShowTermsModal(true);
-  }, []);
+    if (!showTermsModal) return undefined;
+
+    let active = true;
+    const loadTermsContent = async () => {
+      const trustId = resolveLegalTrustId(selectedTrustId || trustInfo?.id || defaultTrust?.id || '');
+      if (!trustId) {
+        setTermsModalContent('');
+        setTermsModalTrustName(trustInfo?.name || defaultTrust?.name || localStorage.getItem('selected_trust_name') || '');
+        setTermsModalLoading(false);
+        return;
+      }
+
+      try {
+        setTermsModalLoading(true);
+        setTermsModalError('');
+        const trust = await fetchTrustById(trustId);
+        if (!active || !trust) return;
+        setTermsModalContent(trust.terms_content || '');
+        setTermsModalTrustName(trust.name || localStorage.getItem('selected_trust_name') || '');
+      } catch (err) {
+        if (!active) return;
+        console.warn('[Home] Failed to load terms content:', err?.message || err);
+        setTermsModalError('Failed to load Terms & Conditions. Please try again.');
+        setTermsModalContent('');
+        setTermsModalTrustName(localStorage.getItem('selected_trust_name') || '');
+      } finally {
+        if (active) setTermsModalLoading(false);
+      }
+    };
+
+    loadTermsContent();
+    return () => {
+      active = false;
+    };
+  }, [showTermsModal, selectedTrustId, trustInfo?.id, trustInfo?.name, defaultTrust?.id, defaultTrust?.name]);
 
   const handleAcceptTerms = () => {
-    localStorage.setItem('terms_accepted', 'true');
+    clearLoginTermsPromptPending();
     setShowTermsModal(false);
+    setTermsModalContent('');
+    setTermsModalTrustName('');
+    setTermsModalError('');
+    setTermsModalLoading(false);
   };
 
   const formatNotificationTitle = (title, message) => {
@@ -1759,7 +1975,17 @@ const Home = ({ onNavigate, onLogout, isMember }) => {
 
   // Build Quick Access tiles from Supabase flag metadata.
   const dbQuickActions = Object.entries(flagsData)
-    .filter(([key, data]) => Boolean(key) && data?.is_enabled && Boolean(resolveQuickRoute(data?.route, key)))
+    .filter(([key, data]) => (
+      Boolean(key)
+      && data?.is_enabled
+      && key !== 'feature_add_community'
+      && key !== 'feature_nomination_details'
+      && key !== 'feature_nomination'
+      && normalizeQuickRoute(data?.route) !== 'add-community'
+      && normalizeQuickRoute(data?.route) !== 'nomination-details'
+      && normalizeQuickRoute(data?.route) !== 'nomination'
+      && Boolean(resolveQuickRoute(data?.route, key))
+    ))
     .map(([key, data]) => ({
       id: key,
       route: resolveQuickRoute(data.route, key),
@@ -1852,6 +2078,9 @@ const Home = ({ onNavigate, onLogout, isMember }) => {
         'gallery',
         'notifications',
         'notification',
+        'add-community',
+        'nomination',
+        'nomination-details',
         'developers',
         'developer-info',
         'developerinfo',
@@ -1870,23 +2099,44 @@ const Home = ({ onNavigate, onLogout, isMember }) => {
       return String(a.displayName).localeCompare(String(b.displayName));
     });
 
-  const activeTrust =
-    trustList.find((trust) => normalizeTrustId(trust.id) === normalizeTrustId(selectedTrustId)) ||
+  const activeTrust = useMemo(() => (
+    trustList.find((trust) => normalizeTrustId(trust?.id) === normalizeTrustId(selectedTrustId)) ||
     trustInfo ||
     defaultTrust ||
-    null;
-  const activeTrustId = normalizeTrustId(activeTrust?.id);
-  const activeTrustIconToken = trustIconVersionById[activeTrustId] || resolveTrustIconToken(activeTrust, '');
-  const activeTrustIconUrl = activeTrust?.icon_url
-    || trustIconUrlById[activeTrustId]
-    || defaultTrust?.icon_url
-    || trustInfo?.icon_url
-    || DEFAULT_TRUST_LOGO;
-  const activeTrustIconSrc = buildCacheBustedIconUrl(
-    activeTrustIconUrl,
-    activeTrustIconToken
-  );
+    null
+  ), [selectedTrustId, trustList, trustInfo, defaultTrust]);
 
+  const selectedTrust = activeTrust;
+  const otherTrusts = useMemo(() => {
+    if (!Array.isArray(trustList) || trustList.length === 0) return [];
+    const normalizedSelectedTrustId = normalizeTrustId(selectedTrustId);
+    if (!normalizedSelectedTrustId) return trustList;
+    return trustList.filter((trust) => normalizeTrustId(trust?.id) !== normalizedSelectedTrustId);
+  }, [selectedTrustId, trustList]);
+
+  useEffect(() => {
+    const normalizedSelectedTrustId = normalizeTrustId(selectedTrustId);
+    const previousSelectedTrustId = normalizeTrustId(previousSelectedTrustIdRef.current);
+    previousSelectedTrustIdRef.current = normalizedSelectedTrustId;
+
+    if (!normalizedSelectedTrustId) return;
+    if (!previousSelectedTrustId || previousSelectedTrustId === normalizedSelectedTrustId) return;
+
+    setAnimatingTrustId(normalizedSelectedTrustId);
+    if (trustSwitchAnimationTimerRef.current) {
+      clearTimeout(trustSwitchAnimationTimerRef.current);
+    }
+    trustSwitchAnimationTimerRef.current = setTimeout(() => {
+      setAnimatingTrustId('');
+      trustSwitchAnimationTimerRef.current = null;
+    }, 520);
+  }, [selectedTrustId]);
+
+  useEffect(() => () => {
+    if (trustSwitchAnimationTimerRef.current) {
+      clearTimeout(trustSwitchAnimationTimerRef.current);
+    }
+  }, []);
   const currentUser = useMemo(() => {
     try {
       const raw = localStorage.getItem('user');
@@ -1894,7 +2144,7 @@ const Home = ({ onNavigate, onLogout, isMember }) => {
     } catch {
       return null;
     }
-  }, [selectedTrustId, activeTrust?.id, userProfile?.name]);
+  }, []);
 
   const selectedTrustMembership = useMemo(() => {
     const memberships = Array.isArray(currentUser?.hospital_memberships)
@@ -1934,6 +2184,60 @@ const Home = ({ onNavigate, onLogout, isMember }) => {
   }, [activeTrust?.id, currentUser?.hospital_memberships, selectedTrustId, trustList]);
 
   const showSelectedTrustMemberBanner = Boolean(selectedTrustMembership?.trust_id || selectedTrustMembership?.id);
+  const footerShareLink = POWERED_BY_URL;
+
+  const renderTrustChip = (trust) => {
+    if (!trust?.id) return null;
+
+    const normalizedTrustId = normalizeTrustId(trust.id);
+    const isActive = normalizedTrustId === selectedTrustId;
+    const isAnimatingSelection = isActive && animatingTrustId === normalizedTrustId;
+    const trustUnreadCount = Number(unreadCountByTrust[normalizedTrustId] || 0);
+    const shouldBlinkForUnread = trustUnreadCount > 0;
+    const trustChipAnimations = [
+      isAnimatingSelection ? 'trustChipMoveToFront 520ms cubic-bezier(0.22, 1, 0.36, 1)' : null,
+      shouldBlinkForUnread ? 'trustChipUnreadPulse 1.5s ease-in-out infinite' : null,
+    ].filter(Boolean).join(', ');
+
+    return (
+      <button
+        key={normalizedTrustId || trust.id || trust.name}
+        onClick={() => handleTrustChipClick(trust)}
+        ref={(node) => {
+          if (!normalizedTrustId) return;
+          if (node) trustChipRefs.current[normalizedTrustId] = node;
+          else delete trustChipRefs.current[normalizedTrustId];
+        }}
+        className="flex-shrink-0 w-[3rem] h-[3rem] rounded-full flex items-center justify-center overflow-visible transition-all duration-200 relative"
+        style={{
+          border: isActive
+            ? `2.5px solid ${theme.primary}`
+            : '2px solid color-mix(in srgb, var(--body-text-color) 18%, var(--surface-color))',
+          backgroundColor: 'color-mix(in srgb, var(--app-page-bg) 86%, var(--surface-color))',
+          transform: isActive ? 'scale(1.05)' : 'scale(1)',
+          boxShadow: isActive
+            ? '0 4px 12px color-mix(in srgb, var(--brand-navy) 22%, transparent)'
+            : 'none',
+          animation: trustChipAnimations || 'none',
+          '--trust-ring-color': theme.primary,
+          '--trust-ring-glow': `color-mix(in srgb, ${theme.primary} 45%, ${theme.accent || theme.secondary})`,
+        }}
+        title={trust?.name || ''}
+      >
+        <TrustChipIcon
+          iconUrl={trust?.icon_url || trustIconUrlById[normalizedTrustId]}
+          altText={trust?.name || 'Trust'}
+          versionToken={trustIconVersionById[normalizedTrustId] || resolveTrustIconToken(trust, '')}
+          state={isActive}
+        />
+        {isActive && (
+          <div className="absolute bottom-0 right-[6px] w-4 h-4 rounded-full flex items-center justify-center" style={{ background: theme.primary }}>
+            <span className="text-[10px] text-white">✓</span>
+          </div>
+        )}
+      </button>
+    );
+  };
 
   const shouldShowTrustSelector = trustList.length > 0;
   const showTrustSelector = shouldShowTrustSelector;
@@ -2097,13 +2401,13 @@ const Home = ({ onNavigate, onLogout, isMember }) => {
           {/* Hamburger */}
           <button
             onClick={() => setIsMenuOpen(!isMenuOpen)}
-              className="w-10 h-10 rounded-2xl flex items-center justify-center transition-all flex-shrink-0 active:scale-95"
-              style={{
-                background: isMenuOpen
-                  ? appButtonBg
-                  : 'color-mix(in srgb, var(--navbar-bg) 72%, var(--surface-color))',
-                boxShadow: isMenuOpen ? `0 4px 12px ${applyOpacity(theme.primary, 0.25)}` : 'none',
-              }}
+            className="w-10 h-10 rounded-2xl flex items-center justify-center transition-all flex-shrink-0 active:scale-95"
+            style={{
+              background: isMenuOpen
+                ? appButtonBg
+                : 'color-mix(in srgb, var(--navbar-bg) 72%, var(--surface-color))',
+              boxShadow: isMenuOpen ? `0 4px 12px ${applyOpacity(theme.primary, 0.25)}` : 'none',
+            }}
           >
             {isMenuOpen
               ? <X className="h-5 w-5" style={{ color: onPrimaryText }} />
@@ -2112,29 +2416,28 @@ const Home = ({ onNavigate, onLogout, isMember }) => {
 
           {/* Trust logo + name */}
           <div className="flex items-center gap-2.5 flex-1 justify-center">
-            <div
-              className="w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 p-0.5"
-              style={{
-                boxShadow: `0 0 0 2px ${theme.primary}, 0 3px 10px ${applyOpacity(theme.primary, 0.19)}`,
-                background: surfaceColor,
-              }}
-            >
-              {activeTrustIconSrc ? (
-                <img
-                  src={activeTrustIconSrc}
-                  alt={activeTrust?.name || defaultTrust?.name || trustInfo?.name || 'Trust'}
-                  className="w-full h-full object-contain rounded-full"
-                />
+            {(() => {
+              const trustName = activeTrust?.name || trustInfo?.name || defaultTrust?.name || '';
+              const isLongName = trustName.length > 20;
+              
+              return isLongName ? (
+                <div className="overflow-hidden w-full flex items-center">
+                  <h1
+                    className="font-extrabold text-[15px] whitespace-nowrap"
+                    style={{ color: navbarTextColor, animation: 'marquee 15s linear infinite', maxWidth: '9rem' }}
+                  >
+                    {trustName}&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+                  </h1>
+                </div>
               ) : (
-                <Building2 className="h-5 w-5" style={{ color: 'var(--body-text-color)' }} />
-              )}
-            </div>
-            <h1
-              className="font-extrabold text-[15px] truncate max-w-[130px]"
-              style={{ color: navbarTextColor }}
-            >
-              {activeTrust?.name || trustInfo?.name || defaultTrust?.name || ''}
-            </h1>
+                <h1
+                  className="font-extrabold text-[15px]"
+                  style={{ color: navbarTextColor }}
+                >
+                  {trustName}
+                </h1>
+              );
+            })()}
           </div>
 
           {/* Bell / placeholder */}
@@ -2197,8 +2500,16 @@ const Home = ({ onNavigate, onLogout, isMember }) => {
                           )}
                         </div>
                       </div>
-                      <div className="max-h-[360px] overflow-y-auto">
-                        {notifications.length > 0 ? notifications.slice(0, 4).map((notification) => (
+                      <div className="notification-list-scroll max-h-[360px] overflow-y-auto">
+                        {isNotificationsLoading ? (
+                          <div className="p-8 text-center">
+                            <div className="mx-auto mb-3 h-10 w-10 rounded-full border-2 border-current opacity-30 animate-spin" style={{ color: navbarTextColor }} />
+                            <p className="text-sm font-medium" style={{ color: 'color-mix(in srgb, var(--body-text-color) 70%, var(--surface-color))' }}>
+                              Loading notifications...
+                            </p>
+                          </div>
+                        ) : notifications.length > 0 ? (
+                          notifications.slice(0, 4).map((notification) => (
                           <div key={notification.id}
                             className="px-4 py-3 relative cursor-pointer transition-colors"
                             style={{
@@ -2238,7 +2549,8 @@ const Home = ({ onNavigate, onLogout, isMember }) => {
                               <X className="w-3.5 h-3.5" />
                             </button>
                           </div>
-                        )) : (
+                          ))
+                        ) : (
                           <div className="p-8 text-center">
                             <div className="w-12 h-12 rounded-full flex items-center justify-center mx-auto mb-3" style={{ background: theme.accent }}>
                               <Bell className="h-5 w-5" style={{ color: navbarTextColor }} />
@@ -2269,7 +2581,7 @@ const Home = ({ onNavigate, onLogout, isMember }) => {
         {(userProfile?.name || showSelectedTrustMemberBanner) && (
           <div className="px-4 pb-3">
             <div
-              className="rounded-[22px] px-3.5 py-3"
+              className="rounded-[22px] px-3 py-2"
               style={{
                 background: showSelectedTrustMemberBanner
                   ? 'linear-gradient(135deg, #121212 0%, #1b1b1b 55%, #2a2a2a 100%)'
@@ -2280,63 +2592,72 @@ const Home = ({ onNavigate, onLogout, isMember }) => {
                   : 'none',
               }}
             >
-              <div className="flex items-center gap-2 min-w-0">
-                  {userProfile?.profilePhotoUrl ? (
-                    <img
-                      src={userProfile.profilePhotoUrl}
-                      alt={userProfile.name}
-                      className="w-8 h-8 rounded-full object-cover flex-shrink-0"
-                      style={{ border: `1.5px solid ${showSelectedTrustMemberBanner ? '#d4a017' : theme.primary}` }}
-                    />
-                  ) : (
-                    <div
-                      className="w-8 h-8 rounded-full flex items-center justify-center text-[12px] font-bold flex-shrink-0"
-                      style={{
-                        background: showSelectedTrustMemberBanner
-                          ? 'linear-gradient(135deg, #7c5a00 0%, #d4a017 100%)'
-                          : appButtonBg,
-                        color: showSelectedTrustMemberBanner ? '#fffdf5' : onPrimaryText
-                      }}
-                    >
-                      {(userProfile?.name || currentUser?.name || 'M').charAt(0).toUpperCase()}
-                    </div>
-                  )}
-
-                  <div className="min-w-0 flex-1">
-                    {userProfile?.name ? (
-                      <div className="flex items-center min-w-0">
-                        <p className="text-[12px] font-semibold truncate leading-snug" style={{ color: showSelectedTrustMemberBanner ? '#f8f0c5' : headingColor }}>
-                          <span className="font-extrabold">{userProfile.name}</span>
-                        </p>
-                      </div>
-                    ) : null}
+              <div className="flex items-center gap-2 min-w-0 justify-between">
+                <div className='flex gap-2'>
+                {userProfile?.profilePhotoUrl ? (
+                  <img
+                    src={userProfile.profilePhotoUrl}
+                    alt={userProfile.name}
+                    className="w-10 h-10 rounded-full object-cover flex-shrink-0"
+                    style={{ border: `1.5px solid ${showSelectedTrustMemberBanner ? '#d4a017' : theme.primary}` }}
+                  />
+                ) : (
+                  <div
+                    className="w-10 h-10 rounded-full flex items-center justify-center text-[12px] font-bold flex-shrink-0"
+                    style={{
+                      background: showSelectedTrustMemberBanner
+                        ? 'linear-gradient(135deg, #7c5a00 0%, #d4a017 100%)'
+                        : appButtonBg,
+                      color: showSelectedTrustMemberBanner ? '#fffdf5' : onPrimaryText,
+                    
+                    }}
+                  >
+                    {(userProfile?.name || currentUser?.name || 'M').charAt(0).toUpperCase()}
                   </div>
-                  {showSelectedTrustMemberBanner && selectedTrustMembership?.membership_number ? (
-                      <span
-                        className="inline-flex items-center gap-1.5 rounded-full px-2 py-1 text-[10px] font-extrabold uppercase tracking-[0.12em] max-w-[28%] flex-shrink-0"
-                        style={{
-                          background: 'linear-gradient(135deg, #5a3f00 0%, #d4a017 100%)',
-                          color: '#fff8db',
-                          border: '1px solid rgba(255, 227, 133, 0.5)',
-                        }}
-                      >
-                        <Crown className="h-3.5 w-3.5 flex-shrink-0" />
-                        <span className="truncate">{selectedTrustMembership.membership_number}</span>
-                      </span>
-                    ) : null}
-                  {showSelectedTrustMemberBanner && selectedTrustMembership?.role ? (
-                    <span
-                      className="inline-flex items-center gap-1.5 rounded-full px-2 py-1 text-[10px] font-extrabold uppercase tracking-[0.1em] max-w-[34%] flex-shrink-0"
-                      style={{
-                        background: 'linear-gradient(135deg, #5a3f00 0%, #d4a017 100%)',
-                        color: '#fff8db',
-                        border: '1px solid rgba(255, 227, 133, 0.5)',
-                      }}
-                    >
-                      <Crown className="h-3.5 w-3.5 flex-shrink-0" />
-                      <span className="truncate">{selectedTrustMembership.role}</span>
-                    </span>
+                )}
+
+                <div >
+                <div className="min-w-0 flex-1">
+                  {userProfile?.name ? (
+                    <div className="flex items-center min-w-0">
+                      <p className="text-[14px] font-semibold truncate leading-snug relative top-[3px]" style={{ color: showSelectedTrustMemberBanner ? '#f8f0c5' : headingColor }}>
+                        <span className="font-extrabold">{userProfile.name}</span>
+                      </p>
+                    </div>
                   ) : null}
+                </div>
+                <div>
+                  {showSelectedTrustMemberBanner && selectedTrustMembership?.role ? (
+                  <span
+                    className="inline-flex items-center  text-[10px] uppercase tracking-[0.1em] flex-shrink-0"
+                    style={{
+                      // background: 'linear-gradient(135deg, #5a3f00 0%, #d4a017 100%)',
+                      color: '#fff8db',
+                      // border: '1px solid rgba(255, 227, 133, 0.5)',
+                    }}
+                  >
+                    {/* <Crown className="h-3.5 w-3.5 flex-shrink-0" /> */}
+                    <span className="truncate">{selectedTrustMembership.role}</span>
+                  </span>
+                ) : null}
+                  </div>
+                </div>
+                </div>
+                <div>
+                {showSelectedTrustMemberBanner && selectedTrustMembership?.membership_number ? (
+                  <span
+                    className="inline-flex items-center gap-1.5 rounded-full px-2 py-1 text-[10px] font-extrabold uppercase tracking-[0.12em]  flex-shrink-0"
+                    style={{
+                      background: 'linear-gradient(135deg, #5a3f00 0%, #d4a017 100%)',
+                      color: '#fff8db',
+                      border: '1px solid rgba(255, 227, 133, 0.5)',
+                    }}
+                  >
+                    <Crown className="h-3.5 w-3.5 flex-shrink-0" />
+                    <span className="truncate">{selectedTrustMembership.membership_number}</span>
+                  </span>
+                ) : null}
+                </div>
               </div>
             </div>
           </div>
@@ -2344,7 +2665,7 @@ const Home = ({ onNavigate, onLogout, isMember }) => {
       </div>
 
 
-      <Sidebar isOpen={isMenuOpen} onClose={() => setIsMenuOpen(false)} onNavigate={onNavigate} currentPage="home" />
+      <Sidebar isOpen={isMenuOpen} onClose={() => setIsMenuOpen(false)} onNavigate={onNavigate} currentPage="home" onLogout={onLogout} />
 
       {/* ── Dynamic Section Renderer (order from theme.homeLayout) ── */}
       <div
@@ -2354,422 +2675,430 @@ const Home = ({ onNavigate, onLogout, isMember }) => {
           userSelect: isNotificationsOpen ? 'none' : 'auto'
         }}
       >
-      {(() => {
-        const SECTIONS = {
-          trustList: showTrustSelector && trustList.length > 0 ? (
-            <div
-              className="flex gap-2 overflow-x-auto overscroll-x-contain px-4 py-2"
-              style={{
-                scrollbarWidth: 'none',
-                background: 'transparent',
-                borderBottom: 'none',
-                animation: resolveAnimation('trustList', 'cards')
-              }}
-              key="trustList"
-            >
-              {trustList.map((trust) => {
-                const isActive = normalizeTrustId(trust.id) === selectedTrustId;
-                return (
-                  <button
-                    key={trust.id || trust.name}
-                    onClick={() => handleTrustSelect(trust.id)}
-                    className="flex-shrink-0 w-10 h-10 rounded-xl flex items-center justify-center overflow-hidden transition-all duration-200"
-                    style={{
-                      border: isActive
-                        ? `2.5px solid ${theme.primary}`
-                        : '2px solid color-mix(in srgb, var(--body-text-color) 18%, var(--surface-color))',
-                      backgroundColor: 'color-mix(in srgb, var(--app-page-bg) 86%, var(--surface-color))',
-                      transform: isActive ? 'scale(1.05)' : 'scale(1)',
-                      boxShadow: isActive
-                        ? '0 4px 12px color-mix(in srgb, var(--brand-navy) 22%, transparent)'
-                        : 'none',
-                    }}
-                    title={trust?.name || ''}
-                  >
-                    <TrustChipIcon
-                      iconUrl={trust?.icon_url || trustIconUrlById[normalizeTrustId(trust?.id)]}
-                      altText={trust?.name || 'Trust'}
-                      versionToken={trustIconVersionById[normalizeTrustId(trust?.id)] || resolveTrustIconToken(trust, '')}
-                    />
-                  </button>
-                );
-              })}
-            </div>
-          ) : null,
-          marquee: ff('feature_marquee') && marqueeUpdates.length > 0 ? (
-            <div
-              className="mt-0 mb-2 w-full overflow-hidden"
-              style={{
-                background: 'var(--marquee-bg)',
-                boxShadow: `0 2px 12px ${applyOpacity(theme.primary, 0.3)}`,
-                animation: resolveAnimation('marquee', 'cards')
-              }}
-              key="marquee"
-            >
-              <div className="flex items-stretch">
-                <div className="flex-shrink-0 px-3 flex items-center gap-2" style={{ background: `color-mix(in srgb, ${theme.secondary} 28%, transparent)` }}>
-                  <span className="relative flex h-2 w-2">
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-70" style={{ background: 'var(--marquee-text)' }} />
-                    <span className="relative inline-flex rounded-full h-2 w-2" style={{ background: 'var(--marquee-text)' }} />
-                  </span>
-                  <span className="text-[11px] font-bold uppercase tracking-widest whitespace-nowrap" style={{ color: 'var(--marquee-text)' }}>
-                    {flagsData?.feature_marquee?.display_name || 'Updates'}
-                  </span>
-                </div>
-                <div className="w-px my-1.5" style={{ background: 'color-mix(in srgb, var(--marquee-text) 30%, transparent)' }} />
-                <div className="overflow-hidden flex-1 py-2">
-                  <div className="marquee-track flex">
-                    {[...marqueeUpdates, ...marqueeUpdates].map((msg, i) => (
-                      <span key={i} className="whitespace-nowrap text-xs font-semibold px-6" style={{ color: 'var(--marquee-text)' }}>⭐ {msg}</span>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            </div>
-          ) : null,
-          gallery: ff('feature_gallery') ? (
-            <div className="px-4 mt-5 mb-3" style={{ animation: resolveAnimation('gallery', 'zoomIn') }} key="gallery">
-              {/* Gallery card */}
-              <div
-                className="rounded-3xl overflow-hidden"
-                style={{
-                  boxShadow: `0 10px 32px ${applyOpacity(theme.secondary, 0.16)}, 0 2px 8px ${applyOpacity(theme.primary, 0.08)}`,
-                  border: `1px solid ${applyOpacity(theme.primary, 0.1)}`,
-                }}
-              >
-                <div className="h-[3px]" style={{ background: `linear-gradient(90deg, ${theme.primary}, ${theme.secondary})` }} />
-                {showGalleryLoader ? (
-                  <div className="w-full h-[200px] flex items-center justify-center" style={{ background: theme.accentBg }}>
-                    <div className="flex flex-col items-center gap-2">
-                      <div className="w-8 h-8 rounded-full border-2 border-t-transparent animate-spin" style={{ borderColor: theme.primary, borderTopColor: 'transparent' }} />
-                      <p className="text-xs font-medium" style={{ color: theme.secondary }}>Loading gallery...</p>
+      
+        {(() => {
+          const SECTIONS = {
+            trustList: showTrustSelector && (selectedTrust || otherTrusts.length > 0) ? (
+              <div key="trustList">
+                <p className="text-sm font-semibold text-muted-foreground ml-4 mt-1" style={{color: ` ${theme.primary}`}}>Our trusts</p>
+                <div
+                  className="flex items-center gap-2 px-4 py-2"
+                  style={{
+                    animation: resolveAnimation('trustList', 'cards'),
+                  }}
+                >
+                  {selectedTrust ? (
+                    <div className="flex-shrink-0">
+                      {renderTrustChip(selectedTrust)}
                     </div>
-                  </div>
-                ) : carouselImages.length > 0 ? (
-                  <ImageSlider images={carouselImages} onNavigate={onNavigate} />
-                ) : (
-                  <button
-                    onClick={() => onNavigate('gallery')}
-                    className="w-full h-[200px] flex flex-col items-center justify-center gap-3"
-                    style={{
-                      background: 'color-mix(in srgb, var(--app-page-bg) 80%, var(--surface-color))'
-                    }}
-                  >
+                  ) : null}
+                  {otherTrusts.length > 0 ? (
                     <div
-                      className="w-14 h-14 rounded-2xl flex items-center justify-center"
-                      style={{ background: `linear-gradient(135deg, ${theme.accent}, ${theme.accentBg})` }}
-                    >
-                      <Image className="h-7 w-7" style={{ color: theme.primary }} />
-                    </div>
-                    <div>
-                      <p className="text-sm font-bold text-center" style={{ color: theme.secondary }}>
-                        {(activeTrust?.name || defaultTrust?.name || DEFAULT_TRUST_NAME)} Gallery
-                      </p>
-                      <p
-                        className="text-xs text-center mt-0.5"
-                        style={{ color: 'color-mix(in srgb, var(--body-text-color) 72%, var(--surface-color))' }}
-                      >
-                        {galleryError || 'Tap to open gallery'}
-                      </p>
-                    </div>
-                  </button>
-                )}
-              </div>
-            </div>
-          ) : null,
-
-          quickActions: enabledQuickActions.length > 0 ? (
-            <div className="px-4 mt-5 mb-4" style={{ animation: resolveAnimation('quickActions', 'cards') }} key="quickActions">
-              <div className="grid grid-cols-2 gap-3">
-                {enabledQuickActions.map((action) => {
-                  return (
-                    <button
-                      key={action.id}
-                      onClick={() => onNavigate(action.route)}
-                      className="rounded-2xl text-left transition-all active:scale-[0.97] duration-150"
+                      className="flex min-w-0 flex-1 gap-2 overflow-x-auto overscroll-x-contain py-2 pl-2"
                       style={{
-                        background: quickActionsBg,
-                        border: `1px solid color-mix(in srgb, ${quickActionsText} 22%, transparent)`,
-                        boxShadow: `0 4px 16px color-mix(in srgb, ${quickActionsText} 14%, transparent), 0 1px 4px color-mix(in srgb, ${quickActionsText} 10%, transparent)`,
-                        overflow: 'hidden',
+                        scrollbarWidth: 'none',
+                        background: 'transparent',
+                        borderBottom: 'none',
+                        scrollBehavior: 'smooth'
+                      }}
+                      ref={trustListScrollRef}
+                    >
+                      {otherTrusts.map((trust) => renderTrustChip(trust))}
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+            ) : null,
+            marquee: ff('feature_marquee') && marqueeUpdates.length > 0 ? (
+              <div
+                className="mt-0 mb-2 w-full overflow-hidden"
+                style={{
+                  background: 'var(--marquee-bg)',
+                  boxShadow: `0 2px 12px ${applyOpacity(theme.primary, 0.3)}`,
+                  animation: resolveAnimation('marquee', 'cards')
+                }}
+                key="marquee"
+              >
+                <div className="flex items-stretch">
+                  <div className="flex-shrink-0 px-3 flex items-center gap-2" style={{ background: `color-mix(in srgb, ${theme.secondary} 28%, transparent)` }}>
+                    <span className="relative flex h-2 w-2">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-70" style={{ background: 'var(--marquee-text)' }} />
+                      <span className="relative inline-flex rounded-full h-2 w-2" style={{ background: 'var(--marquee-text)' }} />
+                    </span>
+                    <span className="text-[11px] font-bold uppercase tracking-widest whitespace-nowrap" style={{ color: 'var(--marquee-text)' }}>
+                      {flagsData?.feature_marquee?.display_name || 'Updates'}
+                    </span>
+                  </div>
+                  <div className="w-px my-1.5" style={{ background: 'color-mix(in srgb, var(--marquee-text) 30%, transparent)' }} />
+                  <div className="overflow-hidden flex-1 py-2">
+                    <div className="marquee-track flex">
+                      {[...marqueeUpdates, ...marqueeUpdates].map((msg, i) => (
+                        <span key={i} className="whitespace-nowrap text-xs font-semibold px-6" style={{ color: 'var(--marquee-text)' }}>⭐ {msg}</span>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ) : null,
+            gallery: ff('feature_gallery') ? (
+              <div className="relative px-4 mt-5 mb-3" style={{ animation: resolveAnimation('gallery', 'zoomIn') }} key="gallery">
+                <div className="pointer-events-none absolute -top-1.5 left-7 z-20 ">
+                  <span
+                    className="inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[10px] font-extrabold uppercase tracking-[0.18em] relative top-[12px]  flex-shrink-0"
+                    style={{
+                      color: onPrimaryText,
+                      background: `linear-gradient(135deg, ${applyOpacity(theme.primary, 0.94)}, ${applyOpacity(theme.secondary, 0.88)})`,
+                      border: `1px solid ${applyOpacity(theme.secondary, 0.42)}`,
+                      boxShadow: `0 10px 22px ${applyOpacity(theme.primary, 0.34)}, 0 2px 6px ${applyOpacity(theme.secondary, 0.18)}`,
+                      backdropFilter: 'blur(10px)',
+                      textShadow: '0 1px 2px rgba(0, 0, 0, 0.18)',
+                    }}
+                  >
+                    <span className="h-1.5 w-1.5 rounded-full" style={{ background: onPrimaryText }} />
+                    Gallery
+                  </span>
+                </div>
+
+                <div
+                  className="rounded-3xl overflow-hidden"
+                  style={{
+                    boxShadow: `0 10px 32px ${applyOpacity(theme.secondary, 0.16)}, 0 2px 8px ${applyOpacity(theme.primary, 0.08)}`,
+                    border: `1px solid ${applyOpacity(theme.primary, 0.1)}`,
+                  }}
+                >
+                  <div className="h-[3px]" style={{ background: `linear-gradient(90deg, ${theme.primary}, ${theme.secondary})` }} />
+                  {showGalleryLoader ? (
+                    <div className="w-full h-[200px] flex items-center justify-center" style={{ background: theme.accentBg }}>
+                      <div className="flex flex-col items-center gap-2">
+                        <div className="w-8 h-8 rounded-full border-2 border-t-transparent animate-spin" style={{ borderColor: theme.primary, borderTopColor: 'transparent' }} />
+                        <p className="text-xs font-medium" style={{ color: theme.secondary }}>Loading gallery...</p>
+                      </div>
+                    </div>
+                  ) : carouselImages.length > 0 ? (
+                    <ImageSlider images={carouselImages} onNavigate={onNavigate} />
+                  ) : (
+                    <button
+                      onClick={() => onNavigate('gallery')}
+                      className="w-full h-[200px] flex flex-col items-center justify-center gap-3"
+                      style={{
+                        background: 'color-mix(in srgb, var(--app-page-bg) 80%, var(--surface-color))'
                       }}
                     >
                       <div
-                        className="h-[4px]"
-                        style={{ background: `linear-gradient(90deg, ${quickActionsText} 0%, color-mix(in srgb, ${quickActionsText} 60%, var(--surface-color)) 100%)` }}
-                      />
-                      <div className="p-3.5">
-                        <div
-                          className="w-10 h-10 rounded-xl flex items-center justify-center mb-2.5"
-                          style={{
-                            background: quickActionsIconBg,
-                            border: `1px solid color-mix(in srgb, ${quickActionsText} 20%, transparent)`,
-                          }}
+                        className="w-14 h-14 rounded-2xl flex items-center justify-center"
+                        style={{ background: `linear-gradient(135deg, ${theme.accent}, ${theme.accentBg})` }}
+                      >
+                        <Image className="h-7 w-7" style={{ color: theme.primary }} />
+                      </div>
+                      <div>
+                        <p className="text-sm font-bold text-center" style={{ color: theme.secondary }}>
+                          {(activeTrust?.name || defaultTrust?.name || DEFAULT_TRUST_NAME)} Gallery
+                        </p>
+                        <p
+                          className="text-xs text-center mt-0.5"
+                          style={{ color: 'color-mix(in srgb, var(--body-text-color) 72%, var(--surface-color))' }}
                         >
-                          <img
-                            src={action.icon_url}
-                            alt={action.displayName}
-                            className="h-[18px] w-[18px] object-contain"
-                          />
-                        </div>
-                        <div className="flex items-start justify-between gap-1">
-                          <div className="min-w-0 flex-1">
-                            <h3 className="text-[12px] font-extrabold leading-snug" style={{ color: quickActionsText }}>
-                              {action.displayName}
-                            </h3>
-                            <p className="text-[10px] font-medium mt-0.5 leading-snug" style={{ color: `color-mix(in srgb, ${quickActionsText} 80%, var(--surface-color))` }}>
-                              {action.tagline}
-                            </p>
-                          </div>
-                          <ChevronRight className="h-3.5 w-3.5 flex-shrink-0 mt-0.5" style={{ color: `color-mix(in srgb, ${quickActionsText} 72%, transparent)` }} />
-                        </div>
+                          {galleryError || 'Tap to open gallery'}
+                        </p>
                       </div>
                     </button>
-                  );
-                })}
+                  )}
+                </div>
               </div>
-            </div>
-          ) : null,
+            ) : null,
 
-          sponsors: (
-            <div className="px-4 mt-5 mb-4" style={{ animation: resolveAnimation('sponsors', 'cards') }} key="sponsors">
-              {sponsors.length > 0 ? (
-              <div className="relative">
-                <div
-                  className="relative overflow-hidden rounded-3xl"
-                  onTouchStart={handleSponsorTouchStart}
-                  onTouchMove={handleSponsorTouchMove}
-                  onTouchEnd={handleSponsorTouchEnd}
-                >
-                  <div
-                    className="absolute inset-0 pointer-events-none"
-                    style={{
-                      background: sponsorOverlayBackground,
-                    }}
-                  />
-                  <div className="relative min-h-[196px]">
-                  {visibleSponsors.map((sponsor, idx) => {
-                    if (!sponsor?.id) return null;
-                    const isActive = idx === activeVisibleSponsorIndex;
+            quickActions: enabledQuickActions.length > 0 ? (
+              <div className="px-4 mt-5 mb-4" style={{ animation: resolveAnimation('quickActions', 'cards') }} key="quickActions">
+                <div className="grid grid-cols-2 gap-3">
+                  {enabledQuickActions.map((action) => {
                     return (
                       <button
-                        key={sponsor.id}
-                        onClick={() => {
-                          console.log(`[Sponsor] clicked sponsor.id=${sponsor.id}`);
-                          setSelectedSponsorId(sponsor.id);
-                          setPinnedSponsor(currentSponsorTrustId, sponsor.id);
-                          onNavigate('sponsors');
+                        key={action.id}
+                        onClick={() => onNavigate(action.route)}
+                        className="rounded-2xl text-left transition-all active:scale-[0.97] duration-150"
+                        style={{
+                          background: quickActionsBg,
+                          border: `1px solid color-mix(in srgb, ${quickActionsText} 22%, transparent)`,
+                          boxShadow: `0 4px 16px color-mix(in srgb, ${quickActionsText} 14%, transparent), 0 1px 4px color-mix(in srgb, ${quickActionsText} 10%, transparent)`,
+                          overflow: 'hidden',
                         }}
-                        className={`absolute inset-0 w-full text-left transition-all duration-700 ease-out ${isActive ? 'opacity-100 translate-y-0 scale-100 pointer-events-auto' : 'opacity-0 translate-y-1 scale-[0.99] pointer-events-none'}`}
-                        aria-hidden={!isActive}
-                        tabIndex={isActive ? 0 : -1}
                       >
                         <div
-                          className="relative rounded-3xl p-[1px] h-full overflow-hidden"
-                          style={{
-                            background: `linear-gradient(130deg, ${sponsorTheme.borderColor1}44 0%, ${sponsorTheme.borderColor2}33 40%, ${sponsorTheme.borderColor1}2E 100%)`,
-                            boxShadow: `0 12px 28px ${sponsorTheme.shadowColor}1F`,
-                          }}
-                        >
+                          className="h-[4px]"
+                          style={{ background: `linear-gradient(90deg, ${quickActionsText} 0%, color-mix(in srgb, ${quickActionsText} 60%, var(--surface-color)) 100%)` }}
+                        />
+                        <div className="p-3.5">
                           <div
-                            className="relative rounded-3xl p-5 flex items-center gap-4 h-full overflow-hidden"
+                            className="w-10 h-10 rounded-xl flex items-center justify-center mb-2.5"
                             style={{
-                              background: applyOpacity(sponsorTheme.cardBgColor, sponsorTheme.cardBgOpacity),
-                              backdropFilter: 'blur(8px)',
+                              background: quickActionsIconBg,
+                              border: `1px solid color-mix(in srgb, ${quickActionsText} 20%, transparent)`,
                             }}
                           >
-                            <div
-                            className="absolute inset-0 pointer-events-none opacity-45"
-                            style={{
-                                background: `repeating-linear-gradient(135deg, transparent 0 13px, ${sponsorTheme.patternColor}44 13px 14px)`,
-                            }}
-                          />
-                            <div
-                              className="absolute -top-10 -right-10 h-24 w-24 rounded-full pointer-events-none"
-                              style={{ background: `radial-gradient(circle, ${sponsorTheme.glowColor1}66 0%, transparent 70%)` }}
+                            <img
+                              src={action.icon_url}
+                              alt={action.displayName}
+                              className="h-[18px] w-[18px] object-contain"
                             />
-                            <div
-                              className="absolute -bottom-10 -left-8 h-20 w-20 rounded-full pointer-events-none"
-                              style={{ background: `radial-gradient(circle, ${sponsorTheme.glowColor2}4A 0%, transparent 75%)` }}
-                            />
-
-                            <div className="w-20 h-20 rounded-[1.2rem] p-[2px] flex-shrink-0 z-10" style={{ background: `linear-gradient(145deg, ${sponsorTheme.photoRingColor1}55, ${sponsorTheme.photoRingColor2}44)` }}>
-                              <div
-                                className="w-full h-full rounded-[1rem] flex items-center justify-center overflow-hidden"
-                                style={{
-                                  background: surfaceColor,
-                                  boxShadow: `0 6px 16px ${sponsorTheme.photoRingColor1}1A`,
-                                }}
-                              >
-                                {(sponsor.photo_url || sponsor.photo_thumb_url)
-                                  ? <img src={sponsor.photo_url || sponsor.photo_thumb_url} alt={sponsor.name || sponsor.company_name} className="w-full h-full object-cover object-center" loading="lazy" decoding="async" />
-                                  : <Star className="h-6 w-6" style={{ color: sponsorTheme.textColor }} />}
-                              </div>
-                            </div>
-
-                            <div className="flex-1 min-w-0 z-10">
-                              <div className="mb-1.5">
-                                <div
-                                  className="inline-flex items-center gap-1.5 rounded-full px-3 py-1"
-                                  style={{ background: sponsorTheme.badgeBgColor, border: `1px solid ${sponsorTheme.badgeTextColor}30`, boxShadow: `0 1px 5px ${sponsorTheme.badgeTextColor}12` }}
-                                >
-                                  <span className="w-2 h-2 rounded-full inline-block animate-pulse" style={{ background: sponsorTheme.badgeDotColor }} />
-                                  <span className="text-[10px] font-bold uppercase tracking-[0.2em]" style={{ color: sponsorTheme.badgeTextColor }}>
-                                    {sponsor.badge_label || 'Official Sponsor'}
-                                  </span>
-                                </div>
-                              </div>
-
-                              <div className="text-[20px] font-extrabold leading-snug truncate" style={{ color: sponsorTheme.titleColor }}>
-                                {sponsor.name || sponsor.company_name}
-                              </div>
-                              <div className="mt-1 flex items-center gap-1.5 min-w-0">
-                                <Building2 className="h-4 w-4 flex-shrink-0" style={{ color: sponsorTheme.subtitleColor }} />
-                                <p className="text-[14px] font-bold truncate tracking-wide" style={{ color: sponsorTheme.subtitleColor }}>
-                                  {sponsor.company_name || sponsor.position || 'Community partner'}
-                                </p>
-                              </div>
-
-                              <p className="text-[13px] font-medium mt-2 line-clamp-3 leading-relaxed" style={{ color: sponsorTheme.descriptionColor }}>
-                                {sponsor.shortText || 'Supporting our community with care and commitment.'}
+                          </div>
+                          <div className="flex items-start justify-between gap-1">
+                            <div className="min-w-0 flex-1">
+                              <h3 className="text-[12px] font-extrabold leading-snug" style={{ color: quickActionsText }}>
+                                {action.displayName}
+                              </h3>
+                              <p className="text-[10px] font-medium mt-0.5 leading-snug" style={{ color: `color-mix(in srgb, ${quickActionsText} 80%, var(--surface-color))` }}>
+                                {action.tagline}
                               </p>
                             </div>
-
+                            <ChevronRight className="h-3.5 w-3.5 flex-shrink-0 mt-0.5" style={{ color: `color-mix(in srgb, ${quickActionsText} 72%, transparent)` }} />
                           </div>
                         </div>
                       </button>
                     );
                   })}
-                  </div>
                 </div>
-                {sponsors.length > 1 && (
-                  <div className="flex justify-center items-center gap-1.5 mt-2">
-                    {visibleSponsors.map((_, idx) => {
-                      const globalIndex = sponsorChunkStart + idx;
-                      const isActive = globalIndex === sponsorIndex;
-                      return (
-                        <span
-                          key={`sponsor-indicator-${globalIndex}`}
-                          className="h-1.5 rounded-full transition-all duration-300"
+              </div>
+            ) : null,
+
+            sponsors: ff('feature_sponsors') ? (
+              <div className="px-4 mt-5 mb-4" style={{ animation: resolveAnimation('sponsors', 'cards') }} key="sponsors">
+                {sponsors.length > 0 ? (
+                  <div className="relative">
+                    <div
+                      className="relative overflow-hidden rounded-3xl"
+                      onTouchStart={handleSponsorTouchStart}
+                      onTouchMove={handleSponsorTouchMove}
+                      onTouchEnd={handleSponsorTouchEnd}
+                    >
+                      <div
+                        className="absolute inset-0 pointer-events-none"
+                        style={{
+                          background: sponsorOverlayBackground,
+                        }}
+                      />
+                      <div className="relative min-h-[196px]">
+                        {visibleSponsors.map((sponsor, idx) => {
+                          if (!sponsor?.id) return null;
+                          const isActive = idx === activeVisibleSponsorIndex;
+                          return (
+                            <button
+                              key={sponsor.id}
+                              onClick={() => {
+                                console.log(`[Sponsor] clicked sponsor.id=${sponsor.id}`);
+                                setSelectedSponsorId(sponsor.id);
+                                setPinnedSponsor(currentSponsorTrustId, sponsor.id);
+                                onNavigate('sponsors');
+                              }}
+                              className={`absolute inset-0 w-full text-left transition-all duration-700 ease-out ${isActive ? 'opacity-100 translate-y-0 scale-100 pointer-events-auto' : 'opacity-0 translate-y-1 scale-[0.99] pointer-events-none'}`}
+                              aria-hidden={!isActive}
+                              tabIndex={isActive ? 0 : -1}
+                            >
+                              <div
+                                className="relative rounded-3xl p-[1px] h-full overflow-hidden"
+                                style={{
+                                  background: `linear-gradient(130deg, ${sponsorTheme.borderColor1}44 0%, ${sponsorTheme.borderColor2}33 40%, ${sponsorTheme.borderColor1}2E 100%)`,
+                                  boxShadow: `0 12px 28px ${sponsorTheme.shadowColor}1F`,
+                                }}
+                              >
+                                <div
+                                  className="relative rounded-3xl p-5 flex items-center gap-4 h-full overflow-hidden"
+                                  style={{
+                                    background: applyOpacity(sponsorTheme.cardBgColor, sponsorTheme.cardBgOpacity),
+                                    backdropFilter: 'blur(8px)',
+                                  }}
+                                >
+                                  <div
+                                    className="absolute inset-0 pointer-events-none opacity-45"
+                                    style={{
+                                      background: `repeating-linear-gradient(135deg, transparent 0 13px, ${sponsorTheme.patternColor}44 13px 14px)`,
+                                    }}
+                                  />
+                                  <div
+                                    className="absolute -top-10 -right-10 h-24 w-24 rounded-full pointer-events-none"
+                                    style={{ background: `radial-gradient(circle, ${sponsorTheme.glowColor1}66 0%, transparent 70%)` }}
+                                  />
+                                  <div
+                                    className="absolute -bottom-10 -left-8 h-20 w-20 rounded-full pointer-events-none"
+                                    style={{ background: `radial-gradient(circle, ${sponsorTheme.glowColor2}4A 0%, transparent 75%)` }}
+                                  />
+
+                                  <div className="w-20 h-20 rounded-[1.2rem] p-[2px] flex-shrink-0 z-10" style={{ background: `linear-gradient(145deg, ${sponsorTheme.photoRingColor1}55, ${sponsorTheme.photoRingColor2}44)` }}>
+                                    <div
+                                      className="w-full h-full rounded-[1rem] flex items-center justify-center overflow-hidden"
+                                      style={{
+                                        background: surfaceColor,
+                                        boxShadow: `0 6px 16px ${sponsorTheme.photoRingColor1}1A`,
+                                      }}
+                                    >
+                                      {(sponsor.photo_url || sponsor.photo_thumb_url)
+                                        ? <img src={sponsor.photo_url || sponsor.photo_thumb_url} alt={sponsor.name || sponsor.company_name} className="w-full h-full object-cover" style={{ objectPosition: '50% 20%' }} loading="lazy" decoding="async" />
+                                        : <Star className="h-6 w-6" style={{ color: sponsorTheme.textColor }} />}
+                                    </div>
+                                  </div>
+
+                                  <div className="flex-1 min-w-0 z-10">
+                                    <div className="mb-1.5">
+                                      <div
+                                        className="inline-flex items-center gap-1.5 rounded-full px-3 py-1"
+                                        style={{ background: sponsorTheme.badgeBgColor, border: `1px solid ${sponsorTheme.badgeTextColor}30`, boxShadow: `0 1px 5px ${sponsorTheme.badgeTextColor}12` }}
+                                      >
+                                        <span className="w-2 h-2 rounded-full inline-block animate-pulse" style={{ background: sponsorTheme.badgeDotColor }} />
+                                        <span className="text-[10px] font-bold uppercase tracking-[0.2em]" style={{ color: sponsorTheme.badgeTextColor }}>
+                                          {sponsor.badge_label || 'Official Sponsor'}
+                                        </span>
+                                      </div>
+                                    </div>
+
+                                    <div className="text-[20px] font-extrabold leading-snug truncate" style={{ color: sponsorTheme.titleColor }}>
+                                      {sponsor.name || sponsor.company_name}
+                                    </div>
+                                    <div className="mt-1 flex items-center gap-1.5 min-w-0">
+                                      <Building2 className="h-4 w-4 flex-shrink-0" style={{ color: sponsorTheme.subtitleColor }} />
+                                      <p className="text-[14px] font-bold truncate tracking-wide" style={{ color: sponsorTheme.subtitleColor }}>
+                                        {sponsor.company_name || sponsor.position || 'Community partner'}
+                                      </p>
+                                    </div>
+
+                                    <p className="text-[13px] font-medium mt-2 line-clamp-3 leading-relaxed" style={{ color: sponsorTheme.descriptionColor }}>
+                                      {sponsor.shortText || 'Supporting our community with care and commitment.'}
+                                    </p>
+                                  </div>
+
+                                </div>
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                    {sponsors.length > 1 && (
+                      <div className="flex justify-center items-center gap-1.5 mt-2">
+                        {visibleSponsors.map((_, idx) => {
+                          const globalIndex = sponsorChunkStart + idx;
+                          const isActive = globalIndex === sponsorIndex;
+                          return (
+                            <span
+                              key={`sponsor-indicator-${globalIndex}`}
+                              className="h-1.5 rounded-full transition-all duration-300"
+                              style={{
+                                width: isActive ? 16 : 6,
+                                background: isActive ? `linear-gradient(90deg, ${sponsorTheme.indicatorActive1}, ${sponsorTheme.indicatorActive2})` : sponsorTheme.indicatorInactive,
+                                boxShadow: isActive ? `0 1px 5px ${sponsorTheme.indicatorActive1}38` : 'none',
+                              }}
+                            />
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                ) : isSponsorSectionLoading ? (
+                  <div
+                    className="relative overflow-hidden rounded-3xl"
+                    style={{
+                      boxShadow: `0 8px 24px ${applyOpacity(theme.secondary, 0.07)}`
+                    }}
+                  >
+                    <div
+                      className="absolute inset-0 pointer-events-none"
+                      style={{
+                        background: sponsorOverlayBackground,
+                      }}
+                    />
+                    <div
+                      className="relative rounded-3xl p-[1px]"
+                      style={{
+                        background: `linear-gradient(130deg, ${sponsorTheme.borderColor1}44 0%, ${sponsorTheme.borderColor2}33 40%, ${sponsorTheme.borderColor1}2E 100%)`,
+                      }}
+                    >
+                      <div
+                        className="relative rounded-3xl p-4 min-h-[168px] overflow-hidden"
+                        style={{
+                          background: applyOpacity(sponsorTheme.cardBgColor, sponsorTheme.cardBgOpacity),
+                          backdropFilter: 'blur(8px)',
+                        }}
+                      >
+                        <div
+                          className="absolute inset-0 pointer-events-none opacity-45"
                           style={{
-                            width: isActive ? 16 : 6,
-                            background: isActive ? `linear-gradient(90deg, ${sponsorTheme.indicatorActive1}, ${sponsorTheme.indicatorActive2})` : sponsorTheme.indicatorInactive,
-                            boxShadow: isActive ? `0 1px 5px ${sponsorTheme.indicatorActive1}38` : 'none',
+                            background: `repeating-linear-gradient(135deg, transparent 0 13px, ${sponsorTheme.patternColor}44 13px 14px)`,
                           }}
                         />
-                      );
-                    })}
+                        <div className="relative z-10 h-full flex items-center gap-4">
+                          <div className="w-20 h-20 rounded-[1.2rem] animate-pulse flex-shrink-0" style={{ background: sponsorTheme.skeletonColor }} />
+                          <div className="flex-1 min-w-0 space-y-2.5">
+                            {sponsorSkeletonRows.map((row) => (
+                              <div
+                                key={`sponsor-skeleton-${row}`}
+                                className={`rounded-full animate-pulse ${row === 1 ? 'h-6 w-52' : row === 2 ? 'h-4 w-40' : 'h-4 w-32'}`}
+                                style={{ background: sponsorTheme.skeletonColor }}
+                              />
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div
+                    className="relative overflow-hidden rounded-3xl"
+                    style={{
+                      boxShadow: `0 8px 24px ${applyOpacity(theme.secondary, 0.07)}`
+                    }}
+                  >
+                    <div
+                      className="absolute inset-0 pointer-events-none"
+                      style={{
+                        background: sponsorOverlayBackground,
+                      }}
+                    />
+                    <div
+                      className="relative rounded-3xl p-[1px]"
+                      style={{
+                        background: `linear-gradient(130deg, ${sponsorTheme.borderColor1}44 0%, ${sponsorTheme.borderColor2}33 40%, ${sponsorTheme.borderColor1}2E 100%)`,
+                      }}
+                    >
+                      <div
+                        className="relative rounded-3xl p-4 min-h-[168px] overflow-hidden"
+                        style={{
+                          background: applyOpacity(sponsorTheme.cardBgColor, sponsorTheme.cardBgOpacity),
+                          backdropFilter: 'blur(8px)',
+                        }}
+                      >
+                        <div
+                          className="absolute inset-0 pointer-events-none opacity-45"
+                          style={{
+                            background: `repeating-linear-gradient(135deg, transparent 0 13px, ${sponsorTheme.patternColor}44 13px 14px)`,
+                          }}
+                        />
+                        <div className="relative z-10 h-full flex items-center gap-4">
+                          <div className="w-20 h-20 rounded-[1.2rem] flex items-center justify-center flex-shrink-0" style={{ background: sponsorTheme.skeletonColor }}>
+                            <Star className="h-6 w-6" style={{ color: sponsorTheme.badgeTextColor }} />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-[13px] font-semibold" style={{ color: sponsorTheme.emptyTextColor }}>
+                              No active sponsors available right now.
+                            </p>
+                            {!sponsors.length && import.meta.env.DEV && sponsorEmptyDebugReason && (
+                              <p className="text-[11px] mt-1 font-medium break-words" style={{ color: getThemeToken(theme, 'typography.component_overrides.error_text', theme.primary) }}>
+                                Debug: {sponsorEmptyDebugReason}
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
                   </div>
                 )}
+
               </div>
-              ) : isSponsorSectionLoading ? (
-                <div
-                  className="relative overflow-hidden rounded-3xl"
-                  style={{
-                    boxShadow: `0 8px 24px ${applyOpacity(theme.secondary, 0.07)}`
-                  }}
-                >
-                  <div
-                    className="absolute inset-0 pointer-events-none"
-                    style={{
-                      background: sponsorOverlayBackground,
-                    }}
-                  />
-                  <div
-                    className="relative rounded-3xl p-[1px]"
-                    style={{
-                      background: `linear-gradient(130deg, ${sponsorTheme.borderColor1}44 0%, ${sponsorTheme.borderColor2}33 40%, ${sponsorTheme.borderColor1}2E 100%)`,
-                    }}
-                  >
-                    <div
-                      className="relative rounded-3xl p-4 min-h-[168px] overflow-hidden"
-                      style={{
-                        background: applyOpacity(sponsorTheme.cardBgColor, sponsorTheme.cardBgOpacity),
-                        backdropFilter: 'blur(8px)',
-                      }}
-                    >
-                      <div
-                        className="absolute inset-0 pointer-events-none opacity-45"
-                        style={{
-                          background: `repeating-linear-gradient(135deg, transparent 0 13px, ${sponsorTheme.patternColor}44 13px 14px)`,
-                        }}
-                      />
-                      <div className="relative z-10 h-full flex items-center gap-4">
-                        <div className="w-20 h-20 rounded-[1.2rem] animate-pulse flex-shrink-0" style={{ background: sponsorTheme.skeletonColor }} />
-                        <div className="flex-1 min-w-0 space-y-2.5">
-                          {sponsorSkeletonRows.map((row) => (
-                            <div
-                              key={`sponsor-skeleton-${row}`}
-                              className={`rounded-full animate-pulse ${row === 1 ? 'h-6 w-52' : row === 2 ? 'h-4 w-40' : 'h-4 w-32'}`}
-                              style={{ background: sponsorTheme.skeletonColor }}
-                            />
-                          ))}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              ) : (
-                <div
-                  className="relative overflow-hidden rounded-3xl"
-                  style={{
-                    boxShadow: `0 8px 24px ${applyOpacity(theme.secondary, 0.07)}`
-                  }}
-                >
-                  <div
-                    className="absolute inset-0 pointer-events-none"
-                    style={{
-                      background: sponsorOverlayBackground,
-                    }}
-                  />
-                  <div
-                    className="relative rounded-3xl p-[1px]"
-                    style={{
-                      background: `linear-gradient(130deg, ${sponsorTheme.borderColor1}44 0%, ${sponsorTheme.borderColor2}33 40%, ${sponsorTheme.borderColor1}2E 100%)`,
-                    }}
-                  >
-                    <div
-                      className="relative rounded-3xl p-4 min-h-[168px] overflow-hidden"
-                      style={{
-                        background: applyOpacity(sponsorTheme.cardBgColor, sponsorTheme.cardBgOpacity),
-                        backdropFilter: 'blur(8px)',
-                      }}
-                    >
-                      <div
-                        className="absolute inset-0 pointer-events-none opacity-45"
-                        style={{
-                          background: `repeating-linear-gradient(135deg, transparent 0 13px, ${sponsorTheme.patternColor}44 13px 14px)`,
-                        }}
-                      />
-                      <div className="relative z-10 h-full flex items-center gap-4">
-                        <div className="w-20 h-20 rounded-[1.2rem] flex items-center justify-center flex-shrink-0" style={{ background: sponsorTheme.skeletonColor }}>
-                          <Star className="h-6 w-6" style={{ color: sponsorTheme.badgeTextColor }} />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-[13px] font-semibold" style={{ color: sponsorTheme.emptyTextColor }}>
-                            No active sponsors available right now.
-                          </p>
-                          {!sponsors.length && import.meta.env.DEV && sponsorEmptyDebugReason && (
-                            <p className="text-[11px] mt-1 font-medium break-words" style={{ color: getThemeToken(theme, 'typography.component_overrides.error_text', theme.primary) }}>
-                              Debug: {sponsorEmptyDebugReason}
-                            </p>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )}
+            ) : null,
+          };
 
-            </div>
-          ),
-        };
-
-        return resolvedHomeLayout.map((key) => {
-          if (key === 'trustList' && !showTrustSelector) return null;
-          return SECTIONS[key] || null;
-        });
-      })()}
+          return resolvedHomeLayout.map((key) => {
+            if (key === 'trustList' && !showTrustSelector) return null;
+            return SECTIONS[key] || null;
+          });
+        })()}
       </div>
 
 
@@ -2816,9 +3145,44 @@ const Home = ({ onNavigate, onLogout, isMember }) => {
           50% { transform: translateX(12px); }
         }
 
+        @keyframes trustChipMoveToFront {
+          0% {
+            transform: translateX(14px) scale(0.92);
+            opacity: 0.72;
+            box-shadow: 0 0 0 rgba(0, 0, 0, 0);
+          }
+          55% {
+            transform: translateX(-6px) scale(1.11);
+            opacity: 1;
+            box-shadow: 0 14px 28px color-mix(in srgb, var(--brand-navy) 26%, transparent);
+          }
+          100% {
+            transform: translateX(0) scale(1.05);
+            opacity: 1;
+            box-shadow: 0 4px 12px color-mix(in srgb, var(--brand-navy) 22%, transparent);
+          }
+        }
+
+        @keyframes trustChipUnreadPulse {
+          0%, 100% {
+            border-color: var(--trust-ring-color);
+            box-shadow:
+              0 0 0 0 color-mix(in srgb, var(--trust-ring-glow) 0%, transparent),
+              0 4px 12px color-mix(in srgb, var(--brand-navy) 22%, transparent);
+          }
+          50% {
+            border-color: color-mix(in srgb, var(--trust-ring-color) 68%, var(--surface-color));
+            box-shadow:
+              0 0 0 7px color-mix(in srgb, var(--trust-ring-glow) 28%, transparent),
+              0 8px 18px color-mix(in srgb, var(--trust-ring-glow) 32%, transparent);
+          }
+        }
+
         /* Hide scrollbar on home page content */
         .home-scroll::-webkit-scrollbar { display: none; }
         .home-scroll { -ms-overflow-style: none; scrollbar-width: none; }
+        .notification-list-scroll::-webkit-scrollbar { display: none; }
+        .notification-list-scroll { -ms-overflow-style: none; scrollbar-width: none; }
       `}</style>
 
       {/* ── Footer ── */}
@@ -2832,18 +3196,25 @@ const Home = ({ onNavigate, onLogout, isMember }) => {
       >
         <div className="flex items-center justify-center gap-2">
           <div className="w-8 h-px" style={{ background: 'linear-gradient(to right, transparent, var(--footer-accent))' }} />
-          <button
-            onClick={() => onNavigate('developers')}
-            className="text-[11px] font-medium transition-colors"
+          <a
+            href={footerShareLink}
+            className="text-[11px] font-medium transition-colors no-underline hover:opacity-90"
             style={{ color: 'var(--footer-text)' }}
           >
             Powered by Developers
-          </button>
+          </a>
           <div className="w-8 h-px" style={{ background: 'linear-gradient(to left, transparent, var(--footer-accent))' }} />
         </div>
         <p className="text-[11px] font-semibold text-center mt-2 opacity-80">App Version {displayTrustVersion}</p>
       </footer>
-      <TermsModal isOpen={showTermsModal} onAccept={handleAcceptTerms} />
+      <TermsModal
+        isOpen={showTermsModal}
+        onAccept={handleAcceptTerms}
+        content={termsModalContent}
+        trustName={termsModalTrustName}
+        loading={termsModalLoading}
+        error={termsModalError}
+      />
     </div>
   );
 };

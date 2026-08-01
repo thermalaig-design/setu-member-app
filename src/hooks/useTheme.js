@@ -13,10 +13,12 @@ import {
   dispatchThemeTemplateApplied
 } from '../utils/themeEvents';
 
-const LAST_THEME_CACHE_KEY = 'last_theme_cache_v2';
-const LEGACY_LAST_THEME_CACHE_KEY = 'last_theme_cache_v1';
-const getPersistTrustCacheIndexKey = (trustId) => `theme_cache_persist_trust_v2_${trustId}`;
-const getPersistThemeCacheEntryKey = (trustId, templateId) => `theme_cache_persist_v2_${trustId}_${templateId || 'none'}`;
+const LAST_THEME_CACHE_KEY = 'last_theme_cache_v3';
+const LEGACY_LAST_THEME_CACHE_KEYS = ['last_theme_cache_v2', 'last_theme_cache_v1'];
+const THEME_CACHE_VERSION = 'v3';
+const LEGACY_THEME_CACHE_VERSIONS = ['v2'];
+const getPersistTrustCacheIndexKey = (trustId) => `theme_cache_persist_trust_${THEME_CACHE_VERSION}_${trustId}`;
+const getPersistThemeCacheEntryKey = (trustId, templateId) => `theme_cache_persist_${THEME_CACHE_VERSION}_${trustId}_${templateId || 'none'}`;
 const BASE_TRUST_ID = import.meta.env.VITE_DEFAULT_TRUST_ID || '';
 const THEME_CACHE_TTL_MS = Number(import.meta.env.VITE_THEME_CACHE_TTL_MS) > 0
   ? Number(import.meta.env.VITE_THEME_CACHE_TTL_MS)
@@ -75,18 +77,19 @@ const resolveStoredTrustId = () => {
   const fallback = String(cachedDefault?.id || '').trim();
   if (fallback) return fallback;
   const lastTheme = safeParse(localStorage.getItem(LAST_THEME_CACHE_KEY) || '')
-    || safeParse(localStorage.getItem(LEGACY_LAST_THEME_CACHE_KEY) || '');
+    || LEGACY_LAST_THEME_CACHE_KEYS.map((key) => safeParse(localStorage.getItem(key) || '')).find(Boolean);
   const lastThemeTrustId = String(lastTheme?.selectedTrustId || lastTheme?.trustId || '').trim();
   return lastThemeTrustId || '';
 };
 
-const getTrustCacheIndexKey = (trustId) => `theme_cache_trust_v2_${trustId}`;
-const getThemeCacheEntryKey = (trustId, templateId) => `theme_cache_v2_${trustId}_${templateId || 'none'}`;
+const getTrustCacheIndexKey = (trustId) => `theme_cache_trust_${THEME_CACHE_VERSION}_${trustId}`;
+const getThemeCacheEntryKey = (trustId, templateId) => `theme_cache_${THEME_CACHE_VERSION}_${trustId}_${templateId || 'none'}`;
 const normalizeTemplateMetaValue = (value) => String(value || '').trim() || null;
 
 const readLastThemeCache = (trustId) => {
-  const parsedV2 = safeParse(localStorage.getItem(LAST_THEME_CACHE_KEY) || '');
-  const parsed = parsedV2 || safeParse(localStorage.getItem(LEGACY_LAST_THEME_CACHE_KEY) || '');
+  const parsedV3 = safeParse(localStorage.getItem(LAST_THEME_CACHE_KEY) || '');
+  const parsed = parsedV3
+    || LEGACY_LAST_THEME_CACHE_KEYS.map((key) => safeParse(localStorage.getItem(key) || '')).find(Boolean);
   if (!parsed || typeof parsed !== 'object') return null;
   if (!trustId) return parsed;
   const cachedTrustId = String(parsed.selectedTrustId || parsed.trustId || '').trim();
@@ -126,8 +129,8 @@ const readCachedThemeEntry = (trustId) => {
 
   // Recovery path: if trust index keys are missing but cache entries still exist,
   // pick the newest cache entry for this trust.
-  const trustSessionPrefix = `theme_cache_v2_${trustId}_`;
-  const trustPersistPrefix = `theme_cache_persist_v2_${trustId}_`;
+  const trustSessionPrefix = `theme_cache_${THEME_CACHE_VERSION}_${trustId}_`;
+  const trustPersistPrefix = `theme_cache_persist_${THEME_CACHE_VERSION}_${trustId}_`;
   let recovered = null;
 
   for (let i = 0; i < sessionStorage.length; i += 1) {
@@ -192,17 +195,27 @@ const isStale = (timestamp) => {
 
 const clearThemeCacheForTrust = (trustId) => {
   if (!trustId) return;
-  const trustPrefix = `theme_cache_v2_${trustId}_`;
-  const persistPrefix = `theme_cache_persist_v2_${trustId}_`;
+  const trustPrefix = `theme_cache_${THEME_CACHE_VERSION}_${trustId}_`;
+  const persistPrefix = `theme_cache_persist_${THEME_CACHE_VERSION}_${trustId}_`;
   const indexKey = getTrustCacheIndexKey(trustId);
   const persistIndexKey = getPersistTrustCacheIndexKey(trustId);
+  const legacySessionPrefixes = LEGACY_THEME_CACHE_VERSIONS.map((version) => `theme_cache_${version}_${trustId}_`);
+  const legacyPersistPrefixes = LEGACY_THEME_CACHE_VERSIONS.map((version) => `theme_cache_persist_${version}_${trustId}_`);
+  const legacyIndexKeys = LEGACY_THEME_CACHE_VERSIONS.map((version) => `theme_cache_trust_${version}_${trustId}`);
+  const legacyPersistIndexKeys = LEGACY_THEME_CACHE_VERSIONS.map((version) => `theme_cache_persist_trust_${version}_${trustId}`);
   const keysToRemove = [];
   const localKeysToRemove = [];
 
   for (let i = 0; i < sessionStorage.length; i += 1) {
     const key = sessionStorage.key(i);
     if (!key) continue;
-    if (key === indexKey || key === `theme_cache_${trustId}` || key.startsWith(trustPrefix)) {
+    if (
+      key === indexKey
+      || key === `theme_cache_${trustId}`
+      || key.startsWith(trustPrefix)
+      || legacyIndexKeys.includes(key)
+      || legacySessionPrefixes.some((prefix) => key.startsWith(prefix))
+    ) {
       keysToRemove.push(key);
     }
   }
@@ -210,7 +223,12 @@ const clearThemeCacheForTrust = (trustId) => {
   for (let i = 0; i < localStorage.length; i += 1) {
     const key = localStorage.key(i);
     if (!key) continue;
-    if (key === persistIndexKey || key.startsWith(persistPrefix)) {
+    if (
+      key === persistIndexKey
+      || key.startsWith(persistPrefix)
+      || legacyPersistIndexKeys.includes(key)
+      || legacyPersistPrefixes.some((prefix) => key.startsWith(prefix))
+    ) {
       localKeysToRemove.push(key);
     }
   }
@@ -221,11 +239,11 @@ const clearThemeCacheForTrust = (trustId) => {
   // Also clear localStorage last-theme cache so stale data doesn't
   // persist across sessions after a template change.
   try {
-    const stored = safeParse(localStorage.getItem(LAST_THEME_CACHE_KEY) || '');
-    const storedTrustId = String(stored?.selectedTrustId || stored?.trustId || '').trim();
-    if (storedTrustId === trustId) {
-      localStorage.removeItem(LAST_THEME_CACHE_KEY);
-    }
+    [LAST_THEME_CACHE_KEY, ...LEGACY_LAST_THEME_CACHE_KEYS].forEach((key) => {
+      const stored = safeParse(localStorage.getItem(key) || '');
+      const storedTrustId = String(stored?.selectedTrustId || stored?.trustId || '').trim();
+      if (storedTrustId === trustId) localStorage.removeItem(key);
+    });
   } catch {
     // no-op
   }
@@ -264,6 +282,24 @@ const hasTemplateMetaChanged = ({ cachedTemplateId, cachedTemplateUpdatedAt, lat
     || latestTemplateUpdatedAt !== (cachedTemplateUpdatedAt || null);
 };
 
+const APP_TEMPLATE_SELECT = 'id, trust_id, name, template_key, theme_config, home_layout, animations, custom_css, updated_at';
+
+const fetchTemplateByTrustId = async (targetTrustId) => {
+  if (!targetTrustId) return { template: null, error: null };
+  const result = await supabase
+    .from('app_templates')
+    .select(APP_TEMPLATE_SELECT)
+    .eq('trust_id', String(targetTrustId))
+    .order('updated_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  return {
+    template: result?.data || null,
+    error: result?.error || null
+  };
+};
+
 const fetchTrustThemeLink = async (targetTrustId) => {
   if (!targetTrustId) {
     return {
@@ -274,25 +310,11 @@ const fetchTrustThemeLink = async (targetTrustId) => {
     };
   }
 
-  const isMissingThemeOverridesColumnError = (error) =>
-    /column\s+Trust\.theme_overrides\s+does not exist/i.test(String(error?.message || ''))
-    || /column\s+theme_overrides\s+does not exist/i.test(String(error?.message || ''));
-
-  let trustResult = await supabase
+  const trustResult = await supabase
     .from('Trust')
-    .select('id, name, template_id, theme_overrides')
+    .select('id, name, template_id')
     .eq('id', targetTrustId)
     .maybeSingle();
-
-  // Backward compatibility: some Trust schemas do not have `theme_overrides`.
-  // In that case, retry without this column so template linking still works.
-  if (trustResult?.error && isMissingThemeOverridesColumnError(trustResult.error)) {
-    trustResult = await supabase
-      .from('Trust')
-      .select('id, name, template_id')
-      .eq('id', targetTrustId)
-      .maybeSingle();
-  }
 
   if (trustResult?.error) {
     return {
@@ -316,6 +338,26 @@ const fetchTrustThemeLink = async (targetTrustId) => {
 
   const linkedTemplateId = trust.template_id || null;
   if (!linkedTemplateId) {
+    const fallbackTemplateResult = await fetchTemplateByTrustId(targetTrustId);
+    if (fallbackTemplateResult.error) {
+      return {
+        trust,
+        template: null,
+        overrides: {},
+        linkSource: 'trust_template_fallback_query_error',
+        error: fallbackTemplateResult.error
+      };
+    }
+
+    if (fallbackTemplateResult.template) {
+      return {
+        trust,
+        template: fallbackTemplateResult.template,
+        overrides: {},
+        linkSource: 'linked_template_by_trust_id'
+      };
+    }
+
     if (import.meta.env.DEV) {
       console.log('[useTheme][TemplateLink][Fetch]', {
         trustId: targetTrustId,
@@ -329,14 +371,14 @@ const fetchTrustThemeLink = async (targetTrustId) => {
     return {
       trust,
       template: null,
-      overrides: trust.theme_overrides || {},
+      overrides: {},
       linkSource: 'no_template_link'
     };
   }
 
   const templateResult = await supabase
     .from('app_templates')
-    .select('id, trust_id, name, template_key, theme_config, home_layout, animations, custom_css, updated_at')
+    .select(APP_TEMPLATE_SELECT)
     .eq('id', linkedTemplateId)
     .maybeSingle();
 
@@ -344,31 +386,43 @@ const fetchTrustThemeLink = async (targetTrustId) => {
     return {
       trust,
       template: null,
-      overrides: trust.theme_overrides || {},
+      overrides: {},
       linkSource: 'linked_template_query_error',
       error: templateResult.error
     };
   }
 
   const template = templateResult?.data || null;
+  const fallbackTemplateResult = template ? null : await fetchTemplateByTrustId(targetTrustId);
+  const resolvedTemplate = template || fallbackTemplateResult?.template || null;
+  const linkSource = template
+    ? 'linked_template'
+    : (resolvedTemplate ? 'linked_template_by_trust_id' : 'invalid_template_link');
+
+  if (!template && fallbackTemplateResult?.error) {
+    return {
+      trust,
+      template: null,
+      overrides: {},
+      linkSource: 'trust_template_fallback_query_error',
+      error: fallbackTemplateResult.error
+    };
+  }
+
   if (import.meta.env.DEV) {
     console.log('[useTheme][TemplateLink][Fetch]', {
       trustId: targetTrustId,
       trustTemplateId: linkedTemplateId,
-      fetchedTemplateId: template?.id || null,
-      fetchedTemplateUpdatedAt: template?.updated_at || null,
-      linkSource: !template
-        ? 'invalid_template_link'
-        : 'linked_template'
+      fetchedTemplateId: resolvedTemplate?.id || null,
+      fetchedTemplateUpdatedAt: resolvedTemplate?.updated_at || null,
+      linkSource
     });
   }
   return {
     trust,
-    template: template,
-    overrides: trust.theme_overrides || {},
-    linkSource: !template
-      ? 'invalid_template_link'
-      : 'linked_template'
+    template: resolvedTemplate,
+    overrides: {},
+    linkSource
   };
 };
 

@@ -2,17 +2,18 @@ import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useBackNavigation } from './hooks';
 import { fetchTrustById } from './services/trustService';
+import { parseLegalSections, resolveLegalTrustId } from './utils/legalContent';
 
-const TRUST_ID = import.meta.env.VITE_DEFAULT_TRUST_ID || '';
 const LOGIN_TRUST_CACHE_KEY = 'cached_base_trust_info';
 
-const getCachedTrust = () => {
+const getCachedTrust = (trustId) => {
   try {
     const raw = localStorage.getItem(LOGIN_TRUST_CACHE_KEY);
     if (!raw) return null;
 
-    const { data, ts, trustId } = JSON.parse(raw);
-    if (trustId && trustId !== TRUST_ID) {
+    const { data, ts, trustId: cachedTrustId } = JSON.parse(raw);
+    const expectedTrustId = String(trustId || '').trim();
+    if (cachedTrustId && expectedTrustId && cachedTrustId !== expectedTrustId) {
       localStorage.removeItem(LOGIN_TRUST_CACHE_KEY);
       return null;
     }
@@ -24,38 +25,13 @@ const getCachedTrust = () => {
   }
 };
 
-const parseSections = (rawText) => {
-  if (!rawText) return [];
-
-  if (/<[a-z][\s\S]*>/i.test(rawText)) {
-    return [{ title: '', body: rawText, isHtml: true }];
-  }
-
-  return rawText
-    .split(/(?=\d+\.\s)/)
-    .map((part) => part.trim())
-    .filter(Boolean)
-    .map((part) => {
-      const match = part.match(/^(\d+)\.\s+(.+?)(?:\n|$)([\s\S]*)/);
-      if (!match) {
-        return { num: null, title: null, body: part, isHtml: false };
-      }
-
-      return {
-        num: match[1],
-        title: match[2].trim(),
-        body: match[3].trim(),
-        isHtml: false,
-      };
-    });
-};
-
 const PrivacyPolicy = () => {
   const navigate = useNavigate();
   useBackNavigation();
 
-  const [trustInfo, setTrustInfo] = useState(() => getCachedTrust());
-  const [content, setContent] = useState('');
+  const resolvedTrustId = resolveLegalTrustId();
+  const [trustInfo, setTrustInfo] = useState(() => getCachedTrust(resolvedTrustId));
+  const [content, setContent] = useState(() => getCachedTrust(resolvedTrustId)?.privacy_content || '');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -64,14 +40,15 @@ const PrivacyPolicy = () => {
 
     const load = async () => {
       try {
-        const cached = getCachedTrust();
+        const trustId = resolveLegalTrustId();
+        const cached = getCachedTrust(trustId);
         if (cached) {
           setTrustInfo(cached);
           setContent(cached.privacy_content || '');
           setLoading(false);
         }
 
-        const trust = await fetchTrustById(TRUST_ID);
+        const trust = await fetchTrustById(trustId);
         if (!active || !trust) return;
 
         setTrustInfo(trust);
@@ -80,10 +57,10 @@ const PrivacyPolicy = () => {
         try {
           localStorage.setItem(
             LOGIN_TRUST_CACHE_KEY,
-            JSON.stringify({ data: trust, ts: Date.now(), trustId: TRUST_ID })
+            JSON.stringify({ data: trust, ts: Date.now(), trustId })
           );
         } catch {
-          // no-op
+          // ignore cache write failures
         }
       } catch (err) {
         console.warn('[Privacy] Load error:', err);
@@ -99,14 +76,14 @@ const PrivacyPolicy = () => {
     };
   }, []);
 
-  const sections = parseSections(content);
+  const sections = parseLegalSections(content);
   const trustName = trustInfo?.name || '';
 
   return (
     <div style={styles.page}>
       <div style={styles.container}>
         <div style={styles.headerRow}>
-          <button onClick={() => navigate(-1)} style={styles.backButton} aria-label="Go back">
+          <button type="button" onClick={() => navigate(-1)} style={styles.backButton} aria-label="Go back">
             &#8592;
           </button>
           <div>
@@ -149,17 +126,19 @@ const PrivacyPolicy = () => {
 const styles = {
   page: {
     minHeight: '100vh',
-    backgroundColor: '#f8fafc',
+    background: 'var(--page-bg, var(--app-page-bg))',
     padding: '16px',
     boxSizing: 'border-box',
+    color: 'var(--body-text-color)',
   },
   container: {
     maxWidth: '900px',
     margin: '0 auto',
-    backgroundColor: '#ffffff',
-    border: '1px solid #e2e8f0',
-    borderRadius: '10px',
+    background: 'var(--surface-color)',
+    border: '1px solid color-mix(in srgb, var(--body-text-color) 12%, var(--surface-color))',
+    borderRadius: '12px',
     padding: '20px',
+    boxShadow: '0 10px 28px color-mix(in srgb, var(--body-text-color) 8%, transparent)',
   },
   headerRow: {
     display: 'flex',
@@ -168,30 +147,32 @@ const styles = {
     marginBottom: '16px',
   },
   backButton: {
-    border: '1px solid #cbd5e1',
-    backgroundColor: '#ffffff',
-    color: '#1e293b',
-    borderRadius: '6px',
-    padding: '8px 12px',
+    border: '1px solid color-mix(in srgb, var(--body-text-color) 16%, var(--surface-color))',
+    background: 'var(--app-button-bg)',
+    color: 'var(--surface-color)',
+    borderRadius: '10px',
+    width: '42px',
+    height: '42px',
     cursor: 'pointer',
     fontSize: '14px',
+    lineHeight: 1,
   },
   title: {
     margin: 0,
     fontSize: '24px',
-    color: '#0f172a',
+    color: 'var(--app-button-bg)',
   },
   subtitle: {
     margin: '4px 0 0 0',
-    color: '#475569',
+    color: 'var(--subheading-color)',
     fontSize: '14px',
   },
   message: {
-    color: '#334155',
+    color: 'var(--body-text-color)',
     fontSize: '15px',
   },
   error: {
-    color: '#b91c1c',
+    color: 'var(--brand-red-dark)',
     fontSize: '15px',
   },
   contentWrap: {
@@ -200,17 +181,17 @@ const styles = {
     gap: '14px',
   },
   section: {
-    borderTop: '1px solid #e2e8f0',
+    borderTop: '1px solid color-mix(in srgb, var(--body-text-color) 12%, var(--surface-color))',
     paddingTop: '14px',
   },
   sectionTitle: {
     margin: '0 0 8px 0',
     fontSize: '18px',
-    color: '#0f172a',
+    color: 'var(--heading-color)',
   },
   sectionBody: {
     margin: 0,
-    color: '#334155',
+    color: 'var(--body-text-color)',
     lineHeight: 1.7,
     whiteSpace: 'pre-wrap',
   },

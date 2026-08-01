@@ -1,5 +1,7 @@
 const USER_STORAGE_KEY = 'user';
 const LOGGED_IN_STORAGE_KEY = 'isLoggedIn';
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const isUuid = (value) => UUID_RE.test(String(value || '').trim());
 
 const sanitizeMemberName = (value) => {
   const raw = String(value || '').trim();
@@ -83,19 +85,22 @@ export const hasAnyTrustMembership = (user = {}) =>
 export const compactUserForStorage = (user = {}) => {
   const memberships = Array.isArray(user?.hospital_memberships) ? user.hospital_memberships : [];
   const compactMemberships = memberships.slice(0, 25).map(compactMembership);
+  const normalizedMembersId = isUuid(user?.members_id) ? String(user.members_id).trim() : null;
+  const normalizedMemberId = isUuid(user?.member_id) ? String(user.member_id).trim() : normalizedMembersId;
   const compactMemberIds = Array.from(
     new Set(
       (Array.isArray(user?.member_ids) ? user.member_ids : [])
         .filter(Boolean)
+        .filter(isUuid)
         .map((id) => String(id))
     )
   );
   const sanitizedName = sanitizeMemberName(user?.Name || user?.name || '');
 
   return {
-    id: user?.id || user?.members_id || null,
-    members_id: user?.members_id || user?.id || null,
-    member_id: user?.member_id || user?.members_id || user?.id || null,
+    id: user?.id || normalizedMembersId || null,
+    members_id: normalizedMembersId,
+    member_id: normalizedMemberId,
     member_ids: compactMemberIds,
     Name: sanitizedName,
     name: sanitizedName,

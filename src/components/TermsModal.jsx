@@ -1,54 +1,93 @@
 import React from 'react';
-import { ShieldCheck, X } from 'lucide-react';
+import { ShieldCheck } from 'lucide-react';
+import { parseLegalSections } from '../utils/legalContent';
 
-const TermsModal = ({ isOpen, onAccept }) => {
+const TermsModal = ({ isOpen, onAccept, content = '', trustName = '', loading = false, error = '' }) => {
   if (!isOpen) return null;
 
+  const sections = parseLegalSections(content);
+
   return (
-    <div className="fixed inset-y-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm w-full max-w-[430px] left-1/2 -translate-x-1/2">
-      <div className="bg-white w-full max-w-[400px] rounded-3xl shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-300">
-        <div className="bg-blue-600 p-6 text-white text-center relative">
-          <div className="bg-white/20 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-3">
-            <ShieldCheck size={32} />
-          </div>
-          <h2 className="text-2xl font-bold">Terms & Conditions</h2>
-          <p className="text-blue-100 text-sm mt-1">Please review and accept to continue</p>
-        </div>
-        
-        <div className="p-6 max-h-[60vh] overflow-y-auto space-y-4 text-gray-600 text-sm leading-relaxed">
-          <section>
-            <h3 className="font-bold text-gray-900 mb-1">1. Acceptance of Terms</h3>
-            <p>By using this application, you agree to be bound by these Terms and Conditions. This app provides hospital management services for Maharaja Agarsen Hospital.</p>
-          </section>
+    <div
+      className="fixed inset-0 z-[100] flex items-center justify-center p-4 w-full max-w-[430px] left-1/2 -translate-x-1/2"
+      style={{ background: 'color-mix(in srgb, var(--body-text-color) 62%, transparent)' }}
+    >
+      <div
+        className="w-full max-w-[420px] rounded-3xl shadow-2xl overflow-hidden max-h-[90vh]"
+        style={{
+          background: 'var(--surface-color)',
+          border: '1px solid color-mix(in srgb, var(--body-text-color) 12%, var(--surface-color))',
+          boxShadow: '0 24px 60px color-mix(in srgb, var(--body-text-color) 20%, transparent)'
+        }}
+      >
+        <div
+          className="p-6 text-center relative"
+          style={{
+            background: 'var(--app-button-bg)',
+            color: 'var(--app-button-text)'
+          }}
+        >
           
-          <section>
-            <h3 className="font-bold text-gray-900 mb-1">2. Data Privacy</h3>
-            <p>We value your privacy. Your personal and medical data is handled securely according to our Privacy Policy. We do not share your sensitive information with third parties without consent.</p>
-          </section>
-          
-          <section>
-            <h3 className="font-bold text-gray-900 mb-1">3. User Responsibility</h3>
-            <p>You are responsible for maintaining the confidentiality of your account and for all activities that occur under your account.</p>
-          </section>
-
-          <section>
-            <h3 className="font-bold text-gray-900 mb-1">4. Medical Disclaimer</h3>
-            <p>The information provided in this app is for informational purposes and does not replace professional medical advice, diagnosis, or treatment.</p>
-          </section>
-
-          <section className="bg-blue-50 p-3 rounded-xl border border-blue-100">
-            <p className="text-blue-800 font-medium">By clicking "I Accept", you confirm that you have read and agree to our Terms of Service and Privacy Policy.</p>
-          </section>
+          <h2 className=" flex align-center gap-[5px] md:gap-2 text-xl font-bold justify-center" style={{ color: 'var(--app-button-text)' }}><div
+            className="w-10 h-10 rounded-full flex items-center justify-center "
+            style={{ background: 'color-mix(in srgb, var(--surface-color) 18%, transparent)' }}
+          >
+            <ShieldCheck />
+          </div><p className='mt-[5px]'> Terms & Conditions</p></h2>
+          <p className="text-sm mt-1" style={{ color: 'color-mix(in srgb, var(--app-button-text) 72%, transparent)' }}>
+            Please review and accept to continue
+          </p>
+          {/* {trustName ? (
+            <p className="mt-2 text-xs font-semibold uppercase tracking-[0.2em]" style={{ color: 'color-mix(in srgb, var(--app-button-text) 82%, transparent)' }}>
+              {trustName}
+            </p>
+          ) : null} */}
         </div>
 
-        <div className="p-6 border-t border-gray-100 flex flex-col gap-3">
-          <button 
+        <div
+          className="p-6 max-h-[58vh] overflow-y-auto overflow-x-hidden space-y-4 text-sm leading-relaxed"
+          style={{ color: 'var(--body-text-color)' }}
+        >
+          {loading ? (
+            <p style={{ color: 'var(--body-text-color)' }}>Loading terms...</p>
+          ) : error ? (
+            <p style={{ color: 'var(--brand-red-dark)' }}>{error}</p>
+          ) : sections.length > 0 ? (
+            sections.map((section, idx) => (
+              <section key={idx} className="space-y-2">
+                {section.isHtml ? (
+                  <div style={{ color: 'var(--body-text-color)' }} dangerouslySetInnerHTML={{ __html: section.body }} />
+                ) : section.num ? (
+                  <>
+                    <h3 className="font-bold" style={{ color: 'var(--heading-color)' }}>
+                      {section.num}. {section.title}
+                    </h3>
+                    {section.body ? <p style={{ color: 'var(--body-text-color)' }}>{section.body}</p> : null}
+                  </>
+                ) : (
+                  <p style={{ color: 'var(--body-text-color)' }}>{section.body}</p>
+                )}
+              </section>
+            ))
+          ) : (
+            <p style={{ color: 'var(--body-text-color)' }}>Terms content is not available yet.</p>
+          )}
+        </div>
+
+        <div className="p-6 border-t" style={{ borderColor: 'color-mix(in srgb, var(--body-text-color) 10%, var(--surface-color))' }}>
+          <button
+            type="button"
             onClick={onAccept}
-            className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 rounded-2xl shadow-lg shadow-blue-200 transition-all active:scale-[0.98]"
+            className="w-full font-bold py-4 rounded-2xl transition-all active:scale-[0.98]"
+            style={{
+              background: 'var(--app-button-bg)',
+              color: 'var(--app-button-text)',
+              boxShadow: '0 10px 22px color-mix(in srgb, var(--brand-red) 22%, transparent)'
+            }}
           >
             I Accept
           </button>
-          <p className="text-center text-xs text-gray-400">
+          <p className="text-center text-xs mt-3" style={{ color: 'color-mix(in srgb, var(--body-text-color) 54%, var(--surface-color))' }}>
             Last updated: January 2026
           </p>
         </div>

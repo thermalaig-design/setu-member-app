@@ -1,5 +1,6 @@
 import { createReferralService, getUserReferralsService, getReferralCountsService, getAllReferralsService, updateReferralStatusService, updateReferralService, deleteReferralService } from '../services/referralService.js';
 import { sendReferralEmail } from '../services/emailService.js';
+import { createCompatibleNotification } from '../services/notificationCompatibilityService.js';
 
 /**
  * Create a new referral
@@ -106,16 +107,14 @@ ${notes ? `📝 Additional Notes: ${notes}\n\n` : ''}Hospital पहुंचन
 
 धन्यवाद! आपके स्वास्थ्य की देखभाल हमारी प्राथमिकता है।`;
 
-      await supabase
-        .from('notifications')
-        .insert({
-          user_id: String(patientPhone),
-          title: '✅ Referral Successfully Created!',
-          message: referralMsg,
-          type: 'referral',
-          is_read: false,
-          created_at: new Date().toISOString(),
-        });
+      await createCompatibleNotification({
+        user_id: String(patientPhone),
+        title: '✅ Referral Successfully Created!',
+        message: referralMsg,
+        type: 'referral',
+        is_read: false,
+        created_at: new Date().toISOString(),
+      });
 
       console.log(`✅ Referral notification created for ${patientPhone}`);
     } catch (notifError) {
@@ -271,16 +270,14 @@ ${statusMsg[status] || ''}
 
 🆔 Referral ID: #${referral.id}`;
 
-      await supabase
-        .from('notifications')
-        .insert({
-          user_id: String(referral.patient_phone),
-          title: `${statusEmoji[status] || '📋'} Referral ${status}`,
-          message: notificationMessage,
-          type: 'referral',
-          is_read: false,
-          created_at: new Date().toISOString(),
-        });
+      await createCompatibleNotification({
+        user_id: String(referral.patient_phone),
+        title: `${statusEmoji[status] || '📋'} Referral ${status}`,
+        message: notificationMessage,
+        type: 'referral',
+        is_read: false,
+        created_at: new Date().toISOString(),
+      });
 
       console.log(`✅ Referral status notification created for ${referral.patient_phone} - Status: ${status}`);
     } catch (notifError) {

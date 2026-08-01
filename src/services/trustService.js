@@ -1,12 +1,40 @@
 import { supabase } from './supabaseClient';
 
-export const fetchMemberTrusts = async (membersId) => {
-  if (!membersId) return [];
+const normalizeText = (value) => String(value || '').trim();
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const isUuid = (value) => UUID_RE.test(normalizeText(value));
+const TRUST_FULL_SELECT = 'id,name,icon_url,remark,legal_name,terms_content,privacy_content,template_id,created_at,version';
+const TRUST_BASIC_SELECT = 'id,name,icon_url,remark,created_at,version';
 
-  const { data: regMembershipsRaw, error: regError } = await supabase
+const runTrustQueryWithFallback = async (buildQuery) => {
+  const fullResult = await buildQuery(TRUST_FULL_SELECT);
+  if (!fullResult?.error) return fullResult;
+
+  const message = [
+    fullResult.error?.message,
+    fullResult.error?.details,
+    fullResult.error?.hint,
+    fullResult.error?.code
+  ].filter(Boolean).join(' ');
+
+  const canRetryBasic = /schema cache/i.test(message)
+    || /does not exist/i.test(message)
+    || ['PGRST200', 'PGRST202', 'PGRST204'].includes(fullResult.error?.code);
+
+  return canRetryBasic ? buildQuery(TRUST_BASIC_SELECT) : fullResult;
+};
+
+export const fetchMemberTrusts = async (membersId) => {
+  const normalizedMemberId = normalizeText(membersId);
+  if (!normalizedMemberId) return [];
+
+  const regQuery = supabase
     .from('reg_members')
-    .select('id, trust_id, "Membership number", role, joined_date, is_active, members_id')
-    .eq('members_id', membersId);
+    .select('id, trust_id, "Membership number", role, joined_date, is_active, members_id');
+
+  const { data: regMembershipsRaw, error: regError } = isUuid(normalizedMemberId)
+    ? await regQuery.eq('members_id', normalizedMemberId)
+    : await regQuery.eq('Membership number', normalizedMemberId);
 
   if (regError) {
     console.warn('Error fetching from reg_members:', regError);
@@ -51,8 +79,6 @@ export const fetchMemberTrusts = async (membersId) => {
   return mappedTrusts;
 };
 
-const normalizeText = (value) => String(value || '').trim();
-
 const mapMembershipRowsWithTrusts = (regMemberships = [], trustById = {}) =>
   regMemberships.map((m, index) => {
     const trustId = m?.trust_id || null;
@@ -79,7 +105,7 @@ export const fetchMemberTrustMemberships = async ({ membersId = null, membership
 
   let regMemberships = [];
 
-  if (normalizedMembersId) {
+  if (isUuid(normalizedMembersId)) {
     const { data, error } = await supabase
       .from('reg_members')
       .select('id, trust_id, "Membership number", role, joined_date, is_active, members_id')
@@ -92,16 +118,17 @@ export const fetchMemberTrustMemberships = async ({ membersId = null, membership
     }
   }
 
-  if (normalizedMembershipNo) {
+  const membershipLookupValue = normalizedMembershipNo || (!isUuid(normalizedMembersId) ? normalizedMembersId : '');
+  if (membershipLookupValue) {
     let membershipNoQuery = supabase
       .from('reg_members')
       .select('id, trust_id, "Membership number", role, joined_date, is_active, members_id')
-      .eq('Membership number', normalizedMembershipNo);
+      .eq('Membership number', membershipLookupValue);
 
     // Critical guard:
     // If members_id is known for selected account, never pull rows of another person
     // who happens to share/reuse the same membership number across trusts.
-    if (normalizedMembersId) {
+    if (isUuid(normalizedMembersId)) {
       membershipNoQuery = membershipNoQuery.eq('members_id', normalizedMembersId);
     }
 
@@ -177,18 +204,20 @@ export const fetchAllTrusts = async () => {
 };
 
 export const fetchDefaultTrust = async (preferredTrustId) => {
-  let query = supabase
-    .from('Trust')
-    .select('id,name,icon_url,remark,legal_name,terms_content,privacy_content,template_id,created_at,version')
-    .limit(1);
+  const { data, error } = await runTrustQueryWithFallback((selectClause) => {
+    let query = supabase
+      .from('Trust')
+      .select(selectClause)
+      .limit(1);
 
-  if (preferredTrustId) {
-    query = query.eq('id', preferredTrustId);
-  } else {
-    query = query.order('created_at', { ascending: false });
-  }
+    if (preferredTrustId) {
+      query = query.eq('id', preferredTrustId);
+    } else {
+      query = query.order('created_at', { ascending: false });
+    }
 
-  const { data, error } = await query;
+    return query;
+  });
   if (error) {
     throw error;
   }
@@ -202,11 +231,13 @@ export const fetchDefaultTrust = async (preferredTrustId) => {
 
 export const fetchTrustByName = async (name) => {
   if (!name) return null;
-  const { data, error } = await supabase
-    .from('Trust')
-    .select('id,name,icon_url,remark,legal_name,terms_content,privacy_content,template_id,created_at,version')
-    .eq('name', name)
-    .limit(1);
+  const { data, error } = await runTrustQueryWithFallback((selectClause) =>
+    supabase
+      .from('Trust')
+      .select(selectClause)
+      .eq('name', name)
+      .limit(1)
+  );
 
   if (error) {
     throw error;
@@ -221,11 +252,13 @@ export const fetchTrustByName = async (name) => {
 
 export const fetchTrustById = async (id) => {
   if (!id) return null;
-  const { data, error } = await supabase
-    .from('Trust')
-    .select('id,name,icon_url,remark,legal_name,terms_content,privacy_content,template_id,created_at,version')
-    .eq('id', id)
-    .limit(1);
+  const { data, error } = await runTrustQueryWithFallback((selectClause) =>
+    supabase
+      .from('Trust')
+      .select(selectClause)
+      .eq('id', id)
+      .limit(1)
+  );
 
   if (error) {
     throw error;
@@ -244,7 +277,7 @@ export const fetchShareAppLinksByTrustId = async (trustId) => {
 
   const { data, error } = await supabase
     .from('shareApp_links')
-    .select('trust_id, play_store_link, app_store_link')
+    .select('trust_id, play_store_link, app_store_link, instagram_link, facebook_link, whatsapp_link, linkedin_link, version')
     .eq('trust_id', normalizedTrustId)
     .maybeSingle();
 

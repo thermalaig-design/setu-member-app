@@ -29,7 +29,7 @@ dotenv.config();
 
 // Initialize express app
 const app = express();
-const PORT = process.env.PORT || 5003;
+const PORT = process.env.PORT || 5005;
 const TRUST_BRAND_NAME = process.env.VITE_DEFAULT_TRUST_NAME || process.env.DEFAULT_TRUST_NAME || 'Trust';
 
 // --------------------
@@ -153,5 +153,3 @@ app.listen(PORT, () => {
 
 initFirebaseAdmin();
 startNotificationPushWorker();
-
-

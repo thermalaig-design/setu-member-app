@@ -1,15 +1,19 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { flushSync } from 'react-dom';
-import { Users, ChevronRight, LogOut, Share2, PhoneCall, FileText } from 'lucide-react';
+import { Users, ChevronRight, LogOut, Share2, PhoneCall, FileText, CirclePlus, Lock, Facebook, Instagram, Linkedin, MessageCircle } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
-import { getProfile } from '../services/api';
+import { getProfile, updateMemberPrivacy } from '../services/api';
 import { fetchFeatureFlags, isFeatureEnabled } from '../services/featureFlags';
 import { fetchShareAppLinksByTrustId } from '../services/trustService';
 import { logUserSessionEvent } from '../services/sessionAuditService';
+import { useTrustDataVersion } from '../hooks/useTrustDataVersion';
 import { useAppTheme } from '../context/ThemeContext';
 import { applyOpacity } from '../utils/colorUtils';
 import { getThemeToken } from '../utils/themeUtils';
+import { getShareAppTargetLink } from '../utils/shareApp';
+import { resolveSelectedTrustMembership } from '../utils/storageUtils';
+import { MEMBER_PRIVACY_UPDATED_EVENT } from '../utils/memberIdentity';
 
 const normalizeSidebarRoute = (route = '', featureKey = '') => {
   const routeValue = String(route || '')
@@ -28,6 +32,8 @@ const normalizeSidebarRoute = (route = '', featureKey = '') => {
   if (featureValue === 'myfamily' || featureValue === 'my-family' || featureValue === 'feature-my-family' || featureValue === 'feature_my_family') return 'my-family';
   if (routeValue === 'nomination-details' || routeValue === 'nominationdetails') return 'nomination-details';
   if (featureValue === 'nominationdetails' || featureValue === 'nomination-details' || featureValue === 'feature-nomination-details' || featureValue === 'feature_nomination_details') return 'nomination-details';
+  if (routeValue === 'add-community' || routeValue === 'addcommunity') return 'add-community';
+  if (featureValue === 'addcommunity' || featureValue === 'add-community' || featureValue === 'feature-add-community' || featureValue === 'feature_add_community') return 'add-community';
   return routeValue;
 };
 
@@ -36,6 +42,7 @@ const resolveSidebarIcon = (featureKey, route) => {
   if (normalizedRoute === 'contact-us') return PhoneCall;
   if (normalizedRoute === 'my-family') return Users;
   if (normalizedRoute === 'nomination-details') return FileText;
+  if (normalizedRoute === 'add-community') return CirclePlus;
   return PhoneCall;
 };
 
@@ -68,6 +75,28 @@ const resolveNameValue = (...candidates) => {
   for (const candidate of candidates) {
     const cleaned = sanitizeMemberName(candidate);
     if (cleaned) return cleaned;
+  }
+  return '';
+};
+
+const resolveMemberRoleValue = (...candidates) => {
+  for (const candidate of candidates) {
+    const value = String(candidate || '').trim();
+    if (!value) continue;
+    const lowered = value.toLowerCase();
+    if (['n/a', 'na', 'null', 'undefined'].includes(lowered)) continue;
+    return value;
+  }
+  return 'Member';
+};
+
+const resolveMembershipNumberValue = (...candidates) => {
+  for (const candidate of candidates) {
+    const value = String(candidate || '').trim();
+    if (!value) continue;
+    const lowered = value.toLowerCase();
+    if (['n/a', 'na', 'null', 'undefined'].includes(lowered)) continue;
+    return value;
   }
   return '';
 };
@@ -129,12 +158,15 @@ const releaseGlobalScrollLocks = () => {
   document.body.style.touchAction = 'auto';
 };
 
+const APP_ORG_NAME = 'Development Organization';
+const APP_ORG_URL = 'https://teiltd.in';
+const APP_DOWNLOAD_URL = 'https://teiltd.in/app-download';
+
 const Sidebar = ({ isOpen, onClose, onNavigate, currentPage, onLogout }) => {
   const theme = useAppTheme();
   const primary = theme.primary || 'var(--brand-red)';
   const secondary = theme.secondary || 'var(--brand-navy)';
   const accent = theme.accent || 'var(--app-accent)';
-  const accentBg = theme.accentBg || 'var(--app-accent-bg)';
   const sidebarTextColor = getThemeToken(theme, 'sidebar.text_color', 'var(--sidebar-text)');
   const sidebarActiveTextColor = getThemeToken(theme, 'sidebar.active_text_color', primary);
   const sidebarMutedTextColor = getThemeToken(
@@ -142,7 +174,6 @@ const Sidebar = ({ isOpen, onClose, onNavigate, currentPage, onLogout }) => {
     'sidebar.muted_text_color',
     sidebarTextColor
   );
-  const sidebarIconColor = getThemeToken(theme, 'sidebar.icon_color', sidebarTextColor);
   const sidebarChevronColor = getThemeToken(theme, 'sidebar.chevron_color', sidebarTextColor);
   const sidebarDividerColor = getThemeToken(theme, 'sidebar.divider_color', applyOpacity(sidebarTextColor, 0.16));
   const sidebarProgressTrackColor = getThemeToken(theme, 'sidebar.progress_track_color', applyOpacity(sidebarTextColor, 0.2));
@@ -152,6 +183,22 @@ const Sidebar = ({ isOpen, onClose, onNavigate, currentPage, onLogout }) => {
   const sidebarToastBgColor = getThemeToken(theme, 'sidebar.toast_bg_color', secondary);
   const sidebarToastTextColor = getThemeToken(theme, 'sidebar.toast_text_color', 'var(--surface-color)');
   const sidebarOverlayBg = getThemeToken(theme, 'sidebar.overlay_bg', 'color-mix(in srgb, var(--app-page-bg) 60%, var(--surface-color))');
+  const sidebarSocialButtonBg = getThemeToken(
+    theme,
+    'sidebar.social_button_bg',
+    'color-mix(in srgb, var(--surface-color) 84%, var(--sidebar-bg))'
+  );
+  const sidebarSocialButtonBorder = getThemeToken(
+    theme,
+    'sidebar.social_button_border',
+    applyOpacity(sidebarTextColor, 0.12)
+  );
+  const sidebarSocialSectionBg = getThemeToken(
+    theme,
+    'sidebar.social_section_bg',
+    'color-mix(in srgb, var(--surface-color) 78%, var(--sidebar-bg))'
+  );
+  const { displayTrustVersion } = useTrustDataVersion();
   const sidebarRef = useRef(null);
   const touchStartX = useRef(0);
   const touchEndX = useRef(0);
@@ -165,12 +212,16 @@ const Sidebar = ({ isOpen, onClose, onNavigate, currentPage, onLogout }) => {
       return null;
     }
   });
+  const [selectedTrustId, setSelectedTrustId] = useState(() => String(localStorage.getItem('selected_trust_id') || '').trim());
   const [shareToast, setShareToast] = useState(false);
   const [featureFlags, setFeatureFlags] = useState({});
   const [flagsData, setFlagsData] = useState({});
   const [memberTrustLinks, setMemberTrustLinks] = useState([]);
   const [loadingTrustLinks, setLoadingTrustLinks] = useState(false);
   const [shareAppLinks, setShareAppLinks] = useState(null);
+  const [privacyEnabled, setPrivacyEnabled] = useState(false);
+  const [privacySaving, setPrivacySaving] = useState(false);
+  const appOrgLink = APP_ORG_URL;
 
   // Load feature flags when sidebar opens
   useEffect(() => {
@@ -182,9 +233,54 @@ const Sidebar = ({ isOpen, onClose, onNavigate, currentPage, onLogout }) => {
         setFlagsData(result.flagsData || {});
       }
     });
-  }, [isOpen]);
+  }, [isOpen, selectedTrustId]);
 
   const ff = (key) => isFeatureEnabled(featureFlags, key);
+
+  const openExternalLink = async (url) => {
+    const targetUrl = String(url || '').trim();
+    if (!targetUrl) return;
+    try {
+      if (Capacitor.isNativePlatform()) {
+        window.location.href = targetUrl;
+        return;
+      }
+      window.open(targetUrl, '_blank', 'noopener,noreferrer');
+    } catch {
+      window.open(targetUrl, '_blank', 'noopener,noreferrer');
+    }
+  };
+
+  const socialLinks = [
+    {
+      key: 'instagram',
+      label: 'Instagram',
+      href: shareAppLinks?.instagram_link,
+      icon: Instagram,
+      color: '#E4405F'
+    },
+    {
+      key: 'facebook',
+      label: 'Facebook',
+      href: shareAppLinks?.facebook_link,
+      icon: Facebook,
+      color: '#1877F2'
+    },
+    {
+      key: 'whatsapp',
+      label: 'WhatsApp',
+      href: shareAppLinks?.whatsapp_link,
+      icon: MessageCircle,
+      color: '#25D366'
+    },
+    {
+      key: 'linkedin',
+      label: 'LinkedIn',
+      href: shareAppLinks?.linkedin_link,
+      icon: Linkedin,
+      color: '#0A66C2'
+    }
+  ].filter((item) => String(item.href || '').trim());
 
   // Load profile data when sidebar opens
   useEffect(() => {
@@ -258,6 +354,29 @@ const Sidebar = ({ isOpen, onClose, onNavigate, currentPage, onLogout }) => {
     };
     load();
   }, [isOpen]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const syncSelectedTrust = (event) => {
+      const nextTrustId = String(event?.detail?.trustId || localStorage.getItem('selected_trust_id') || '').trim();
+      setSelectedTrustId(nextTrustId);
+    };
+
+    syncSelectedTrust();
+    window.addEventListener('trust-changed', syncSelectedTrust);
+    window.addEventListener('storage', syncSelectedTrust);
+    return () => {
+      window.removeEventListener('trust-changed', syncSelectedTrust);
+      window.removeEventListener('storage', syncSelectedTrust);
+    };
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (typeof profile?.privacy === 'boolean') {
+      setPrivacyEnabled(profile.privacy);
+    }
+  }, [profile?.privacy]);
 
   useEffect(() => {
     const syncProfileFromCache = () => {
@@ -385,6 +504,24 @@ const Sidebar = ({ isOpen, onClose, onNavigate, currentPage, onLogout }) => {
   if (!isOpen) return null;
 
   const displayName = resolveNameValue(profile?.name, userData?.Name, userData?.name) || 'User';
+  const selectedTrustMembership = resolveSelectedTrustMembership(userData || {}, selectedTrustId);
+  // const selectedTrustDisplayName = resolveNameValue(
+  //   selectedTrustName,
+  //   selectedTrustMembership?.trust_name,
+  //   selectedTrustMembership?.Trust?.name,
+  //   selectedTrustMembership?.trust?.name
+  // ) || 'Selected Trust';
+  const selectedTrustRole = resolveMemberRoleValue(
+    selectedTrustMembership?.role,
+    selectedTrustMembership?.member_role,
+    selectedTrustMembership?.type,
+    selectedTrustMembership?.membership_type
+  );
+  const selectedTrustMembershipNumber = resolveMembershipNumberValue(
+    selectedTrustMembership?.membership_number,
+    selectedTrustMembership?.['Membership number'],
+    selectedTrustMembership?.membershipNumber
+  );
   const initials = displayName.charAt(0).toUpperCase();
   const completion = calcCompletion(profile, userData);
   const completionColor = sidebarActiveTextColor;
@@ -404,6 +541,58 @@ const Sidebar = ({ isOpen, onClose, onNavigate, currentPage, onLogout }) => {
     });
   };
 
+  const handleTogglePrivacy = async () => {
+    if (privacySaving) return;
+    const nextValue = !privacyEnabled;
+    setPrivacyEnabled(nextValue);
+    setPrivacySaving(true);
+    try {
+      await updateMemberPrivacy(nextValue);
+      setProfile((prev) => (prev ? { ...prev, privacy: nextValue } : prev));
+      if (userData) {
+        const key = `userProfile_${userData.Mobile || userData.mobile || userData.id || 'default'}`;
+        try {
+          const saved = JSON.parse(localStorage.getItem(key) || '{}');
+          localStorage.setItem(key, JSON.stringify({ ...saved, privacy: nextValue }));
+        } catch {
+          // ignore cache write failures
+        }
+      }
+      // Directory/Executive Body lists cache full member rows client-side; drop them
+      // so the new privacy value is reflected next time those screens load.
+      try {
+        const keysToRemove = [];
+        for (let i = 0; i < localStorage.length; i += 1) {
+          const storageKey = localStorage.key(i);
+          if (storageKey && storageKey.startsWith('directory_cache_v3_')) keysToRemove.push(storageKey);
+        }
+        keysToRemove.forEach((storageKey) => localStorage.removeItem(storageKey));
+      } catch {
+        // ignore cache cleanup failures
+      }
+      // Patch any already-mounted Directory/Executive Body/Committee list so the
+      // change is reflected immediately instead of only after a remount/refresh.
+      window.dispatchEvent(new CustomEvent(MEMBER_PRIVACY_UPDATED_EVENT, {
+        detail: {
+          privacy: nextValue,
+          membersId: profile?.members_id || userData?.members_id || userData?.member_id || userData?.id || null,
+          mobile: userData?.Mobile || userData?.mobile || null,
+          membershipNumber:
+            profile?.membership_number ||
+            profile?.memberId ||
+            userData?.['Membership number'] ||
+            userData?.membership_number ||
+            null,
+        },
+      }));
+    } catch (err) {
+      console.error('Failed to update privacy setting:', err);
+      setPrivacyEnabled(!nextValue);
+    } finally {
+      setPrivacySaving(false);
+    }
+  };
+
   const menuItems = Object.entries(flagsData)
     .filter(([key, meta]) => {
       const resolvedRoute = normalizeSidebarRoute(meta?.route, key);
@@ -420,7 +609,11 @@ const Sidebar = ({ isOpen, onClose, onNavigate, currentPage, onLogout }) => {
         || normalizedKey === 'nominationdetails'
         || normalizedKey === 'nomination-details'
         || normalizedKey === 'feature-nomination-details';
-      return Boolean(key) && meta?.is_enabled && (isContactUs || isMyFamily || isNominationDetails);
+      const isAddCommunity = resolvedRoute === 'add-community'
+        || normalizedKey === 'addcommunity'
+        || normalizedKey === 'add-community'
+        || normalizedKey === 'feature-add-community';
+      return Boolean(key) && meta?.is_enabled && (isContactUs || isMyFamily || isNominationDetails || isAddCommunity);
     })
     .map(([key, meta]) => ({
       id: normalizeSidebarRoute(meta?.route, key),
@@ -436,6 +629,8 @@ const Sidebar = ({ isOpen, onClose, onNavigate, currentPage, onLogout }) => {
       if (ao !== bo) return ao - bo;
       return String(a.label).localeCompare(String(b.label));
     });
+  const addCommunityMenuItem = menuItems.find((item) => item.id === 'add-community');
+  const primaryMenuItems = menuItems.filter((item) => item.id !== 'add-community');
 
   return (
     <>
@@ -491,7 +686,7 @@ const Sidebar = ({ isOpen, onClose, onNavigate, currentPage, onLogout }) => {
           {/* Avatar + name row */}
           <div className="flex items-center gap-3 mb-3">
             {/* Avatar */}
-            <div className="relative flex-shrink-0">
+            <div className="relative bottom-2 flex-shrink-0">
               {profile?.profilePhotoUrl ? (
                 <img
                   src={profile.profilePhotoUrl}
@@ -519,6 +714,36 @@ const Sidebar = ({ isOpen, onClose, onNavigate, currentPage, onLogout }) => {
             {/* Name + subtitle */}
             <div className="flex-1 min-w-0">
               <p className="font-bold text-sm truncate" style={{ color: sidebarTextColor }}>{displayName}</p>
+              <p>
+            <span
+              className="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[10px] font-semibold tracking-wide uppercase mr-1"
+              style={{
+                color: sidebarBadgeTextColor,
+                background: sidebarBadgeBgColor,
+                border: `1px solid ${applyOpacity(sidebarActiveTextColor, 0.18)}`
+              }}
+              title="Selected trust role"
+            >
+              {/* <span className="opacity-75">Role</span> */}
+              <span className="normal-case tracking-normal">
+                {selectedTrustRole}
+              </span>
+            </span>
+            <span
+              className="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[10px] font-semibold tracking-wide uppercase"
+              style={{
+                color: sidebarBadgeTextColor,
+                background: applyOpacity(sidebarActiveTextColor, 0.1),
+                border: `1px solid ${applyOpacity(sidebarActiveTextColor, 0.14)}`
+              }}
+              title="Selected trust membership number"
+            >
+              {/* <span className="opacity-75">M No</span> */}
+              <span className="normal-case tracking-normal">
+                {selectedTrustMembershipNumber || 'Not available'}
+              </span>
+            </span>
+          </p>
               <p className="text-xs font-semibold mt-0.5" style={{ color: sidebarActiveTextColor }}>View &amp; Edit Profile</p>
             </div>
 
@@ -558,6 +783,8 @@ const Sidebar = ({ isOpen, onClose, onNavigate, currentPage, onLogout }) => {
         )}
 
         {/* ── Scrollable area: nav + extras ── */}
+        
+
         <div 
           className="flex-1 overflow-y-auto overflow-x-hidden"
           style={{ 
@@ -567,13 +794,13 @@ const Sidebar = ({ isOpen, onClose, onNavigate, currentPage, onLogout }) => {
             scrollBehavior: 'smooth',
             flex: '1 1 auto',
             overscrollBehavior: 'contain',
-            paddingBottom: 'calc(5.5rem + env(safe-area-inset-bottom, 0px))'
+            paddingBottom: 'calc(7rem + env(safe-area-inset-bottom, 0px))'
           }}
         >
           {/* Nav items + More Options */}
           <div className="py-3 px-3">
             <div className="space-y-1">
-              {menuItems.map((item) => {
+              {primaryMenuItems.map((item) => {
                 const cp = (currentPage || '').toLowerCase();
                 const aliasMap = {
                   'healthcare-directory': 'directory',
@@ -669,26 +896,92 @@ const Sidebar = ({ isOpen, onClose, onNavigate, currentPage, onLogout }) => {
               />
             </button>
 
+              {/* Privacy toggle — hides this member's contact/address details from Directory & Executive Body */}
+              <div
+                className="w-full flex items-center gap-3 px-4 rounded-xl select-none"
+                style={{ minHeight: '52px' }}
+              >
+                <Lock
+                  className="h-5 w-5 flex-shrink-0"
+                  style={{ color: sidebarTextColor }}
+                />
+                <div className="flex-1 text-left">
+                  <span className="font-semibold block" style={{ color: sidebarTextColor }}>
+                    Privacy Mode
+                  </span>
+                  {/* <span className="text-[10px]" style={{ color: sidebarMutedTextColor }}>
+                    Hide my details in Directory
+                  </span> */}
+                </div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={privacyEnabled}
+                  aria-label="Toggle privacy mode"
+                  onClick={handleTogglePrivacy}
+                  disabled={privacySaving}
+                  className="relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors active:scale-95 disabled:opacity-60"
+                  style={{
+                    background: privacyEnabled ? sidebarActiveTextColor : sidebarProgressTrackColor,
+                    WebkitTapHighlightColor: sidebarTapHighlightColor,
+                  }}
+                >
+                  <span
+                    className="inline-block h-4 w-4 transform rounded-full transition-transform"
+                    style={{
+                      background: 'var(--surface-color)',
+                      transform: privacyEnabled ? 'translateX(22px)' : 'translateX(4px)',
+                    }}
+                  />
+                </button>
+              </div>
+
+              {addCommunityMenuItem && (
+                <button
+                  onClick={() => { onNavigate(addCommunityMenuItem.id); onClose(); }}
+                  className="w-full flex items-center gap-3 px-4 rounded-xl transition-all text-left active:scale-95 select-none"
+                  style={{
+                    minHeight: '52px',
+                    WebkitTapHighlightColor: sidebarTapHighlightColor,
+                    background: 'transparent',
+                  }}
+                >
+                  <addCommunityMenuItem.icon
+                    className="h-5 w-5 flex-shrink-0"
+                    style={{ color: sidebarTextColor }}
+                  />
+                  <span
+                    className="font-semibold flex-1"
+                    style={{ color: sidebarTextColor }}
+                  >
+                    {addCommunityMenuItem.label}
+                  </span>
+                </button>
+              )}
+
               {/* Share Button - controlled by feature_share_app */}
               {ff('feature_share_app') && <button
               onClick={async () => {
                 try {
                   const platform = Capacitor.getPlatform();
-                  const androidLink = String(shareAppLinks?.play_store_link || '').trim();
-                  const iosLink = String(shareAppLinks?.app_store_link || '').trim();
-
-                  const targetLink = platform === 'ios'
-                    ? (iosLink || androidLink)
-                    : (androidLink || iosLink);
+                  const targetLink = getShareAppTargetLink(shareAppLinks, platform, APP_DOWNLOAD_URL);
 
                   if (!targetLink) {
                     setShareToast(true);
-                    setTimeout(() => setShareToast(false), 2500);
+                    window.setTimeout(() => setShareToast(false), 2500);
                     return;
                   }
 
                   if (Capacitor.isNativePlatform()) {
-                    window.location.href = targetLink;
+                    if (typeof navigator.share === 'function') {
+                      await navigator.share({
+                        title: 'Download the app',
+                        text: 'Install the app from this link.',
+                        url: targetLink,
+                      });
+                    } else {
+                      window.location.href = targetLink;
+                    }
                     return;
                   }
 
@@ -696,7 +989,7 @@ const Sidebar = ({ isOpen, onClose, onNavigate, currentPage, onLogout }) => {
                 } catch (err) {
                   if (err?.name === 'AbortError') return;
                   setShareToast(true);
-                  setTimeout(() => setShareToast(false), 2500);
+                  window.setTimeout(() => setShareToast(false), 2500);
                 }
               }}
               className="w-full flex items-center gap-3 px-4 rounded-xl transition-all text-left active:scale-95 select-none relative"
@@ -730,16 +1023,83 @@ const Sidebar = ({ isOpen, onClose, onNavigate, currentPage, onLogout }) => {
         </div>
 
       {/* ── Fixed Logout Button at Bottom ── */}
-      <div
-        className="absolute left-0 right-0 bottom-0 px-3 pt-3 z-50"
-        style={{
-          background: 'var(--sidebar-bg)',
+        <div
+          className="absolute left-0 right-0 bottom-0 px-3 pt-2 z-50"
+          style={{
+            background: 'var(--sidebar-bg)',
 	          borderTop: `1px solid ${sidebarDividerColor}`,
-          backdropFilter: 'blur(var(--sidebar-blur, 12px))',
-          WebkitBackdropFilter: 'blur(var(--sidebar-blur, 12px))',
-          paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom, 0px))'
-        }}
-      >
+            backdropFilter: 'blur(var(--sidebar-blur, 12px))',
+            WebkitBackdropFilter: 'blur(var(--sidebar-blur, 12px))',
+            paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom, 0px))'
+          }}
+        >
+        {socialLinks.length > 0 && (
+          <div
+            className="mb-3 px-3 py-1"
+            // style={{
+            //   background: sidebarSocialSectionBg,
+            //   borderColor: sidebarSocialSectionBg
+            // }}
+          >
+            {/* <div className="mb-2 flex items-center justify-between gap-3">
+              <span
+                className="text-[9px] font-semibold tracking-[0.16em] uppercase"
+                style={{ color: sidebarMutedTextColor }}
+              >
+                Follow us
+              </span>
+              <span
+                className="text-[9px] font-medium"
+                style={{ color: sidebarMutedTextColor, opacity: 0.8 }}
+              >
+                Social links
+              </span>
+            </div> */}
+            <div className="grid grid-cols-4 gap-[2px]">
+              {socialLinks.map((item) => {
+                const Icon = item.icon;
+                return (
+                  <button
+                    key={item.key}
+                    type="button"
+                    onClick={() => openExternalLink(item.href)}
+                    className="flex h-11 w-11 items-center justify-center rounded-full transition-all active:scale-95"
+                    style={{
+                      background: sidebarSocialButtonBg,
+                      border: `1px solid ${sidebarSocialButtonBorder}`,
+                      WebkitTapHighlightColor: sidebarTapHighlightColor
+                    }}
+                    aria-label={item.label}
+                    title={item.label}
+                  >
+                    <Icon className="h-5 w-5" style={{ color: item.color }} />
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        <div
+          className="mb-2 flex items-center justify-between gap-3 px-1"
+          style={{
+            color: sidebarMutedTextColor,
+            opacity: 0.82,
+          }}
+        >
+          <span className="text-[9px] font-medium tracking-[0.14em] uppercase">
+            Version&nbsp; {displayTrustVersion}
+          </span>
+          <a
+            href={appOrgLink}
+            className="truncate text-[9px] font-medium no-underline hover:opacity-90"
+            style={{ color: sidebarMutedTextColor }}
+            title={APP_ORG_NAME}
+          >
+            {APP_ORG_NAME}
+          </a>
+        </div>
+
         <button
           onClick={async () => {
             if (typeof onLogout === 'function') {

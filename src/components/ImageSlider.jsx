@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 
-const ImageSlider = ({ images, autoPlayInterval = 3000, onNavigate }) => {
+const ImageSlider = ({ images, autoPlayInterval = 3000, onNavigate, onImageClick }) => {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isDragging, setIsDragging] = useState(false);
   const [translateX, setTranslateX] = useState(0);
@@ -98,6 +98,10 @@ const ImageSlider = ({ images, autoPlayInterval = 3000, onNavigate }) => {
 
   const handleSliderClick = () => {
     if (wasSwipeRef.current || dragDistanceRef.current > 8) return;
+    if (typeof onImageClick === 'function') {
+      onImageClick(currentIndex);
+      return;
+    }
     if (typeof onNavigate === 'function') onNavigate('gallery');
   };
 
