@@ -46,16 +46,25 @@ const FEATURE_KEY_ALIASES = {
 };
 
 export const normalizeFeatureKey = (...values) => {
-  for (const value of values) {
-    const normalized = String(value || '')
-      .trim()
-      .toLowerCase()
-      .replace(/[-\s]+/g, '_');
-    if (!normalized) continue;
-    if (FEATURE_KEY_ALIASES[normalized]) return FEATURE_KEY_ALIASES[normalized];
-    if (normalized.startsWith('feature_')) return normalized;
-    return `feature_${normalized}`;
+  const normalizedValues = values
+    .map((value) => String(value || '').trim().toLowerCase().replace(/[-\s]+/g, '_'))
+    .filter(Boolean);
+
+  // Prefer any candidate that is already a canonical `feature_*` key.
+  const directMatch = normalizedValues.find((value) => value.startsWith('feature_'));
+  if (directMatch) return directMatch;
+
+  // Then check every candidate against the alias table — not just the
+  // first one. Some features are identified by their subname rather than
+  // their generic parent `name` (e.g. features.name = "Community" is just
+  // the parent grouping; features.subname = "Add Community" is the actual
+  // alias key). Stopping at the first (often generic) value here used to
+  // silently resolve to the wrong feature_* key.
+  for (const value of normalizedValues) {
+    if (FEATURE_KEY_ALIASES[value]) return FEATURE_KEY_ALIASES[value];
   }
+
+  if (normalizedValues.length > 0) return `feature_${normalizedValues[0]}`;
   return null;
 };
 

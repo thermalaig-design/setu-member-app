@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams, Navigate } from 'react-router-dom';
 import { useTenant } from './context/TenantContext';
 import { isReservedSlug } from './constants/reservedRoutes';
@@ -57,6 +57,27 @@ const isMacSafari = () => {
   const isMac = ua.includes('Macintosh') && !isTouchMac;
   const isRealSafari = /Safari/.test(ua) && !/Chrome|Chromium|CriOS|Edg\/|EdgiOS|OPR\/|FxiOS|Firefox/.test(ua);
   return isMac && isRealSafari;
+};
+
+// Embedded in-app browsers (WhatsApp/Instagram/Facebook) never fire
+// beforeinstallprompt and their limited chrome often can't complete an
+// install even via manual browser-menu steps — the only reliable guidance
+// is to open the link in a real browser. Checked before the iOS/Android
+// branches below since these in-app UAs can otherwise be misclassified as
+// plain iOS Safari (their UA still contains "Safari").
+const isInAppEmbeddedBrowser = () => {
+  if (typeof navigator === 'undefined') return false;
+  const ua = navigator.userAgent || '';
+  return /FBAN|FBAV|FB_IAB|FBIOS|Instagram|WhatsApp/i.test(ua);
+};
+
+// Lightweight UA check used only to pick the right install-instructions
+// copy for Android when beforeinstallprompt didn't fire (already dismissed
+// too many times, unsupported browser, etc.) — not used for any
+// functional/behavioral branching beyond which text to show.
+const isAndroid = () => {
+  if (typeof navigator === 'undefined') return false;
+  return /Android/i.test(navigator.userAgent || '');
 };
 
 const isStandaloneDisplay = () => {
@@ -192,6 +213,18 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
 
   const [deferredPrompt, setDeferredPrompt] = useState(null);
   const [installOutcome, setInstallOutcome] = useState('');
+  // Only appinstalled (not the native prompt's 'accepted' outcome) actually
+  // confirms the browser finished installing — see the appinstalled
+  // listener below and handleInstallClick's comments.
+  const [isInstalled, setIsInstalled] = useState(false);
+  // Not every Chromium build/version fires appinstalled reliably after an
+  // 'accepted' outcome (browser bugs, unusual install flows, etc.) — a ref
+  // (not state, so the timeout callback below always reads the latest
+  // value) plus a pending-timeout id let the "Finishing installation…" UI
+  // fall back to the normal Install button instead of hanging forever if
+  // that event never arrives.
+  const isInstalledRef = useRef(false);
+  const acceptedTimeoutRef = useRef(null);
   const [resolvedOnce, setResolvedOnce] = useState(() => alreadyResolvedThisSlug);
   const [membershipMessage, setMembershipMessage] = useState('');
   // Standalone (installed PWA) sessions render Home in place instead of
@@ -228,6 +261,44 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
     };
     window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
     return () => window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+  }, []);
+
+  // Keep a ref mirror of isInstalled so the safety-timeout callback below
+  // (started from handleInstallClick, possibly still pending several
+  // seconds later) always reads the latest value instead of a stale one
+  // captured at setTimeout time.
+  useEffect(() => {
+    isInstalledRef.current = isInstalled;
+  }, [isInstalled]);
+
+  // appinstalled is the only reliable install-completion signal — the
+  // native prompt's 'accepted' outcome just means the user tapped Install,
+  // not that Chrome finished installing it. Never force-navigate/launch
+  // here; only reflect the installed state in the UI (Open App below is a
+  // user-initiated click, same as everywhere else in this component).
+  useEffect(() => {
+    const handleAppInstalled = () => {
+      if (acceptedTimeoutRef.current) {
+        clearTimeout(acceptedTimeoutRef.current);
+        acceptedTimeoutRef.current = null;
+      }
+      setDeferredPrompt(null);
+      setIsInstalled(true);
+      setInstallOutcome('installed');
+    };
+    window.addEventListener('appinstalled', handleAppInstalled);
+    return () => window.removeEventListener('appinstalled', handleAppInstalled);
+  }, []);
+
+  // Not every Chromium build fires appinstalled after 'accepted' (browser
+  // bugs, unusual install flows, older/newer versions behaving
+  // inconsistently) — clear any pending safety timeout on unmount so it
+  // never fires setState after the component is gone.
+  useEffect(() => () => {
+    if (acceptedTimeoutRef.current) {
+      clearTimeout(acceptedTimeoutRef.current);
+      acceptedTimeoutRef.current = null;
+    }
   }, []);
 
   // Called by the standalone (installed PWA) auto-entry effect below: verifies
@@ -382,18 +453,61 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
   const handleInstallClick = async () => {
     if (deferredPrompt) {
       deferredPrompt.prompt();
+      // The native prompt's outcome only tells us the user tapped
+      // Install/Cancel — it is NOT confirmation the browser finished
+      // installing. For 'accepted' we deliberately do not set isInstalled
+      // here; the UI shows an intermediate "installing" state (below) and
+      // only the appinstalled listener flips isInstalled to true.
       const { outcome } = await deferredPrompt.userChoice;
       setInstallOutcome(outcome);
       setDeferredPrompt(null);
+      if (outcome === 'accepted') {
+        // Safety net for browser/version inconsistencies where appinstalled
+        // never fires after 'accepted' — don't leave the user stuck on
+        // "Finishing installation…" forever; fall back to the normal
+        // Install button so they can retry or use the manual browser menu.
+        if (acceptedTimeoutRef.current) clearTimeout(acceptedTimeoutRef.current);
+        acceptedTimeoutRef.current = setTimeout(() => {
+          acceptedTimeoutRef.current = null;
+          if (!isInstalledRef.current) setInstallOutcome('');
+        }, 8000);
+      }
       return;
     }
-    if (isIosSafari()) {
+    if (isInAppEmbeddedBrowser()) {
+      setInstallOutcome('in-app-browser');
+    } else if (isIosSafari()) {
       setInstallOutcome('ios-instructions');
     } else if (isMacSafari()) {
       setInstallOutcome('mac-safari-instructions');
+    } else if (isAndroid()) {
+      setInstallOutcome('android-manual');
     } else {
       setInstallOutcome('unsupported');
     }
+  };
+
+  // Best-effort "open the installed app" — this is a real top-level
+  // navigation (not client-side routing) to the same tenant URL we're
+  // already on, so Chrome/Android gets a chance to hand it off to the
+  // installed PWA via its app/URL association. That handoff is entirely
+  // browser/OS-controlled and not guaranteed; if it doesn't happen, this
+  // just reloads the page, which is why the helper text below points the
+  // user at their Home Screen icon as the fallback.
+  const handleOpenApp = () => {
+    window.location.href = `${window.location.origin}/app/${normalizedAppSlug}`;
+  };
+
+  // Single click handler shared by the whole card (see cardBody below) so
+  // Install/Open App/mid-install all stay mutually exclusive with no
+  // duplicate handlers on the button itself.
+  const handleCardClick = () => {
+    if (isInstalled) {
+      handleOpenApp();
+      return;
+    }
+    if (installOutcome === 'accepted') return;
+    handleInstallClick();
   };
 
   // Safari (iOS and macOS) never fires beforeinstallprompt — there is no
@@ -419,10 +533,10 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
         <div
           className="tenant-card-body"
           style={{ ...styles.cardBody, cursor: 'pointer' }}
-          onClick={handleInstallClick}
+          onClick={handleCardClick}
         >
           <p style={{ ...styles.eyebrow, color: palette.textMuted }}>
-            Welcome to {tenantTrust.name}
+            Welcome to {tenantTrust.legal_name || tenantTrust.name}
           </p>
 
           {logoUrl && (
@@ -435,37 +549,110 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
             />
           )}
           <h1 style={{ ...styles.trustName, color: palette.textPrimary }}>{tenantTrust.name}</h1>
-          <p style={{ ...styles.subheading, color: palette.textSecondary }}>
-            Get faster access and open directly.
-          </p>
 
-          <button
-            type="button"
-            className="tenant-install-btn"
-            style={{ ...styles.installBtn, background: accentGradient, color: accent.text, boxShadow: `0 10px 26px ${accentGlow(0.4)}` }}
-          >
-            <span>Install App</span>
-            <span className="tenant-install-btn-arrow" aria-hidden="true">→</span>
-          </button>
+          {isInstalled ? (
+            <>
+              <div style={{ ...styles.installedBadge, background: accentGradient, color: accent.text }} aria-hidden="true">✓</div>
+              <p style={{ ...styles.installedHeading, color: palette.textPrimary }}>
+                {tenantTrust.name} installed successfully
+              </p>
+              <p style={{ ...styles.subheading, color: palette.textSecondary }}>
+                You can now open it from your Home Screen / Apps.
+              </p>
+            </>
+          ) : (
+            <p style={{ ...styles.subheading, color: palette.textSecondary }}>
+              Get faster access and open directly.
+            </p>
+          )}
+
+          {isInstalled ? (
+            <button
+              type="button"
+              className="tenant-install-btn"
+              style={{ ...styles.installBtn, background: accentGradient, color: accent.text, boxShadow: `0 10px 26px ${accentGlow(0.4)}` }}
+            >
+              <span>Open App</span>
+              <span className="tenant-install-btn-arrow" aria-hidden="true">→</span>
+            </button>
+          ) : installOutcome === 'accepted' ? (
+            <div
+              className="tenant-install-btn"
+              style={{ ...styles.installBtn, background: 'transparent', border: `1.5px solid ${accent.from}`, color: palette.textPrimary, cursor: 'default' }}
+            >
+              <span style={{ ...styles.installingSpinner, borderTopColor: accent.from }} />
+              <span>Finishing installation…</span>
+            </div>
+          ) : (
+            <button
+              type="button"
+              className="tenant-install-btn"
+              style={{ ...styles.installBtn, background: accentGradient, color: accent.text, boxShadow: `0 10px 26px ${accentGlow(0.4)}` }}
+            >
+              <span>Install App</span>
+              <span className="tenant-install-btn-arrow" aria-hidden="true">→</span>
+            </button>
+          )}
+
+          {isInstalled && (
+            <p style={{ ...styles.instructions, color: palette.textMuted }}>
+              If the app does not open automatically, tap the app icon on your Home Screen.
+            </p>
+          )}
+
+          {tenantTrust.remark && (
+            <p style={{ ...styles.trustDescription, color: palette.textSecondary }}>
+              {tenantTrust.remark}
+            </p>
+          )}
 
           {membershipMessage && (
             <p style={{ ...styles.membershipMessage, color: palette.warningText }}>{membershipMessage}</p>
           )}
 
-          {installOutcome && (
-            installSteps ? (
-              <ol style={{ ...styles.instructionsList, color: palette.textMuted }}>
-                {installSteps.map((step) => <li key={step}>{step}</li>)}
-              </ol>
-            ) : (
-              <p style={{ ...styles.instructions, color: palette.textMuted }}>
-                {installOutcome === 'unsupported' && 'Use your browser menu and choose Install App / Add to Home Screen.'}
-                {installOutcome === 'dismissed' && 'You can install the app anytime from your browser menu.'}
-              </p>
-            )
+          {installOutcome && !['accepted', 'installed', 'ios-instructions', 'mac-safari-instructions'].includes(installOutcome) && (
+            <p style={{ ...styles.instructions, color: palette.textMuted }}>
+              {installOutcome === 'unsupported' && 'Use your browser menu and choose Install App / Add to Home Screen.'}
+              {installOutcome === 'dismissed' && 'You can install the app anytime from your browser menu.'}
+              {installOutcome === 'android-manual' && 'Open browser menu → Install app / Add to Home screen'}
+              {installOutcome === 'in-app-browser' && 'Open this link in Chrome to install the app'}
+            </p>
           )}
         </div>
       </div>
+
+      {installSteps && (
+        <div
+          className="tenant-safari-modal-overlay"
+          style={styles.modalOverlay}
+          onClick={() => setInstallOutcome('')}
+        >
+          <div
+            className="tenant-safari-modal"
+            style={{ ...styles.modalCard, background: palette.cardBackground, borderColor: palette.cardBorder }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ ...styles.accentBar, background: accentGradient }} />
+            <div style={styles.modalBody}>
+              <button
+                type="button"
+                aria-label="Close"
+                className="tenant-safari-modal-close"
+                style={{ ...styles.modalCloseBtn, color: palette.textMuted }}
+                onClick={() => setInstallOutcome('')}
+              >
+                ×
+              </button>
+              <h2 style={{ ...styles.modalTitle, color: palette.textPrimary }}>
+                Install {tenantTrust.name} on Safari
+              </h2>
+              <ol style={{ ...styles.instructionsList, color: palette.textMuted }}>
+                {installSteps.map((step) => <li key={step}>{step}</li>)}
+              </ol>
+            </div>
+          </div>
+        </div>
+      )}
 
       <a
         href={SETU_DOWNLOAD_URL}
@@ -604,12 +791,40 @@ const styles = {
     fontSize: '11px',
     fontWeight: 700,
     letterSpacing: '1.5px',
-    textTransform: 'uppercase',
   },
   subheading: {
     margin: '0 0 14px',
     fontSize: '13px',
     lineHeight: 1.5,
+  },
+  trustDescription: {
+    margin: '2px 0 0',
+    fontSize: '12px',
+    lineHeight: 1.55,
+  },
+  installedBadge: {
+    width: '40px',
+    height: '40px',
+    borderRadius: '50%',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    fontSize: '18px',
+    fontWeight: 800,
+    margin: '2px 0 0',
+  },
+  installedHeading: {
+    margin: 0,
+    fontSize: '16px',
+    fontWeight: 800,
+    lineHeight: 1.35,
+  },
+  installingSpinner: {
+    width: '15px',
+    height: '15px',
+    border: '2px solid rgba(128,128,128,0.3)',
+    borderRadius: '50%',
+    animation: 'spin 0.7s linear infinite',
   },
   installBtn: {
     width: '100%',
@@ -637,6 +852,47 @@ const styles = {
     padding: '0 0 0 20px',
     fontSize: '12px',
     lineHeight: 1.7,
+  },
+  modalOverlay: {
+    position: 'fixed',
+    inset: 0,
+    background: 'rgba(0,0,0,0.55)',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: '20px',
+    zIndex: 1000,
+  },
+  modalCard: {
+    position: 'relative',
+    width: '100%',
+    maxWidth: '360px',
+    borderRadius: '18px',
+    overflow: 'hidden',
+    border: '1px solid rgba(255,255,255,0.08)',
+    boxShadow: '0 20px 44px rgba(0,0,0,0.45)',
+  },
+  modalBody: {
+    position: 'relative',
+    padding: '28px 24px 26px',
+    textAlign: 'center',
+  },
+  modalCloseBtn: {
+    position: 'absolute',
+    top: '10px',
+    right: '12px',
+    background: 'transparent',
+    border: 'none',
+    fontSize: '22px',
+    lineHeight: 1,
+    cursor: 'pointer',
+    padding: '4px',
+  },
+  modalTitle: {
+    margin: '0 0 6px',
+    fontSize: '16px',
+    fontWeight: 800,
+    lineHeight: 1.35,
   },
   poweredBy: {
     marginTop: '26px',

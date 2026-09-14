@@ -332,7 +332,7 @@ export const fetchTrustByAppSlug = async (appSlug) => {
 
   const { data, error } = await supabase
     .from('Trust')
-    .select('id,name,icon_url,app_slug,pwa_icon_192_url,pwa_icon_512_url,pwa_theme_color,pwa_background_color,pwa_enabled,version')
+    .select('id,name,legal_name,remark,icon_url,app_slug,pwa_icon_192_url,pwa_icon_512_url,pwa_theme_color,pwa_background_color,pwa_enabled,version')
     .eq('app_slug', normalizedSlug)
     .eq('pwa_enabled', true)
     .maybeSingle();
