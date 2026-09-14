@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { flushSync } from 'react-dom';
-import { Users, ChevronRight, LogOut, Share2, PhoneCall, FileText, CirclePlus, Clock3, Lock, Facebook, Instagram, Linkedin, MessageCircle } from 'lucide-react';
+import { Users, ChevronRight, LogOut, Share2, PhoneCall, FileText, CirclePlus, Clock3, Lock, Facebook, Instagram, Linkedin, MessageCircle, ShoppingBag } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 import { Share } from '@capacitor/share';
 import { getProfile, updateMemberPrivacy } from '../../services/api';
@@ -37,6 +37,8 @@ const normalizeSidebarRoute = (route = '', featureKey = '') => {
   if (featureValue === 'addcommunity' || featureValue === 'add-community' || featureValue === 'feature-add-community' || featureValue === 'feature_add_community') return 'add-community';
   if (routeValue === 'order-history' || routeValue === 'orderhistory') return 'order-history';
   if (featureValue === 'orderhistory' || featureValue === 'order-history' || featureValue === 'feature-order-history' || featureValue === 'feature_order_history') return 'order-history';
+  if (routeValue === 'products' || routeValue === 'product' || routeValue === 'categories-products') return 'products';
+  if (featureValue === 'product' || featureValue === 'products' || featureValue === 'feature-product' || featureValue === 'feature-products') return 'products';
   return routeValue;
 };
 
@@ -47,6 +49,7 @@ const resolveSidebarIcon = (featureKey, route) => {
   if (normalizedRoute === 'nomination-details') return FileText;
   if (normalizedRoute === 'add-community') return CirclePlus;
   if (normalizedRoute === 'order-history') return Clock3;
+  if (normalizedRoute === 'products') return ShoppingBag;
   return PhoneCall;
 };
 
@@ -659,9 +662,7 @@ const Sidebar = ({ isOpen, onClose, onNavigate, currentPage, onLogout }) => {
     })
     .map(([key, meta]) => ({
       id: normalizeSidebarRoute(meta?.route, key),
-      label: normalizeSidebarRoute(meta?.route, key) === 'contact-us'
-        ? toTitleCase(meta?.display_name || meta?.name || key)
-        : (meta?.display_name || meta?.name || key),
+      label: toTitleCase(meta?.display_name || meta?.name || key),
       icon: resolveSidebarIcon(key, meta?.route),
       quickOrder: meta?.quick_order ?? null,
     }))
@@ -897,6 +898,7 @@ const Sidebar = ({ isOpen, onClose, onNavigate, currentPage, onLogout }) => {
               })}
 
               {/* Other Membership Details — Navigate to full page */}
+              {ff('feature_othermembership') && normalizeDisplayInApp(flagsData?.feature_othermembership?.display_in_app) === 'sidebar' && (
               <button
                 onClick={handleOtherMembershipNavigation}
               className="w-full flex items-center gap-3 px-4 rounded-xl transition-all text-left active:scale-95 select-none"
@@ -914,7 +916,7 @@ const Sidebar = ({ isOpen, onClose, onNavigate, currentPage, onLogout }) => {
 	              />
               <div className="flex-1 text-left">
                 <span className="font-semibold" style={{ color: sidebarTextColor }}>
-                  Other Membership Details
+                  {toTitleCase(flagsData?.feature_othermembership?.display_name || 'Other Membership Details')}
                 </span>
                 {loadingTrustLinks && (
                   <span
@@ -938,6 +940,7 @@ const Sidebar = ({ isOpen, onClose, onNavigate, currentPage, onLogout }) => {
 	                style={{ color: sidebarChevronColor }}
               />
             </button>
+              )}
 
               {/* Privacy toggle — hides this member's contact/address details from Directory & Executive Body */}
               <div

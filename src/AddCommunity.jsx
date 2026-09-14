@@ -10,6 +10,12 @@ import { fetchFeatureFlags } from './services/featureFlags';
 
 const DEFAULT_PAGE_TITLE = 'Add Community';
 
+const toTitleCase = (value = '') =>
+  String(value || '')
+    .trim()
+    .replace(/\s+/g, ' ')
+    .replace(/\w\S*/g, (word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase());
+
 // shareApp_links.web_app_url is a full URL (e.g. https://www.teiltd.in/<slug>)
 // generated asynchronously by the generate-webApp-link Edge Function once
 // create_trust_via_whatsapp's Trust insert trigger fires it — so it isn't
@@ -208,7 +214,7 @@ const AddCommunity = ({ onNavigateBack }) => {
         const result = await fetchFeatureFlags(trustId);
         if (!active || !result?.success) return;
         const displayName = result.flagsData?.feature_add_community?.display_name;
-        if (displayName) setPageTitle(displayName);
+        if (displayName) setPageTitle(toTitleCase(displayName));
       } catch (err) {
         console.warn('[AddCommunity] Failed to load feature flag display name:', err?.message || err);
       }

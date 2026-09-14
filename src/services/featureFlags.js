@@ -43,6 +43,14 @@ const FEATURE_KEY_ALIASES = {
   member_banner: 'feature_member_banner',
   'member-banner': 'feature_member_banner',
   feature_member_banner: 'feature_member_banner',
+  othermembership: 'feature_othermembership',
+  other_membership: 'feature_othermembership',
+  'other-membership': 'feature_othermembership',
+  feature_othermembership: 'feature_othermembership',
+  bottomnav: 'feature_bottom_nav',
+  bottom_nav: 'feature_bottom_nav',
+  'bottom-nav': 'feature_bottom_nav',
+  feature_bottom_nav: 'feature_bottom_nav',
 };
 
 export const normalizeFeatureKey = (...values) => {

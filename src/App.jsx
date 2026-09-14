@@ -39,6 +39,7 @@ import ProtectedRoute from './ProtectedRoute';
 import SponsorDetails from './SponsorDetails';
 import SponsorsList from './SponsorsList';
 import DeveloperDetails from './DeveloperDetails';
+import UserPanel from './UserPanel';
 import FeatureGuard from './components/FeatureGuard';
 
 import TermsAndConditions from './TermsAndConditions';
@@ -1029,6 +1030,7 @@ const HospitalTrusteeApp = () => {
         'sponsor-details': '/sponsor-details',
         'sponsors': '/sponsors',
         'developers': '/developers',
+        'user-panel': '/user-panel',
         'gallery': '/gallery',
         'admin-profiles': '/admin-profiles',
         'contact-us': '/contact-us',
@@ -1500,6 +1502,16 @@ const HospitalTrusteeApp = () => {
           }
         />
         <Route
+          path="/user-panel"
+          element={
+            <ProtectedRoute>
+              <FeatureGuard featureKey="feature_bottom_nav">
+                <UserPanel onNavigate={handleNavigate} />
+              </FeatureGuard>
+            </ProtectedRoute>
+          }
+        />
+        <Route
           path="/gallery"
           element={
             <ProtectedRoute>
@@ -1576,7 +1588,9 @@ const HospitalTrusteeApp = () => {
           path="/other-memberships"
           element={
             <ProtectedRoute>
-              <OtherMemberships onNavigate={handleNavigate} />
+              <FeatureGuard featureKey="feature_othermembership">
+                <OtherMemberships onNavigate={handleNavigate} />
+              </FeatureGuard>
             </ProtectedRoute>
           }
         />

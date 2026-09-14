@@ -363,6 +363,24 @@ export const fetchShareAppLinksByTrustId = async (trustId) => {
   return data || null;
 };
 
+export const fetchTrustHelpUrl = async (trustId) => {
+  const normalizedTrustId = normalizeText(trustId);
+  if (!normalizedTrustId) return null;
+
+  const { data, error } = await supabase
+    .from('Trust')
+    .select('help_url')
+    .eq('id', normalizedTrustId)
+    .maybeSingle();
+
+  if (error) {
+    console.warn('Error fetching trust help_url:', error);
+    return null;
+  }
+
+  return normalizeText(data?.help_url) || null;
+};
+
 export const fetchTemplatesForTrust = async (trustId) => {
   if (!trustId) return [];
 

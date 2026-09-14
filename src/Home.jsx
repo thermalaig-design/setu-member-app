@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo, memo } from 'react';
 import { User, Users, Clock, FileText, UserPlus, Bell, ChevronRight, Heart, Shield, Plus, ArrowRight, Pill, ShoppingCart, Calendar, Stethoscope, Building2, QrCode, Monitor, Brain, Package, FileCheck, Search, Filter, Star, HelpCircle, BookOpen, Video, Headphones, Menu, X, Home as HomeIcon, Settings, UserCircle, Image, Trash2, Code, FolderOpen, Crown } from 'lucide-react';
 import Sidebar from './features/sidebar/Sidebar';
+import BottomNav from './components/BottomNav';
 import TermsModal from './components/TermsModal';
 import ImageSlider from './components/ImageSlider';
 import { getProfile, getMarqueeUpdates, getUserNotifications, markNotificationAsRead, markAllNotificationsAsRead, deleteNotification } from './services/api';
@@ -50,6 +51,12 @@ import {
 } from './utils/themeUtils';
 import { applyOpacity } from './utils/colorUtils';
 import { resolveNotificationRedirectRoute } from './services/notificationRedirectService';
+
+const toTitleCase = (value = '') =>
+  String(value || '')
+    .trim()
+    .replace(/\s+/g, ' ')
+    .replace(/\w\S*/g, (word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase());
 
 // Quick-action modules with a registered chrome-free *Content component.
 // route slug (matches enabledQuickActions[].route / theme.homeLayoutModes key) -> component.
@@ -2237,6 +2244,7 @@ const Home = ({ onNavigate, onLogout }) => {
     feature_product: 'products',
     feature_products: 'products',
     feature_order_history: 'order-history',
+    feature_othermembership: 'other-memberships',
   };
 
   const resolveQuickRoute = (route, featureKey = '') => {
@@ -2272,10 +2280,8 @@ const Home = ({ onNavigate, onLogout }) => {
       Boolean(key)
       && data?.is_enabled
       && normalizeDisplayInApp(data?.display_in_app) === 'home'
-      && key !== 'feature_add_community'
       && key !== 'feature_nomination_details'
       && key !== 'feature_nomination'
-      && normalizeQuickRoute(data?.route) !== 'add-community'
       && normalizeQuickRoute(data?.route) !== 'nomination-details'
       && normalizeQuickRoute(data?.route) !== 'nomination'
       && Boolean(resolveQuickRoute(data?.route, key))
@@ -2285,7 +2291,7 @@ const Home = ({ onNavigate, onLogout }) => {
       return {
         id: key,
         route,
-        displayName: data.display_name,
+        displayName: toTitleCase(data.display_name),
         tagline: data.tagline,
         icon_url: resolveQuickIcon(route, data.icon_url),
         quick_order: data.quick_order ?? null,
@@ -2375,7 +2381,6 @@ const Home = ({ onNavigate, onLogout }) => {
         'gallery',
         'notifications',
         'notification',
-        'add-community',
         'nomination',
         'nomination-details',
         'developers',
@@ -2535,7 +2540,7 @@ const Home = ({ onNavigate, onLogout }) => {
     );
   };
 
-  const shouldShowTrustSelector = trustList.length > 0;
+  const shouldShowTrustSelector = trustList.length > 0 && ff('feature_trustlist');
   const showTrustSelector = shouldShowTrustSelector;
   const surfaceColor = getThemeToken(theme, 'accent_bg', null)
     || theme?.accentBg
@@ -3025,7 +3030,7 @@ const Home = ({ onNavigate, onLogout }) => {
                       <span className="relative inline-flex rounded-full h-2 w-2" style={{ background: 'var(--marquee-text)' }} />
                     </span>
                     <span className="text-[11px] font-bold uppercase tracking-widest whitespace-nowrap" style={{ color: 'var(--marquee-text)' }}>
-                      {flagsData?.feature_marquee?.display_name || 'Updates'}
+                      {toTitleCase(flagsData?.feature_marquee?.display_name || 'Updates')}
                     </span>
                   </div>
                   <div className="w-px my-1.5" style={{ background: 'color-mix(in srgb, var(--marquee-text) 30%, transparent)' }} />
@@ -3566,6 +3571,9 @@ const Home = ({ onNavigate, onLogout }) => {
         </div>
         <p className="text-[11px] font-semibold text-center mt-2 opacity-80">App Version {displayTrustVersion}</p>
       </footer>
+
+      <BottomNav onNavigate={onNavigate} />
+
       <TermsModal
         isOpen={showTermsModal}
         onAccept={handleAcceptTerms}
