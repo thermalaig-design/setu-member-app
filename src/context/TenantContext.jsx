@@ -1,6 +1,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { fetchTrustByAppSlug } from '../services/trustService';
 import { applyTenantManifest } from '../utils/pwaManifest';
+import { isReservedSlug } from '../constants/reservedRoutes';
 
 // These keys represent the identity of THIS installed PWA / customer link.
 // They are set once when a valid Trust slug is resolved and must never be
@@ -28,12 +29,43 @@ const writeStored = (key, value) => {
   }
 };
 
+// The URL is the only thing that reliably tells two different /app/{slug}
+// PWAs apart — localStorage is shared across all of them on this origin.
+// Whenever the current path is /app/{slug}, that slug must win over
+// whatever tenant happens to be cached from a previously opened/installed
+// PWA on the same device.
+const getUrlSlug = () => {
+  try {
+    const match = String(window.location.pathname || '').match(/^\/app\/([^/?#]+)/i);
+    const slug = match && match[1] ? decodeURIComponent(match[1]).trim().toLowerCase() : '';
+    // /app/login, /app/profile, etc. are existing app routes, not a Trust
+    // slug — never treat a reserved first-level segment as tenant identity.
+    if (!slug || isReservedSlug(slug)) return '';
+    return slug;
+  } catch {
+    return '';
+  }
+};
+
 export const TenantProvider = ({ children }) => {
   const [tenantTrust, setTenantTrust] = useState(null);
   const [tenantLoading, setTenantLoading] = useState(false);
   const [tenantError, setTenantError] = useState('');
-  const [installedTrustId, setInstalledTrustId] = useState(() => readStored(INSTALLED_TRUST_ID_KEY));
-  const [installedSlug, setInstalledSlug] = useState(() => readStored(INSTALLED_SLUG_KEY));
+  const [installedSlug, setInstalledSlug] = useState(() => {
+    const urlSlug = getUrlSlug();
+    return urlSlug || readStored(INSTALLED_SLUG_KEY);
+  });
+  const [installedTrustId, setInstalledTrustId] = useState(() => {
+    const urlSlug = getUrlSlug();
+    const storedSlug = readStored(INSTALLED_SLUG_KEY);
+    // A cached trust id is only trustworthy when it belongs to the same
+    // slug the URL is asking for right now (or when this route carries no
+    // slug at all, e.g. a deeper in-app route within an already-resolved
+    // session) — otherwise it's another tenant's identity leaking in from
+    // shared localStorage, and must not be exposed even momentarily.
+    if (urlSlug && urlSlug !== storedSlug) return '';
+    return readStored(INSTALLED_TRUST_ID_KEY);
+  });
   const rehydratedRef = useRef(false);
 
   const resolveTenantFromSlug = useCallback(async (slug) => {
@@ -70,13 +102,16 @@ export const TenantProvider = ({ children }) => {
     }
   }, []);
 
-  // On app boot, if this device already has an installed tenant identity
-  // (a slug resolved on a previous launch), re-resolve it so branding /
-  // manifest / theme are available immediately without needing the user to
-  // revisit the /app/<slug> landing route again.
+  // On app boot: if the URL is /app/<slug>, that slug is authoritative and
+  // TenantLanding (mounted for that route) resolves it itself — never
+  // rehydrate a different, possibly stale, cached tenant here in that case.
+  // Only when this route carries no slug (a deeper in-app route within an
+  // already-resolved session) do we fall back to the last resolved tenant
+  // identity for this device, same as before.
   useEffect(() => {
     if (rehydratedRef.current) return;
     rehydratedRef.current = true;
+    if (getUrlSlug()) return;
     if (installedSlug && !tenantTrust) {
       resolveTenantFromSlug(installedSlug);
     }
