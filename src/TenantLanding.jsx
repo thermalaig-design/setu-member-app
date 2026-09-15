@@ -2,10 +2,12 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams, Navigate } from 'react-router-dom';
 import { useTenant } from './context/TenantContext';
 import { isReservedSlug } from './constants/reservedRoutes';
-import { fetchMemberTrustMemberships } from './services/trustService';
+import { fetchMemberTrustMemberships, resolveTenantAppAccess, syncTenantMembershipName } from './services/trustService';
+import { saveProfile } from './services/api';
 import { getUserHospitalMemberships } from './utils/storageUtils';
 import { getAppHomePath } from './utils/tenantNavigation';
 import Home from './Home';
+import TenantProfileModal from './components/TenantProfileModal';
 
 const LAST_SELECTED_TRUST_ID_KEY = 'last_selected_trust_id';
 const normalizeText = (value) => String(value || '').trim();
@@ -227,6 +229,13 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
   const acceptedTimeoutRef = useRef(null);
   const [resolvedOnce, setResolvedOnce] = useState(() => alreadyResolvedThisSlug);
   const [membershipMessage, setMembershipMessage] = useState('');
+  // Set by enterTenantTrust when resolveTenantAppAccess reports an
+  // incomplete profile ('needs_profile') or a not-yet-active membership
+  // ('pending') for the logged-in member on this tenant Trust. tenantAccessPayload
+  // holds that resolver response so the profile modal / pending screen (and
+  // the modal's submit handler) have the trust/member/reg_member data they need.
+  const [tenantAccessState, setTenantAccessState] = useState(null);
+  const [tenantAccessPayload, setTenantAccessPayload] = useState(null);
   // Standalone (installed PWA) sessions render Home in place instead of
   // navigating to '/', so the browser stays on /app/<appSlug> — see
   // enterTenantTrust below. Initialized synchronously from the same-session
@@ -301,12 +310,38 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
     }
   }, []);
 
+  // Shared by the initial resolve below and by the profile-modal submit
+  // handler: switches selected_trust_id to this tenant Trust and renders
+  // Home in place (staying on /app/<appSlug>) instead of navigating to '/'.
+  const grantTenantHome = useCallback((trustId, trustName) => {
+    const normalizedTrustId = normalizeText(trustId);
+    const normalizedTrustName = normalizeText(trustName);
+    localStorage.setItem('selected_trust_id', normalizedTrustId);
+    localStorage.setItem(LAST_SELECTED_TRUST_ID_KEY, normalizedTrustId);
+    if (normalizedTrustName) localStorage.setItem('selected_trust_name', normalizedTrustName);
+    window.dispatchEvent(new CustomEvent('trust-changed', {
+      detail: { trustId: normalizedTrustId, trustName: normalizedTrustName || null, source: 'tenant-standalone-launch' }
+    }));
+
+    // Installed PWA: stay on /app/<appSlug> and render Home in place.
+    // Navigating to '/' here is what previously caused a refresh on
+    // /app/setu to fall through to the separate marketing site, since
+    // '/' is served by that site, not the member app, for this host.
+    setShowTenantHome(true);
+    const cacheKey = getStandaloneVerificationKey(normalizedTrustId);
+    if (cacheKey) verifiedStandaloneEntries.add(cacheKey);
+  }, []);
+
   // Called by the standalone (installed PWA) auto-entry effect below: verifies
-  // the logged-in member actually belongs to this Trust, switches
-  // selected_trust_id to it, and renders Home in place (staying on
-  // /app/<appSlug>) instead of navigating to '/'.
+  // the logged-in member actually belongs to this Trust — creating that
+  // membership server-side (via resolveTenantAppAccess) if this is their
+  // first time here — and either renders Home in place, prompts for a
+  // missing profile, or shows a pending-access screen, instead of navigating
+  // to '/'.
   const enterTenantTrust = useCallback(async () => {
     setMembershipMessage('');
+    setTenantAccessState(null);
+    setTenantAccessPayload(null);
 
     const isLoggedIn = localStorage.getItem('isLoggedIn') === 'true';
     const rawUser = isLoggedIn ? localStorage.getItem('user') : null;
@@ -318,7 +353,7 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
     }
 
     if (!isLoggedIn || !user) {
-      navigate('/login', { replace: true });
+      navigate('/login', { replace: true, state: { tenantSlug: normalizedAppSlug } });
       return false;
     }
 
@@ -327,46 +362,83 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
     const membershipNumber = user.membership_number || user['Membership number'] || '';
 
     try {
-      // Reuse the same membership-lookup service OTPVerification.jsx uses to
-      // verify Trust membership, instead of introducing a second model.
-      let memberships = [];
-      try {
-        memberships = await fetchMemberTrustMemberships({ membersId, membershipNumber });
-      } catch (fetchErr) {
-        console.warn('[TenantLanding] Live membership check failed, using cached memberships:', fetchErr?.message || fetchErr);
-        memberships = getUserHospitalMemberships(user);
+      const access = await resolveTenantAppAccess({ appSlug: normalizedAppSlug, membersId });
+      if (!access) {
+        setMembershipMessage('Unable to verify your membership right now. Please try again.');
+        return false;
       }
 
-      const tenantMembership = (Array.isArray(memberships) ? memberships : [])
-        .find((membership) => normalizeText(membership?.trust_id) === tenantTrustId);
+      const trustName = normalizeText(access.trust?.name || tenantTrust?.name);
 
-      if (tenantMembership) {
-        const trustName = normalizeText(tenantMembership.trust_name || tenantTrust?.name);
-        localStorage.setItem('selected_trust_id', tenantTrustId);
-        localStorage.setItem(LAST_SELECTED_TRUST_ID_KEY, tenantTrustId);
-        if (trustName) localStorage.setItem('selected_trust_name', trustName);
-        window.dispatchEvent(new CustomEvent('trust-changed', {
-          detail: { trustId: tenantTrustId, trustName: trustName || null, source: 'tenant-standalone-launch' }
-        }));
-
-        // Installed PWA: stay on /app/<appSlug> and render Home in place.
-        // Navigating to '/' here is what previously caused a refresh on
-        // /app/setu to fall through to the separate marketing site, since
-        // '/' is served by that site, not the member app, for this host.
-        setShowTenantHome(true);
-        const cacheKey = getStandaloneVerificationKey(tenantTrustId);
-        if (cacheKey) verifiedStandaloneEntries.add(cacheKey);
+      if (access.needs_profile) {
+        setTenantAccessPayload(access);
+        setTenantAccessState('needs_profile');
         return true;
       }
 
-      setMembershipMessage(`Your account is not a member of ${tenantTrust?.name || 'this'}. Please log in with the mobile number registered for this Trust.`);
-      return false;
-    } catch (err) {
-      console.warn('[TenantLanding] Membership verification failed:', err?.message || err);
-      setMembershipMessage('Unable to verify your membership right now. Please try again.');
-      return false;
+      if (access.is_active) {
+        grantTenantHome(access.trust?.id || tenantTrustId, trustName);
+        return true;
+      }
+
+      setTenantAccessPayload(access);
+      setTenantAccessState('pending');
+      return true;
+    } catch (accessErr) {
+      console.warn('[TenantLanding] resolveTenantAppAccess failed, falling back to read-only membership check:', accessErr?.message || accessErr);
+
+      try {
+        // Reuse the same membership-lookup service OTPVerification.jsx uses to
+        // verify Trust membership, instead of introducing a second model.
+        // Read-only fallback for transient errors — never creates a
+        // membership itself, so a failed resolveTenantAppAccess call never
+        // silently grants access to a non-member.
+        let memberships = [];
+        try {
+          memberships = await fetchMemberTrustMemberships({ membersId, membershipNumber });
+        } catch (fetchErr) {
+          console.warn('[TenantLanding] Live membership check failed, using cached memberships:', fetchErr?.message || fetchErr);
+          memberships = getUserHospitalMemberships(user);
+        }
+
+        const tenantMembership = (Array.isArray(memberships) ? memberships : [])
+          .find((membership) => normalizeText(membership?.trust_id) === tenantTrustId);
+
+        if (tenantMembership) {
+          const trustName = normalizeText(tenantMembership.trust_name || tenantTrust?.name);
+          grantTenantHome(tenantTrustId, trustName);
+          return true;
+        }
+
+        setMembershipMessage('Unable to verify your membership right now. Please try again.');
+        return false;
+      } catch (err) {
+        console.warn('[TenantLanding] Membership verification failed:', err?.message || err);
+        setMembershipMessage('Unable to verify your membership right now. Please try again.');
+        return false;
+      }
     }
-  }, [navigate, tenantTrust]);
+  }, [navigate, tenantTrust, normalizedAppSlug, grantTenantHome]);
+
+  // Called when TenantProfileModal's form is submitted: saves the profile
+  // (existing saveProfile — writes Members.Name/Email directly), syncs the
+  // denormalized reg_members.Name so a later resolve doesn't keep asking for
+  // a profile, then either grants Home (public / already-active) or moves to
+  // the pending-access screen (private, still inactive).
+  const handleProfileSubmit = useCallback(async ({ name, email }) => {
+    await saveProfile({ name, email });
+    const regMemberId = tenantAccessPayload?.reg_member?.id;
+    if (regMemberId) {
+      await syncTenantMembershipName({ regMemberId, name });
+    }
+
+    if (tenantAccessPayload?.is_active) {
+      grantTenantHome(tenantAccessPayload.trust?.id || tenantTrust?.id, tenantAccessPayload.trust?.name || tenantTrust?.name);
+      setTenantAccessState(null);
+    } else {
+      setTenantAccessState('pending');
+    }
+  }, [tenantAccessPayload, grantTenantHome, tenantTrust]);
 
   // If the app is already installed (running standalone) and the tenant
   // resolved successfully, skip the marketing landing and go straight to
@@ -415,13 +487,6 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
     );
   }
 
-  // Standalone tenant session already validated membership (see
-  // enterTenantTrust): render the existing Home UI in place, reused as-is,
-  // while the browser stays on /app/<appSlug> instead of navigating to '/'.
-  if (showTenantHome) {
-    return <Home onNavigate={onNavigate} onLogout={onLogout} isMember={isMember} />;
-  }
-
   const themeColor = tenantTrust.pwa_theme_color || '#d4af37';
   const backgroundColor = tenantTrust.pwa_background_color || '#1a1a1a';
   const logoUrl = tenantTrust.pwa_icon_192_url || tenantTrust.icon_url || '';
@@ -436,6 +501,46 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
   const accentGlow = (alpha) => `rgba(${accentRgb.r}, ${accentRgb.g}, ${accentRgb.b}, ${alpha})`;
   const accentGradient = `linear-gradient(135deg, ${accent.from}, ${accent.to})`;
   const pageBackground = `radial-gradient(circle at 50% 15%, ${accentGlow(0.22)}, transparent 55%), ${backgroundColor}`;
+
+  // Standalone tenant session already validated membership (see
+  // enterTenantTrust): render the existing Home UI in place, reused as-is,
+  // while the browser stays on /app/<appSlug> instead of navigating to '/'.
+  if (showTenantHome) {
+    return <Home onNavigate={onNavigate} onLogout={onLogout} isMember={isMember} />;
+  }
+
+  // New membership (or an existing one with a blank Name) needs a profile
+  // before continuing — full-screen tenant-branded modal, submit handled by
+  // handleProfileSubmit above.
+  if (tenantAccessState === 'needs_profile') {
+    return (
+      <TenantProfileModal
+        trustName={tenantTrust.name}
+        mobile={tenantAccessPayload?.member?.Mobile}
+        initialName={tenantAccessPayload?.member?.Name || ''}
+        initialEmail={tenantAccessPayload?.member?.Email || ''}
+        isActive={Boolean(tenantAccessPayload?.is_active)}
+        accent={accent}
+        palette={palette}
+        onSubmit={handleProfileSubmit}
+      />
+    );
+  }
+
+  // Membership exists (or was just created) but is not yet active — private
+  // Trust, pending admin approval. Home must never render in this state.
+  if (tenantAccessState === 'pending') {
+    return (
+      <div style={{ ...styles.page, background: pageBackground }}>
+        <div style={{ ...styles.notAvailableCard, background: palette.cardBackground, borderColor: palette.cardBorder }}>
+          <h1 style={{ ...styles.notAvailableHeading, color: palette.textPrimary }}>Access request submitted</h1>
+          <p style={{ ...styles.notAvailableText, color: palette.textSecondary }}>
+            Your access request for {tenantTrust.name} is pending approval. You'll be able to open the app once an admin approves your request.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   // Standalone (installed PWA) launches auto-enter via enterTenantTrust above;
   // show a branded spinner instead of flashing the Install/Continue card

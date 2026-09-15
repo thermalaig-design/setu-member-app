@@ -5,6 +5,7 @@ import { useTrustDataVersion } from './hooks/useTrustDataVersion';
 import { checkPhoneNumber } from './services/authService';
 import { fetchTrustById } from './services/trustService';
 import { useTenant } from './context/TenantContext';
+import { getAppHomePath } from './utils/tenantNavigation';
 
 const TRUST_ID = import.meta.env.VITE_DEFAULT_TRUST_ID || '';
 const LOGIN_TRUST_CACHE_KEY = 'cached_base_trust_info';
@@ -67,7 +68,7 @@ function Login() {
   const navigate = useNavigate();
   useBackNavigation();
   const authDefaultTrust = resolveAuthDefaultTrust();
-  const { installedTrustId, tenantTrust } = useTenant();
+  const { installedTrustId, installedSlug, tenantTrust } = useTenant();
   const isTenantMode = Boolean(installedTrustId);
   // Priority 1: installed/tenant Trust (white-label /app/<slug> identity).
   // Priority 2: existing selected/default Trust fallback (unchanged).
@@ -90,7 +91,7 @@ function Login() {
   useEffect(() => {
     const user = localStorage.getItem('user');
     const isLoggedIn = localStorage.getItem('isLoggedIn') === 'true';
-    if (user && user !== 'null' && user !== 'undefined' && isLoggedIn) navigate('/', { replace: true });
+    if (user && user !== 'null' && user !== 'undefined' && isLoggedIn) navigate(getAppHomePath(), { replace: true });
   }, [navigate]);
 
   useEffect(() => {
@@ -139,7 +140,12 @@ function Login() {
 
       sessionStorage.setItem(OTP_FLOW_KEY, 'normal');
       navigate('/otp-verification', {
-        state: { user: checkResult.data.user, accounts: checkResult.data.accounts || [checkResult.data.user], phoneNumber }
+        state: {
+          user: checkResult.data.user,
+          accounts: checkResult.data.accounts || [checkResult.data.user],
+          phoneNumber,
+          tenantSlug: isTenantMode ? installedSlug : ''
+        }
       });
     } catch (err) {
       console.error('[Login] Error checking phone:', err);

@@ -8,6 +8,7 @@ import { logUserSessionEvent } from './services/sessionAuditService';
 import { persistUserSession } from './utils/storageUtils';
 import { setLoginTermsPromptPending } from './utils/legalContent';
 import { useTenant } from './context/TenantContext';
+import { getAppHomePath } from './utils/tenantNavigation';
 
 const TRUST_ID = import.meta.env.VITE_DEFAULT_TRUST_ID || '';
 const LOGIN_TRUST_CACHE_KEY = 'cached_base_trust_info';
@@ -94,7 +95,7 @@ function OTPVerification() {
   useEffect(() => {
     const isLoggedIn = localStorage.getItem('isLoggedIn') === 'true';
     if (isLoggedIn) {
-      navigate('/', { replace: true });
+      navigate(getAppHomePath(), { replace: true });
       return;
     }
     if (!canRenderOtpPage) navigate('/login', { replace: true });
@@ -301,7 +302,7 @@ function OTPVerification() {
     try { sessionStorage.removeItem(OTP_FLOW_KEY); } catch { /* ignore */ }
     setLoginTermsPromptPending();
 
-    navigate('/', { replace: true });
+    navigate(getAppHomePath(), { replace: true });
     return true;
   };
 

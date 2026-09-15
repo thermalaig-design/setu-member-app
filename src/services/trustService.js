@@ -332,7 +332,7 @@ export const fetchTrustByAppSlug = async (appSlug) => {
 
   const { data, error } = await supabase
     .from('Trust')
-    .select('id,name,legal_name,remark,icon_url,app_slug,pwa_icon_192_url,pwa_icon_512_url,pwa_theme_color,pwa_background_color,pwa_enabled,version')
+    .select('id,name,legal_name,remark,icon_url,app_slug,app_visibility,pwa_icon_192_url,pwa_icon_512_url,pwa_theme_color,pwa_background_color,pwa_enabled,version')
     .eq('app_slug', normalizedSlug)
     .eq('pwa_enabled', true)
     .maybeSingle();
@@ -343,6 +343,54 @@ export const fetchTrustByAppSlug = async (appSlug) => {
   }
 
   return data || null;
+};
+
+// Resolves (and, if needed, server-side creates) this member's reg_members
+// row for the tenant Trust behind /app/<appSlug>. Backed by the deployed
+// generate-webApp-link Edge Function's `resolve_app_access` action, which
+// reads Trust.app_visibility itself to decide is_active on insert (public ->
+// true, private -> false) and never touches is_active on an existing row —
+// the client only ever reads the decision, it never sends is_active/
+// app_visibility values of its own.
+export const resolveTenantAppAccess = async ({ appSlug, membersId }) => {
+  const normalizedSlug = normalizeText(appSlug).toLowerCase();
+  const normalizedMembersId = normalizeText(membersId);
+  if (!normalizedSlug || !normalizedMembersId) return null;
+
+  const { data, error } = await supabase.functions.invoke('generate-webApp-link', {
+    body: { action: 'resolve_app_access', app_slug: normalizedSlug, members_id: normalizedMembersId }
+  });
+
+  if (error) {
+    console.warn('Error resolving tenant app access:', error);
+    throw error;
+  }
+
+  if (!data?.success) {
+    console.warn('Tenant app access resolution failed:', data?.message);
+    return null;
+  }
+
+  return data;
+};
+
+// Keeps reg_members' denormalized Name in sync after a profile-popup save —
+// resolve_app_access only copies Name onto a *newly created* row and never
+// updates it again on its own. Only ever writes Name; is_active is never
+// touched from the client.
+export const syncTenantMembershipName = async ({ regMemberId, name }) => {
+  const normalizedId = normalizeText(regMemberId);
+  const normalizedName = normalizeText(name);
+  if (!normalizedId || !normalizedName) return;
+
+  const { error } = await supabase
+    .from('reg_members')
+    .update({ Name: normalizedName })
+    .eq('id', normalizedId);
+
+  if (error) {
+    console.warn('Error syncing tenant membership name:', error);
+  }
 };
 
 export const fetchShareAppLinksByTrustId = async (trustId) => {
