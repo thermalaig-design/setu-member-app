@@ -223,11 +223,15 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
   // Drives the post-install experience: 'idle' is the normal marketing
   // card; 'prompting' is while the native browser install dialog is open;
   // 'launching' is the full-screen transition shown the instant the user
-  // accepts, until the real `appinstalled` event confirms the browser
-  // finished installing; 'installed' is the existing success screen. There
-  // is no standard API to force-launch a newly installed PWA, so nothing
-  // in this state machine auto-navigates — the success screen's "Open
-  // App" button (handleOpenApp below) is the one reliable, user-initiated
+  // accepts, until the real `appinstalled` event fires; 'finalizing' is
+  // after appinstalled but before the app is verified actually launchable
+  // (see handleAppInstalled below — appinstalled confirms Chrome
+  // registered the install, not that Android's WebAPK package install has
+  // finished); 'installed' is the existing success screen, only reached
+  // once that verification (or its fallback/max-wait) says so. There is
+  // no standard API to force-launch a newly installed PWA, so nothing in
+  // this state machine auto-navigates — the success screen's "Open App"
+  // button (handleOpenApp below) is the one reliable, user-initiated
   // launch action.
   const [installPhase, setInstallPhase] = useState('idle');
   // Not every Chromium build/version fires appinstalled reliably after an
@@ -238,6 +242,20 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
   // hanging forever if that event never arrives.
   const isInstalledRef = useRef(false);
   const acceptedTimeoutRef = useRef(null);
+  // The three timers handleAppInstalled below can start once appinstalled
+  // fires, to confirm the app is actually launchable before showing the
+  // Open App screen (Android's WebAPK package can still be mid-install for
+  // a few more seconds after appinstalled — device shows "Installing
+  // <App>...", and opening too early just reloads this browser tab):
+  // - postInstallGraceTimeoutRef: the plain ~3s fallback delay used when
+  //   navigator.getInstalledRelatedApps() isn't supported.
+  // - finalizeCheckTimeoutRef: the getInstalledRelatedApps polling chain
+  //   (a recursive setTimeout, not setInterval, so it can stop cleanly).
+  // - finalizeMaxTimeoutRef: an outer ~15s cap so the user is never stuck
+  //   on the finalizing screen forever if verification never confirms.
+  const postInstallGraceTimeoutRef = useRef(null);
+  const finalizeCheckTimeoutRef = useRef(null);
+  const finalizeMaxTimeoutRef = useRef(null);
   // Guards handleOpenApp below against firing more than once per tap.
   const openAppInFlightRef = useRef(false);
   const [resolvedOnce, setResolvedOnce] = useState(() => alreadyResolvedThisSlug);
@@ -350,11 +368,33 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
     isInstalledRef.current = isInstalled;
   }, [isInstalled]);
 
-  // appinstalled is the only reliable install-completion signal — the
+  // appinstalled is the only reliable install-*registration* signal — the
   // native prompt's 'accepted' outcome just means the user tapped Install,
-  // not that Chrome finished installing it. Stops the full-screen
-  // "Launching your app…" transition and shows the success screen. No
-  // automatic navigation/hand-off attempt is made here: there is no
+  // not that Chrome finished installing it. But appinstalled itself is
+  // ALSO not proof the app is actually launchable yet: on Android, the
+  // underlying WebAPK package can still be mid-install for a few more
+  // seconds after this fires (the device shows "Installing <App>..."),
+  // and flipping straight to the Open App screen during that window means
+  // tapping it has nothing to hand off to yet — it just reloads this
+  // browser tab, repeatedly, since there's still nothing to open. So
+  // appinstalled moves to the 'finalizing' phase (its own full-screen
+  // transition, not the success screen) and only moves on to 'installed'
+  // once one of these actually confirms/gives up:
+  // - Where navigator.getInstalledRelatedApps() is supported: polls it
+  //   (a short initial delay, then a fixed interval — see the constants
+  //   below) until it reports THIS tenant's own app as installed twice in
+  //   a row (one positive match could be a transient/stale read; two
+  //   consecutive ones is a much stronger signal without waiting for many
+  //   more).
+  // - Where it isn't supported: falls back to the plain grace delay used
+  //   before this change.
+  // - Either way, an outer max-wait timeout guarantees the user is never
+  //   stuck on 'finalizing' forever if verification never confirms —
+  //   appinstalled DID fire, so this eventually trusts it regardless.
+  // None of this is a guarantee (no API reports "the WebAPK install
+  // actually finished" to wait on instead) — same as everything else
+  // about post-install hand-off, it's a heuristic. No automatic
+  // navigation/hand-off attempt is made here regardless: there is no
   // standard API to force-launch a newly installed PWA, and any attempt
   // fired from this callback runs outside a user gesture, so a same-tab
   // navigation could yank the user away from the success screen
@@ -362,6 +402,39 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
   // The success screen's "Open App" button (handleOpenApp below) is the
   // one reliable, user-initiated launch action.
   useEffect(() => {
+    // First getInstalledRelatedApps() check fires this long after
+    // appinstalled; subsequent checks repeat at this interval; two
+    // consecutive positive matches are required before trusting it; and
+    // the whole finalizing phase gives up (and just trusts appinstalled)
+    // after this long regardless of which path is verifying it.
+    const FIRST_CHECK_DELAY_MS = 1200;
+    const CHECK_INTERVAL_MS = 750;
+    const REQUIRED_CONSECUTIVE_MATCHES = 2;
+    const UNSUPPORTED_FALLBACK_DELAY_MS = 3000;
+    const MAX_FINALIZING_MS = 15000;
+
+    const clearAllFinalizeTimers = () => {
+      if (postInstallGraceTimeoutRef.current) {
+        clearTimeout(postInstallGraceTimeoutRef.current);
+        postInstallGraceTimeoutRef.current = null;
+      }
+      if (finalizeCheckTimeoutRef.current) {
+        clearTimeout(finalizeCheckTimeoutRef.current);
+        finalizeCheckTimeoutRef.current = null;
+      }
+      if (finalizeMaxTimeoutRef.current) {
+        clearTimeout(finalizeMaxTimeoutRef.current);
+        finalizeMaxTimeoutRef.current = null;
+      }
+    };
+
+    const markInstalled = () => {
+      clearAllFinalizeTimers();
+      setIsInstalled(true);
+      setInstallOutcome('installed');
+      setInstallPhase('installed');
+    };
+
     const handleAppInstalled = () => {
       if (acceptedTimeoutRef.current) {
         clearTimeout(acceptedTimeoutRef.current);
@@ -369,18 +442,62 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
       }
       clearInstallPrompt();
       setDeferredPrompt(null);
-      setIsInstalled(true);
-      setInstallOutcome('installed');
-      setInstallPhase('installed');
+      setInstallPhase('finalizing');
+
+      // Never leave the user stuck finalizing forever if verification
+      // below never confirms — appinstalled already fired, so eventually
+      // trust it regardless of which path (or neither) confirmed it.
+      finalizeMaxTimeoutRef.current = setTimeout(markInstalled, MAX_FINALIZING_MS);
+
+      if (typeof navigator === 'undefined' || typeof navigator.getInstalledRelatedApps !== 'function') {
+        postInstallGraceTimeoutRef.current = setTimeout(markInstalled, UNSUPPORTED_FALLBACK_DELAY_MS);
+        return;
+      }
+
+      const expectedId = `/app/${normalizedAppSlug}`.toLowerCase();
+      const manifestPath = `/pwa-manifest/${normalizedAppSlug}.webmanifest`.toLowerCase();
+      let consecutiveMatches = 0;
+
+      const checkInstalled = () => {
+        navigator.getInstalledRelatedApps()
+          .then((relatedApps) => {
+            // Per-tenant match against THIS slug specifically — a
+            // different tenant PWA installed on the same device/browser
+            // must never confirm this one as finalized.
+            const matches = (Array.isArray(relatedApps) ? relatedApps : []).some((app) => {
+              const id = String(app?.id || '').toLowerCase();
+              const url = String(app?.url || '').toLowerCase();
+              return id === expectedId || url.includes(manifestPath);
+            });
+            consecutiveMatches = matches ? consecutiveMatches + 1 : 0;
+            if (consecutiveMatches >= REQUIRED_CONSECUTIVE_MATCHES) {
+              markInstalled();
+              return;
+            }
+            finalizeCheckTimeoutRef.current = setTimeout(checkInstalled, CHECK_INTERVAL_MS);
+          })
+          .catch(() => {
+            consecutiveMatches = 0;
+            finalizeCheckTimeoutRef.current = setTimeout(checkInstalled, CHECK_INTERVAL_MS);
+          });
+      };
+
+      finalizeCheckTimeoutRef.current = setTimeout(checkInstalled, FIRST_CHECK_DELAY_MS);
     };
+
     window.addEventListener('appinstalled', handleAppInstalled);
-    return () => window.removeEventListener('appinstalled', handleAppInstalled);
-  }, []);
+    return () => {
+      window.removeEventListener('appinstalled', handleAppInstalled);
+      clearAllFinalizeTimers();
+    };
+  }, [normalizedAppSlug]);
 
   // Not every Chromium build fires appinstalled after 'accepted' (browser
   // bugs, unusual install flows, older/newer versions behaving
-  // inconsistently) — clear any pending safety timeout on unmount so it
-  // never fires setState after this component is gone.
+  // inconsistently) — clear the safety timeout on unmount so it never
+  // fires setState after this component is gone. (The finalizing timers
+  // started from handleAppInstalled above are cleaned up by that same
+  // effect's own cleanup, since they're created and torn down together.)
   useEffect(() => () => {
     if (acceptedTimeoutRef.current) {
       clearTimeout(acceptedTimeoutRef.current);
@@ -655,29 +772,37 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
 
   // Full-screen transition covering the ENTIRE install flow from the
   // moment the user taps Install (replacing the tenant card entirely — no
-  // card, no "Powered by Setu", no install instructions) through to the
-  // real `appinstalled` event confirming the browser finished installing:
+  // card, no "Powered by Setu", no install instructions) through to
+  // verified-installed:
   // - 'prompting': deferredPrompt.prompt() is awaiting the user's choice
   //   in the native browser dialog. This must render too, not just
   //   'launching' — otherwise the Install App card is still what's
   //   sitting underneath/behind that dialog, and can flash back into view
   //   the instant it closes but before 'launching' is set.
-  // - 'launching': the user accepted; waiting on appinstalled.
+  // - 'launching': the user accepted; waiting on the real `appinstalled`
+  //   event.
+  // - 'finalizing': appinstalled fired, but Android's WebAPK package can
+  //   still be mid-install for a few more seconds — waiting on
+  //   handleAppInstalled's verification (or its fallback/max-wait) before
+  //   trusting the app is actually launchable.
   // See handleInstallClick/handleAppInstalled above for the state
-  // transitions and the safety-timeout fallback if appinstalled never
-  // arrives. ('idle' — e.g. the user dismissed the dialog — correctly
-  // falls through to the normal card below; only a genuine dismissal
-  // should ever bring it back.)
-  if (installPhase === 'prompting' || installPhase === 'launching') {
-    const isPrompting = installPhase === 'prompting';
+  // transitions and the safety-timeout fallbacks. ('idle' — e.g. the user
+  // dismissed the dialog — correctly falls through to the normal card
+  // below; only a genuine dismissal should ever bring it back.)
+  if (installPhase === 'prompting' || installPhase === 'launching' || installPhase === 'finalizing') {
+    const phaseCopy = installPhase === 'prompting'
+      ? { heading: 'Preparing installation…', subtext: 'Please respond to the browser prompt.' }
+      : installPhase === 'finalizing'
+        ? { heading: 'Finalizing your app…', subtext: 'This can take a few extra seconds on some devices.' }
+        : { heading: 'Launching your app…', subtext: 'Please wait while we finish setting things up.' };
     return (
       <div style={{ ...styles.page, background: backgroundColor }}>
         <div style={{ ...styles.spinner, borderTopColor: accent.from }} />
         <p style={{ ...styles.loadingText, color: palette.textPrimary, fontSize: '15px', fontWeight: 700, marginTop: '18px' }}>
-          {isPrompting ? 'Preparing installation…' : 'Launching your app…'}
+          {phaseCopy.heading}
         </p>
         <p style={{ ...styles.loadingText, color: palette.textSecondary, marginTop: '4px' }}>
-          {isPrompting ? 'Please respond to the browser prompt.' : 'Please wait while we finish setting things up.'}
+          {phaseCopy.subtext}
         </p>
         <style>{'@keyframes spin { to { transform: rotate(360deg); } }'}</style>
       </div>
@@ -767,7 +892,7 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
       handleOpenApp();
       return;
     }
-    if (installPhase === 'prompting' || installPhase === 'launching') return;
+    if (installPhase === 'prompting' || installPhase === 'launching' || installPhase === 'finalizing') return;
     handleInstallClick();
   };
 
@@ -827,7 +952,7 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
             </p>
           )}
 
-          {isInstalled ? (
+          {installPhase === 'installed' && isInstalled ? (
             <button
               type="button"
               className="tenant-install-btn"
