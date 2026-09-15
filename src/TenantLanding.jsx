@@ -238,6 +238,8 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
   // hanging forever if that event never arrives.
   const isInstalledRef = useRef(false);
   const acceptedTimeoutRef = useRef(null);
+  // Guards handleOpenApp below against firing more than once per tap.
+  const openAppInFlightRef = useRef(false);
   const [resolvedOnce, setResolvedOnce] = useState(() => alreadyResolvedThisSlug);
   const [membershipMessage, setMembershipMessage] = useState('');
   // Set by enterTenantTrust when resolveTenantAppAccess reports an
@@ -651,21 +653,31 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
     );
   }
 
-  // Full-screen transition shown the instant the user accepts the native
-  // install prompt, replacing the tenant card entirely (no card, no
-  // "Powered by Setu", no install instructions) until the real
-  // `appinstalled` event confirms the browser finished installing — see
-  // handleInstallClick/handleAppInstalled above for the state transitions
-  // and the safety-timeout fallback if that event never arrives.
-  if (installPhase === 'launching') {
+  // Full-screen transition covering the ENTIRE install flow from the
+  // moment the user taps Install (replacing the tenant card entirely — no
+  // card, no "Powered by Setu", no install instructions) through to the
+  // real `appinstalled` event confirming the browser finished installing:
+  // - 'prompting': deferredPrompt.prompt() is awaiting the user's choice
+  //   in the native browser dialog. This must render too, not just
+  //   'launching' — otherwise the Install App card is still what's
+  //   sitting underneath/behind that dialog, and can flash back into view
+  //   the instant it closes but before 'launching' is set.
+  // - 'launching': the user accepted; waiting on appinstalled.
+  // See handleInstallClick/handleAppInstalled above for the state
+  // transitions and the safety-timeout fallback if appinstalled never
+  // arrives. ('idle' — e.g. the user dismissed the dialog — correctly
+  // falls through to the normal card below; only a genuine dismissal
+  // should ever bring it back.)
+  if (installPhase === 'prompting' || installPhase === 'launching') {
+    const isPrompting = installPhase === 'prompting';
     return (
       <div style={{ ...styles.page, background: backgroundColor }}>
         <div style={{ ...styles.spinner, borderTopColor: accent.from }} />
         <p style={{ ...styles.loadingText, color: palette.textPrimary, fontSize: '15px', fontWeight: 700, marginTop: '18px' }}>
-          Launching your app…
+          {isPrompting ? 'Preparing installation…' : 'Launching your app…'}
         </p>
         <p style={{ ...styles.loadingText, color: palette.textSecondary, marginTop: '4px' }}>
-          Please wait while we finish setting things up.
+          {isPrompting ? 'Please respond to the browser prompt.' : 'Please wait while we finish setting things up.'}
         </p>
         <style>{'@keyframes spin { to { transform: rotate(360deg); } }'}</style>
       </div>
@@ -701,7 +713,7 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
             setInstallOutcome('');
             setInstallPhase('idle');
           }
-        }, 8000);
+        }, 20000);
       } else {
         setInstallPhase('idle');
       }
@@ -728,8 +740,22 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
   // controlled and not guaranteed; if it doesn't happen, this just
   // reloads the page, which is why the helper text below points the user
   // at their Home Screen icon as the fallback.
+  //
+  // Guarded against firing more than once per tap (openAppInFlightRef,
+  // declared with the component's other refs above): a second
+  // window.location.assign() call while the first is still in flight
+  // (double-tap, or the click landing on both the button and the card's
+  // own onClick below) aborts that first navigation and restarts it —
+  // which is exactly the kind of "sometimes it just doesn't do anything"
+  // flakiness this button was reported to have.
   const handleOpenApp = () => {
-    const tenantUrl = `${window.location.origin}/app/${normalizedAppSlug}/`;
+    if (openAppInFlightRef.current) return;
+    openAppInFlightRef.current = true;
+    // Exactly one trailing slash, always — matches the installed PWA's
+    // own scope/start_url so Chrome/Android has the best chance of
+    // recognizing this as "the same app" instead of an ordinary page.
+    const slugPath = String(normalizedAppSlug || '').replace(/^\/+|\/+$/g, '');
+    const tenantUrl = `${window.location.origin}/app/${encodeURIComponent(slugPath)}/`;
     window.location.assign(tenantUrl);
   };
 
@@ -806,6 +832,14 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
               type="button"
               className="tenant-install-btn"
               style={{ ...styles.installBtn, background: accentGradient, color: accent.text, boxShadow: `0 10px 26px ${accentGlow(0.4)}` }}
+              // Direct handler on the button itself (not just relying on
+              // the card's own onClick bubbling up to it) — the actual
+              // launch action the user taps should never depend on an
+              // event making it through the rest of the card first.
+              onClick={(event) => {
+                event.stopPropagation();
+                handleOpenApp();
+              }}
             >
               <span>Open App</span>
               <span className="tenant-install-btn-arrow" aria-hidden="true">→</span>
