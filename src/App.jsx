@@ -54,7 +54,7 @@ import AddCommunity from './AddCommunity';
 import TrustIdCard from './TrustIdCard';
 import AppVersionUpdatePrompt from './components/AppVersionUpdatePrompt';
 import TenantLanding from './TenantLanding';
-import { useTenant } from './context/TenantContext';
+import { useTenant, getTenantSlugFromPath } from './context/TenantContext';
 import { getCurrentNotificationContext, matchesNotificationForContext } from './services/notificationAudience';
 import { initPushNotifications } from './services/pushNotificationService';
 import { createUserNotification } from './services/api';
@@ -116,6 +116,30 @@ const readLastKnownThemeTrust = () => {
   const id = String(parsed.selectedTrustId || parsed.trustId || '').trim();
   const name = String(parsed.selectedTrustName || parsed.trustName || '').trim();
   return { id, name };
+};
+
+// The pre-tenant fallback chain for "which Trust is active" — only valid
+// when this isn't a /app/<slug> tenant route. On a tenant route the tenant
+// resolved from THAT route is authoritative (see callers below); falling
+// through to these caches there would resurrect whichever Trust happened
+// to be selected/cached from a previously opened tenant on this origin.
+const resolveLegacyCachedTrustId = () => {
+  const selected = localStorage.getItem('selected_trust_id') || '';
+  if (selected) return selected;
+  const persistedSelected = String(localStorage.getItem(LAST_SELECTED_TRUST_ID_KEY) || '').trim();
+  if (persistedSelected) return persistedSelected;
+  try {
+    const cachedDefault = localStorage.getItem('default_trust_cache');
+    if (cachedDefault) {
+      const parsed = JSON.parse(cachedDefault);
+      if (parsed?.id) return String(parsed.id);
+    }
+  } catch {
+    // ignore malformed cache
+  }
+  const lastKnownThemeTrust = readLastKnownThemeTrust();
+  if (lastKnownThemeTrust.id) return lastKnownThemeTrust.id;
+  return '';
 };
 
 const readBootThemeCache = (trustId) => {
@@ -291,22 +315,14 @@ const HospitalTrusteeApp = () => {
   const resolvedCommitteePreviousScreen = selectedMember?.previousScreen || previousScreen;
   const resolvedCommitteePreviousScreenName = selectedMember?.previousScreenName || previousScreenName;
   const [activeTrustId, setActiveTrustId] = useState(() => {
-    const selected = localStorage.getItem('selected_trust_id') || '';
-    if (selected) return selected;
-    const persistedSelected = String(localStorage.getItem(LAST_SELECTED_TRUST_ID_KEY) || '').trim();
-    if (persistedSelected) return persistedSelected;
-    try {
-      const cachedDefault = localStorage.getItem('default_trust_cache');
-      if (cachedDefault) {
-        const parsed = JSON.parse(cachedDefault);
-        if (parsed?.id) return String(parsed.id);
-      }
-    } catch {
-      // ignore malformed cache
+    // On a tenant PWA route (/app/<slug>), the tenant resolved from THIS
+    // route is authoritative — never fall back to a stale selected/
+    // default/theme Trust cached from a previously opened tenant on this
+    // origin (e.g. Backup) just because it resolves faster/first.
+    if (getTenantSlugFromPath(location.pathname)) {
+      return tenantInstalledTrustId || '';
     }
-    const lastKnownThemeTrust = readLastKnownThemeTrust();
-    if (lastKnownThemeTrust.id) return lastKnownThemeTrust.id;
-    return '';
+    return resolveLegacyCachedTrustId();
   });
   const resolveDefaultThemeTrust = () => {
     // Installed/tenant Trust identity (from a white-label /app/<slug> link) takes
@@ -318,6 +334,15 @@ const HospitalTrusteeApp = () => {
       const tenantName = (tenantTrust && String(tenantTrust.id) === String(tenantInstalledTrustId) && tenantTrust.name)
         || BASE_TRUST_NAME;
       return { id: tenantInstalledTrustId, name: tenantName };
+    }
+
+    // Still on a tenant route but the tenant hasn't resolved yet — there is
+    // no valid fallback Trust to show. Falling through to the caches below
+    // would render whichever Trust was cached from a previously opened
+    // tenant on this origin instead of staying neutral until this tenant
+    // resolves.
+    if (getTenantSlugFromPath(location.pathname)) {
+      return { id: '', name: BASE_TRUST_NAME };
     }
 
     try {
@@ -514,25 +539,26 @@ const HospitalTrusteeApp = () => {
   }, [location.pathname]);
 
   useEffect(() => {
+    // On a tenant PWA route, the current tenant is authoritative — never
+    // resync activeTrustId from the legacy selected/default/theme caches,
+    // which may still hold a previously opened tenant's Trust (e.g.
+    // Backup) until (or even after) this tenant resolves.
+    const isTenantRoute = Boolean(getTenantSlugFromPath(location.pathname));
+
     const syncTrustId = () => {
-      let next = localStorage.getItem('selected_trust_id') || '';
-      if (!next) next = String(localStorage.getItem(LAST_SELECTED_TRUST_ID_KEY) || '').trim();
-      if (!next) {
-        try {
-          const cachedDefault = localStorage.getItem('default_trust_cache');
-          if (cachedDefault) {
-            const parsed = JSON.parse(cachedDefault);
-            next = parsed?.id ? String(parsed.id) : '';
-          }
-        } catch {
-          // ignore malformed cache
-        }
+      if (isTenantRoute) {
+        const next = tenantInstalledTrustId || '';
+        setActiveTrustId((prev) => (prev === next ? prev : next));
+        return;
       }
+      const next = resolveLegacyCachedTrustId();
       setActiveTrustId((prev) => (prev === next ? prev : next));
     };
 
     const onTrustChanged = (event) => {
-      const next = event?.detail?.trustId || localStorage.getItem('selected_trust_id') || '';
+      const next = event?.detail?.trustId
+        || (isTenantRoute ? (tenantInstalledTrustId || '') : localStorage.getItem('selected_trust_id'))
+        || '';
       setActiveTrustId((prev) => (prev === next ? prev : next));
     };
 
@@ -548,7 +574,7 @@ const HospitalTrusteeApp = () => {
       window.removeEventListener('storage', syncTrustId);
       document.removeEventListener('visibilitychange', syncTrustId);
     };
-  }, []);
+  }, [location.pathname, tenantInstalledTrustId]);
 
   useEffect(() => {
     if (!activeTrustId) return undefined;

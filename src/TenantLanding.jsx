@@ -220,12 +220,22 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
   // confirms the browser finished installing — see the appinstalled
   // listener below and handleInstallClick's comments.
   const [isInstalled, setIsInstalled] = useState(false);
+  // Drives the post-install experience: 'idle' is the normal marketing
+  // card; 'prompting' is while the native browser install dialog is open;
+  // 'launching' is the full-screen transition shown the instant the user
+  // accepts, until the real `appinstalled` event confirms the browser
+  // finished installing; 'installed' is the existing success screen. There
+  // is no standard API to force-launch a newly installed PWA, so nothing
+  // in this state machine auto-navigates — the success screen's "Open
+  // App" button (handleOpenApp below) is the one reliable, user-initiated
+  // launch action.
+  const [installPhase, setInstallPhase] = useState('idle');
   // Not every Chromium build/version fires appinstalled reliably after an
   // 'accepted' outcome (browser bugs, unusual install flows, etc.) — a ref
   // (not state, so the timeout callback below always reads the latest
-  // value) plus a pending-timeout id let the "Finishing installation…" UI
-  // fall back to the normal Install button instead of hanging forever if
-  // that event never arrives.
+  // value) plus a pending-timeout id let the full-screen "Launching your
+  // app…" transition fall back to the normal Install button instead of
+  // hanging forever if that event never arrives.
   const isInstalledRef = useRef(false);
   const acceptedTimeoutRef = useRef(null);
   const [resolvedOnce, setResolvedOnce] = useState(() => alreadyResolvedThisSlug);
@@ -285,9 +295,15 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
 
   // appinstalled is the only reliable install-completion signal — the
   // native prompt's 'accepted' outcome just means the user tapped Install,
-  // not that Chrome finished installing it. Never force-navigate/launch
-  // here; only reflect the installed state in the UI (Open App below is a
-  // user-initiated click, same as everywhere else in this component).
+  // not that Chrome finished installing it. Stops the full-screen
+  // "Launching your app…" transition and shows the success screen. No
+  // automatic navigation/hand-off attempt is made here: there is no
+  // standard API to force-launch a newly installed PWA, and any attempt
+  // fired from this callback runs outside a user gesture, so a same-tab
+  // navigation could yank the user away from the success screen
+  // unexpectedly and a new-tab attempt would likely just be popup-blocked.
+  // The success screen's "Open App" button (handleOpenApp below) is the
+  // one reliable, user-initiated launch action.
   useEffect(() => {
     const handleAppInstalled = () => {
       if (acceptedTimeoutRef.current) {
@@ -298,6 +314,7 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
       setDeferredPrompt(null);
       setIsInstalled(true);
       setInstallOutcome('installed');
+      setInstallPhase('installed');
     };
     window.addEventListener('appinstalled', handleAppInstalled);
     return () => window.removeEventListener('appinstalled', handleAppInstalled);
@@ -306,7 +323,7 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
   // Not every Chromium build fires appinstalled after 'accepted' (browser
   // bugs, unusual install flows, older/newer versions behaving
   // inconsistently) — clear any pending safety timeout on unmount so it
-  // never fires setState after the component is gone.
+  // never fires setState after this component is gone.
   useEffect(() => () => {
     if (acceptedTimeoutRef.current) {
       clearTimeout(acceptedTimeoutRef.current);
@@ -579,13 +596,35 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
     );
   }
 
+  // Full-screen transition shown the instant the user accepts the native
+  // install prompt, replacing the tenant card entirely (no card, no
+  // "Powered by Setu", no install instructions) until the real
+  // `appinstalled` event confirms the browser finished installing — see
+  // handleInstallClick/handleAppInstalled above for the state transitions
+  // and the safety-timeout fallback if that event never arrives.
+  if (installPhase === 'launching') {
+    return (
+      <div style={{ ...styles.page, background: backgroundColor }}>
+        <div style={{ ...styles.spinner, borderTopColor: accent.from }} />
+        <p style={{ ...styles.loadingText, color: palette.textPrimary, fontSize: '15px', fontWeight: 700, marginTop: '18px' }}>
+          Launching your app…
+        </p>
+        <p style={{ ...styles.loadingText, color: palette.textSecondary, marginTop: '4px' }}>
+          Please wait while we finish setting things up.
+        </p>
+        <style>{'@keyframes spin { to { transform: rotate(360deg); } }'}</style>
+      </div>
+    );
+  }
+
   const handleInstallClick = async () => {
     if (deferredPrompt) {
+      setInstallPhase('prompting');
       deferredPrompt.prompt();
       // The native prompt's outcome only tells us the user tapped
       // Install/Cancel — it is NOT confirmation the browser finished
       // installing. For 'accepted' we deliberately do not set isInstalled
-      // here; the UI shows an intermediate "installing" state (below) and
+      // here; the UI shows the full-screen launching transition below and
       // only the appinstalled listener flips isInstalled to true.
       const { outcome } = await deferredPrompt.userChoice;
       // Consumed — a BeforeInstallPromptEvent can only be prompted once, so
@@ -594,15 +633,22 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
       setInstallOutcome(outcome);
       setDeferredPrompt(null);
       if (outcome === 'accepted') {
+        setInstallPhase('launching');
         // Safety net for browser/version inconsistencies where appinstalled
-        // never fires after 'accepted' — don't leave the user stuck on
-        // "Finishing installation…" forever; fall back to the normal
-        // Install button so they can retry or use the manual browser menu.
+        // never fires after 'accepted' — don't leave the user stuck on the
+        // full-screen "Launching your app…" transition forever; fall back
+        // to the normal Install button so they can retry or use the
+        // manual browser menu.
         if (acceptedTimeoutRef.current) clearTimeout(acceptedTimeoutRef.current);
         acceptedTimeoutRef.current = setTimeout(() => {
           acceptedTimeoutRef.current = null;
-          if (!isInstalledRef.current) setInstallOutcome('');
+          if (!isInstalledRef.current) {
+            setInstallOutcome('');
+            setInstallPhase('idle');
+          }
         }, 8000);
+      } else {
+        setInstallPhase('idle');
       }
       return;
     }
@@ -619,15 +665,17 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
     }
   };
 
-  // Best-effort "open the installed app" — this is a real top-level
-  // navigation (not client-side routing) to the same tenant URL we're
-  // already on, so Chrome/Android gets a chance to hand it off to the
-  // installed PWA via its app/URL association. That handoff is entirely
-  // browser/OS-controlled and not guaranteed; if it doesn't happen, this
-  // just reloads the page, which is why the helper text below points the
-  // user at their Home Screen icon as the fallback.
+  // The primary launch action, and the only one that is user-initiated
+  // (this click is what makes it a real user gesture) — a top-level
+  // navigation (not client-side routing) to the exact tenant URL, so
+  // Chrome/Android gets a chance to hand it off to the installed PWA via
+  // its app/URL association. That handoff is entirely browser/OS-
+  // controlled and not guaranteed; if it doesn't happen, this just
+  // reloads the page, which is why the helper text below points the user
+  // at their Home Screen icon as the fallback.
   const handleOpenApp = () => {
-    window.location.href = `${window.location.origin}/app/${normalizedAppSlug}`;
+    const tenantUrl = `${window.location.origin}/app/${normalizedAppSlug}/`;
+    window.location.assign(tenantUrl);
   };
 
   // Single click handler shared by the whole card (see cardBody below) so
@@ -638,7 +686,7 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
       handleOpenApp();
       return;
     }
-    if (installOutcome === 'accepted') return;
+    if (installPhase === 'prompting' || installPhase === 'launching') return;
     handleInstallClick();
   };
 
@@ -707,14 +755,6 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
               <span>Open App</span>
               <span className="tenant-install-btn-arrow" aria-hidden="true">→</span>
             </button>
-          ) : installOutcome === 'accepted' ? (
-            <div
-              className="tenant-install-btn"
-              style={{ ...styles.installBtn, background: 'transparent', border: `1.5px solid ${accent.from}`, color: palette.textPrimary, cursor: 'default' }}
-            >
-              <span style={{ ...styles.installingSpinner, borderTopColor: accent.from }} />
-              <span>Finishing installation…</span>
-            </div>
           ) : (
             <button
               type="button"
@@ -950,13 +990,6 @@ const styles = {
     fontSize: '16px',
     fontWeight: 800,
     lineHeight: 1.35,
-  },
-  installingSpinner: {
-    width: '15px',
-    height: '15px',
-    border: '2px solid rgba(128,128,128,0.3)',
-    borderRadius: '50%',
-    animation: 'spin 0.7s linear infinite',
   },
   installBtn: {
     width: '100%',

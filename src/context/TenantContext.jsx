@@ -33,10 +33,13 @@ const writeStored = (key, value) => {
 // PWAs apart — localStorage is shared across all of them on this origin.
 // Whenever the current path is /app/{slug}, that slug must win over
 // whatever tenant happens to be cached from a previously opened/installed
-// PWA on the same device.
-const getUrlSlug = () => {
+// PWA on the same device. Exported so other Trust-selection code (e.g.
+// App.jsx's activeTrustId/theme resolution) can ask the same question
+// instead of re-deriving it (and risking it disagreeing with this file).
+export const getTenantSlugFromPath = (pathname) => {
   try {
-    const match = String(window.location.pathname || '').match(/^\/app\/([^/?#]+)/i);
+    const path = String(pathname ?? window.location.pathname ?? '');
+    const match = path.match(/^\/app\/([^/?#]+)/i);
     const slug = match && match[1] ? decodeURIComponent(match[1]).trim().toLowerCase() : '';
     // /app/login, /app/profile, etc. are existing app routes, not a Trust
     // slug — never treat a reserved first-level segment as tenant identity.
@@ -46,6 +49,8 @@ const getUrlSlug = () => {
     return '';
   }
 };
+
+const getUrlSlug = () => getTenantSlugFromPath();
 
 export const TenantProvider = ({ children }) => {
   const [tenantTrust, setTenantTrust] = useState(null);
