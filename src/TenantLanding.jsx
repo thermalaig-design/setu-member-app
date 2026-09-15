@@ -285,6 +285,61 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
     return subscribeInstallPrompt((event) => setDeferredPrompt(event));
   }, []);
 
+  // Detects a tenant PWA that was installed in an EARLIER browser session
+  // (appinstalled below only ever sees installs completed during the
+  // current one). Deliberately does NOT infer "installed" from whether
+  // beforeinstallprompt fired/didn't fire — that event's absence has many
+  // unrelated causes (already prompted too recently, browser policy,
+  // ineligible criteria, etc.) and is not an install-state signal.
+  useEffect(() => {
+    if (!normalizedAppSlug) return;
+
+    // Running standalone already means THIS exact tenant PWA is what
+    // launched this window — no ambiguity, no API call needed.
+    if (isStandaloneDisplay()) {
+      setIsInstalled(true);
+      setInstallOutcome('installed');
+      setInstallPhase('installed');
+      return;
+    }
+
+    // Still in a normal browser tab: navigator.getInstalledRelatedApps()
+    // (Chrome/Android only) is the real "is this installed" signal. Where
+    // it isn't supported/available, this simply does nothing — the
+    // appinstalled listener below still covers this session's own
+    // installs, and otherwise the normal Install App card is shown rather
+    // than ever guessing "installed" without real evidence.
+    if (typeof navigator === 'undefined' || typeof navigator.getInstalledRelatedApps !== 'function') {
+      return undefined;
+    }
+
+    let cancelled = false;
+    const manifestPath = `/pwa-manifest/${normalizedAppSlug}.webmanifest`.toLowerCase();
+
+    navigator.getInstalledRelatedApps()
+      .then((relatedApps) => {
+        if (cancelled) return;
+        // Per-tenant match against THIS slug's own manifest — a different
+        // tenant PWA installed on the same device/browser must never flip
+        // this tenant's card to the installed/Open App state.
+        const matchesThisTenant = (Array.isArray(relatedApps) ? relatedApps : []).some((app) => {
+          const url = String(app?.url || '').toLowerCase();
+          const id = String(app?.id || '').toLowerCase();
+          return url.includes(manifestPath) || id.includes(normalizedAppSlug);
+        });
+        if (matchesThisTenant) {
+          setIsInstalled(true);
+          setInstallOutcome('installed');
+          setInstallPhase('installed');
+        }
+      })
+      .catch(() => {
+        // Unsupported/failed — never claim installed without real evidence.
+      });
+
+    return () => { cancelled = true; };
+  }, [normalizedAppSlug]);
+
   // Keep a ref mirror of isInstalled so the safety-timeout callback below
   // (started from handleInstallClick, possibly still pending several
   // seconds later) always reads the latest value instead of a stale one
