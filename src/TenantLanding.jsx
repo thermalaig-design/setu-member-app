@@ -4,8 +4,9 @@ import { useTenant } from './context/TenantContext';
 import { isReservedSlug } from './constants/reservedRoutes';
 import { fetchMemberTrustMemberships, resolveTenantAppAccess, syncTenantMembershipName } from './services/trustService';
 import { saveProfile } from './services/api';
-import { getUserHospitalMemberships } from './utils/storageUtils';
+import { getUserHospitalMemberships, clearTenantUserSession } from './utils/storageUtils';
 import { getAppHomePath } from './utils/tenantNavigation';
+import { getInstallPrompt, clearInstallPrompt, subscribeInstallPrompt } from './utils/installPrompt';
 import Home from './Home';
 import TenantProfileModal from './components/TenantProfileModal';
 
@@ -263,13 +264,15 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
     return () => { active = false; };
   }, [appSlug, reserved, resolveTenantFromSlug, alreadyResolvedThisSlug]);
 
+  // The actual beforeinstallprompt listener lives in index.html's inline
+  // bootstrap script — registered before any JS module loads, so an event
+  // firing before this component (or even React) mounts is never lost. Pick
+  // up one that already arrived, then subscribe for any that fire later.
   useEffect(() => {
-    const handleBeforeInstallPrompt = (event) => {
-      event.preventDefault();
-      setDeferredPrompt(event);
-    };
-    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
-    return () => window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    const existingPrompt = getInstallPrompt();
+    if (existingPrompt) setDeferredPrompt(existingPrompt);
+
+    return subscribeInstallPrompt((event) => setDeferredPrompt(event));
   }, []);
 
   // Keep a ref mirror of isInstalled so the safety-timeout callback below
@@ -291,6 +294,7 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
         clearTimeout(acceptedTimeoutRef.current);
         acceptedTimeoutRef.current = null;
       }
+      clearInstallPrompt();
       setDeferredPrompt(null);
       setIsInstalled(true);
       setInstallOutcome('installed');
@@ -370,7 +374,12 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
 
       const trustName = normalizeText(access.trust?.name || tenantTrust?.name);
 
-      if (access.needs_profile) {
+      // Profile modal only ever applies to a membership just created for
+      // this visit — an existing reg_members row (active or not) must go
+      // straight to Home/Pending below, even if its Name happens to be
+      // blank. Checking is_new_membership first is what keeps an existing
+      // active member from ever seeing "Complete your profile" again.
+      if (access.is_new_membership && access.needs_profile) {
         setTenantAccessPayload(access);
         setTenantAccessState('needs_profile');
         return true;
@@ -439,6 +448,20 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
       setTenantAccessState('pending');
     }
   }, [tenantAccessPayload, grantTenantHome, tenantTrust]);
+
+  // "Use another mobile number" on the profile/onboarding screen: a stale
+  // SETU session saved on this device (from a different login, possibly for
+  // a different Trust) must never be silently reused here without the user
+  // being able to see/reject it. Clears only auth/session/selected-Trust
+  // keys — never the installed_app_trust_id/installed_app_slug identity
+  // TenantContext owns, so this device's tenant PWA context is untouched —
+  // then sends the user into this same tenant's login flow.
+  const handleUseAnotherNumber = useCallback(() => {
+    clearTenantUserSession();
+    setTenantAccessState(null);
+    setTenantAccessPayload(null);
+    navigate('/login', { replace: true, state: { tenantSlug: normalizedAppSlug } });
+  }, [navigate, normalizedAppSlug]);
 
   // If the app is already installed (running standalone) and the tenant
   // resolved successfully, skip the marketing landing and go straight to
@@ -523,6 +546,7 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
         accent={accent}
         palette={palette}
         onSubmit={handleProfileSubmit}
+        onUseAnotherNumber={handleUseAnotherNumber}
       />
     );
   }
@@ -564,6 +588,9 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
       // here; the UI shows an intermediate "installing" state (below) and
       // only the appinstalled listener flips isInstalled to true.
       const { outcome } = await deferredPrompt.userChoice;
+      // Consumed — a BeforeInstallPromptEvent can only be prompted once, so
+      // clear the shared store too, not just this component's own state.
+      clearInstallPrompt();
       setInstallOutcome(outcome);
       setDeferredPrompt(null);
       if (outcome === 'accepted') {

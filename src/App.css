@@ -42,3 +42,65 @@
 .app-route-shell h6 {
 	color: var(--heading-color, #111827);
 }
+.other-memberships-page {
+	background: var(--page-bg, var(--app-page-bg));
+	color: var(--body-text-color);
+}
+
+.other-memberships-header {
+	margin: 0 3px;
+	background: var(--navbar-bg, var(--app-navbar-bg)) !important;
+	color: var(--navbar-text) !important;
+	border-bottom: 1px solid var(--navbar-border) !important;
+}
+
+.other-memberships-content {
+	padding: 24px 20px 48px;
+}
+
+.other-membership-card img,
+.other-membership-card > div > div > img {
+	border: 2px solid #e9bd25 !important;
+}
+
+.other-membership-card > div {
+	background: transparent !important;
+}
+
+.other-membership-card > div > div > div {
+	background: linear-gradient(135deg, #f5c342, #b8860b) !important;
+	color: #1a1408 !important;
+}
+
+@media (max-width: 560px) {
+	.other-memberships-content {
+		padding: 20px 20px 40px;
+	}
+
+	.other-memberships-header {
+		margin: 0;
+	}
+
+	.other-memberships-grid {
+		column-gap: 14px !important;
+		row-gap: 28px !important;
+	}
+
+	.other-membership-card > div > div {
+		gap: 10px !important;
+	}
+
+	.other-membership-card img,
+	.other-membership-card > div > div > div {
+		width: 64px !important;
+		height: 64px !important;
+	}
+
+	.other-membership-card h3 {
+		font-size: 14px !important;
+	}
+
+	.other-membership-card p {
+		font-size: 11px !important;
+	}
+}

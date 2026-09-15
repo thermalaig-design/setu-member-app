@@ -1,7 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { flushSync } from 'react-dom';
-import { Users, ChevronRight, LogOut, Share2, PhoneCall, FileText, CirclePlus, Clock3, Lock, Facebook, Instagram, Linkedin, MessageCircle, ShoppingBag } from 'lucide-react';
+import { Users, ChevronRight, LogOut, Share2, PhoneCall, FileText, CirclePlus, Clock3, Lock, ShoppingBag } from 'lucide-react';
+import { FaFacebookF, FaInstagram, FaLinkedinIn, FaWhatsapp, FaYoutube } from 'react-icons/fa';
 import { Capacitor } from '@capacitor/core';
 import { Share } from '@capacitor/share';
 import { getProfile, updateMemberPrivacy } from '../../services/api';
@@ -303,29 +304,36 @@ const Sidebar = ({ isOpen, onClose, onNavigate, currentPage, onLogout }) => {
       key: 'instagram',
       label: 'Instagram',
       href: shareAppLinks?.instagram_link,
-      icon: Instagram,
+      icon: FaInstagram,
       color: '#E4405F'
     },
     {
       key: 'facebook',
       label: 'Facebook',
       href: shareAppLinks?.facebook_link,
-      icon: Facebook,
+      icon: FaFacebookF,
       color: '#1877F2'
     },
     {
       key: 'whatsapp',
       label: 'WhatsApp',
       href: shareAppLinks?.whatsapp_link,
-      icon: MessageCircle,
+      icon: FaWhatsapp,
       color: '#25D366'
     },
     {
       key: 'linkedin',
       label: 'LinkedIn',
       href: shareAppLinks?.linkedin_link,
-      icon: Linkedin,
+      icon: FaLinkedinIn,
       color: '#0A66C2'
+    },
+    {
+      key: 'youtube',
+      label: 'YouTube',
+      href: shareAppLinks?.youtube_url,
+      icon: FaYoutube,
+      color: '#FF0000'
     }
   ].filter((item) => String(item.href || '').trim());
 
@@ -1066,7 +1074,7 @@ const Sidebar = ({ isOpen, onClose, onNavigate, currentPage, onLogout }) => {
                 Social links
               </span>
             </div> */}
-            <div className="grid grid-cols-4 gap-[2px]">
+            <div className="grid grid-cols-5 gap-[2px]">
               {socialLinks.map((item) => {
                 const Icon = item.icon;
                 return (
@@ -1083,7 +1091,7 @@ const Sidebar = ({ isOpen, onClose, onNavigate, currentPage, onLogout }) => {
                     aria-label={item.label}
                     title={item.label}
                   >
-                    <Icon className="h-5 w-5" style={{ color: item.color }} />
+                    <Icon aria-hidden="true" size={20} style={{ color: item.color }} />
                   </button>
                 );
               })}

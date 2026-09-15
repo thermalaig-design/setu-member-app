@@ -39,7 +39,7 @@ import ProtectedRoute from './ProtectedRoute';
 import SponsorDetails from './SponsorDetails';
 import SponsorsList from './SponsorsList';
 import DeveloperDetails from './DeveloperDetails';
-import UserPanel from './UserPanel';
+import PersistentUserPanel from './components/PersistentUserPanel';
 import FeatureGuard from './components/FeatureGuard';
 
 import TermsAndConditions from './TermsAndConditions';
@@ -1506,7 +1506,11 @@ const HospitalTrusteeApp = () => {
           element={
             <ProtectedRoute>
               <FeatureGuard featureKey="feature_bottom_nav">
-                <UserPanel onNavigate={handleNavigate} />
+                {/* Actual content is PersistentUserPanel below, kept mounted
+                    outside <Routes> so its iframe survives navigating away
+                    and back. This route only exists so ProtectedRoute /
+                    FeatureGuard can gate direct/refresh navigation here. */}
+                {null}
               </FeatureGuard>
             </ProtectedRoute>
           }
@@ -1623,6 +1627,10 @@ const HospitalTrusteeApp = () => {
         />
         <Route path="*" element={<Navigate to={getAppHomePath()} replace />} />
       </Routes>
+      <PersistentUserPanel
+        isActive={location.pathname === '/user-panel'}
+        onNavigate={handleNavigate}
+      />
     </div>
   );
 

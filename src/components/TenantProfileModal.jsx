@@ -8,7 +8,7 @@ import React, { useState } from 'react';
 // install-instructions modal in that file, rather than the app's global
 // --app-button-bg CSS vars (which reflect the *selected* Trust, not
 // necessarily this not-yet-entered tenant Trust).
-function TenantProfileModal({ trustName, mobile, initialName = '', initialEmail = '', isActive, accent, palette, onSubmit }) {
+function TenantProfileModal({ trustName, mobile, initialName = '', initialEmail = '', isActive, accent, palette, onSubmit, onUseAnotherNumber }) {
   const [name, setName] = useState(initialName);
   const [email, setEmail] = useState(initialEmail);
   const [submitting, setSubmitting] = useState(false);
@@ -58,6 +58,11 @@ function TenantProfileModal({ trustName, mobile, initialName = '', initialEmail 
                 disabled
                 style={{ ...styles.input, ...styles.inputDisabled, color: palette.textSecondary, borderColor: palette.cardBorder }}
               />
+              {onUseAnotherNumber && (
+                <button type="button" onClick={onUseAnotherNumber} style={{ ...styles.linkBtn, color: accent.from }}>
+                  Use another mobile number
+                </button>
+              )}
             </div>
 
             <div style={styles.fieldGroup}>
@@ -178,6 +183,18 @@ const styles = {
   },
   inputDisabled: {
     opacity: 0.7,
+  },
+  linkBtn: {
+    alignSelf: 'flex-start',
+    border: 'none',
+    background: 'transparent',
+    padding: 0,
+    marginTop: '2px',
+    fontSize: '11.5px',
+    fontWeight: 700,
+    cursor: 'pointer',
+    textDecoration: 'underline',
+    fontFamily: "'Inter', sans-serif",
   },
   error: {
     margin: 0,

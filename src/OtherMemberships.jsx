@@ -1,15 +1,18 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  ArrowLeft, Users, Plus, X, CheckCircle, Menu, Home as HomeIcon,
-  AlertCircle, Building2, Hash, Tag, FileText, Loader2, Save, ChevronRight, BadgeCheck
+  ArrowLeft, Plus, X, Menu, Home as HomeIcon,
+  AlertCircle, Building2, Loader2, ChevronRight, BadgeCheck, ExternalLink
 } from 'lucide-react';
 import Sidebar from './features/sidebar/Sidebar';
+import BottomNav from './components/BottomNav';
 import TrustIdCard from './TrustIdCard';
 import { useAppTheme } from './context/ThemeContext';
 import { applyOpacity } from './utils/colorUtils';
 import { getNavbarThemeStyles, getThemeToken } from './utils/themeUtils';
 import { fetchActiveTrustsByMobile } from './services/trustService';
+import { isFeatureVisible } from './services/featureFlags';
+import { useFeatureFlags } from './hooks/useFeatureFlags';
 import { getAppHomePath } from './utils/tenantNavigation';
 
 // ─── Supabase helpers ──────────────────────────────────────────────────────
@@ -106,18 +109,6 @@ const fetchOtherMemberships = async (memberId) => {
 
 
 
-// Insert a new other_membership record
-const addOtherMembership = async (payload) => {
-  const supabase = await getSupabase();
-  const { data, error } = await supabase
-    .from('other_memberships')
-    .insert([payload])
-    .select('*, Trust:trust_id ( id, name, icon_url )')
-    .single();
-  if (error) throw error;
-  return data;
-};
-
 // Delete an other_membership record
 const deleteOtherMembership = async (id) => {
   const supabase = await getSupabase();
@@ -137,33 +128,21 @@ const Label = ({ children }) => (
   }}>{children}</p>
 );
 
-const inputStyle = {
-  width: '100%',
-  padding: '11px 14px',
-  border: '1.5px solid var(--advertisement-card-border)',
-  borderRadius: '12px',
-  fontSize: '14px',
-  fontFamily: "var(--font-family, 'Inter', sans-serif)",
-  color: 'var(--advertisement-description)',
-  background: 'color-mix(in srgb, var(--advertisement-card-bg) 80%, var(--app-accent-bg))',
-  outline: 'none',
-  boxSizing: 'border-box',
-  transition: 'border-color 0.2s',
-};
-
 // ─── Main Component ────────────────────────────────────────────────────────
-
-const EMPTY_FORM = {
-  trust_id: '',
-  organisation_name: '',
-  membership_no: '',
-  membership_type: '',
-  remark: '',
-};
 
 const normalizeText = (value) => String(value || '').trim();
 
 const normalizeId = (value) => normalizeText(value).toLowerCase();
+
+const getMembershipDisplayName = (item = {}) =>
+  normalizeText(item?.Trust?.name || item?.organisation_name || item?.trust_name || item?.name);
+
+const sortMembershipsAlphabetically = (items = []) =>
+  [...items].sort((a, b) => getMembershipDisplayName(a).localeCompare(
+    getMembershipDisplayName(b),
+    undefined,
+    { sensitivity: 'base', numeric: true }
+  ));
 
 const pickFirstText = (...values) => {
   for (const value of values) {
@@ -359,6 +338,7 @@ const buildTrustLinksFromUserPayload = (parsedUser = {}) => {
         id: hm.trust_id,
         name: hm.trust_name,
         icon_url: hm.trust_icon_url,
+        legal_name: hm.trust_legal_name || null,
       },
       membership_no: membershipNo || '-',
       location: null,
@@ -425,31 +405,35 @@ const areMembershipCollectionsEqual = (left = [], right = []) => {
 const OtherMemberships = ({ onNavigate }) => {
   const navigate = useNavigate();
   const theme = useAppTheme();
+  const { flags: featureFlags } = useFeatureFlags();
   const navbarTheme = getNavbarThemeStyles(theme);
   const bootUser = getStoredUser();
   const bootMemberId = bootUser?.members_id || bootUser?.id || 'anonymous';
   const bootTrustLinksFromUser = buildTrustLinksFromUserPayload(bootUser);
   const bootTrustLinks = readTrustLinksCache(bootMemberId);
   const initialTrustLinks = bootTrustLinksFromUser.length > 0 ? bootTrustLinksFromUser : bootTrustLinks;
+  const primaryColor = getThemeToken(theme, 'primary_color', 'var(--brand-red)');
+  const secondaryColor = getThemeToken(theme, 'secondary_color', 'var(--brand-navy)');
+  const accentColor = getThemeToken(theme, 'accent_color', 'var(--app-accent)');
+  const accentBgColor = getThemeToken(theme, 'accent_bg', 'var(--app-accent-bg)');
 
   const colors = {
-    primary: theme.primary || 'var(--brand-red)',
-    secondary: theme.secondary || 'var(--brand-navy)',
-    accent: theme.accent || 'var(--app-accent)',
-    accentBg: theme.accentBg || 'var(--app-accent-bg)',
+    primary: primaryColor,
+    secondary: secondaryColor,
+    accent: accentColor,
+    accentBg: accentBgColor,
     bg: getThemeToken(theme, 'page_bg.background_color', 'var(--app-page-bg)'),
     surface: 'var(--surface-color)',
-    card: `linear-gradient(180deg, ${applyOpacity('var(--surface-color)', 0.96)} 0%, ${applyOpacity(theme.accentBg || 'var(--app-accent-bg)', 0.72)} 100%)`,
-    cardInner: applyOpacity(theme.accentBg || 'var(--app-accent-bg)', 0.42),
-    border: applyOpacity(theme.secondary || 'var(--brand-navy)', 0.13),
+    card: `linear-gradient(180deg, ${applyOpacity('var(--surface-color)', 0.96)} 0%, ${applyOpacity(accentBgColor, 0.72)} 100%)`,
+    cardInner: applyOpacity(accentBgColor, 0.42),
+    border: applyOpacity(secondaryColor, 0.13),
     muted: 'var(--body-text-color)',
-    success: 'color-mix(in srgb, #16a34a 82%, var(--brand-red) 18%)',
-    successBg: 'color-mix(in srgb, var(--app-accent-bg) 58%, #DCFCE7)',
+    onPrimary: getThemeToken(theme, 'app_buttons.text_color', 'var(--app-button-text)'),
     error: 'var(--brand-red-dark)',
     errorBg: 'var(--brand-red-light)',
-    vipText: '#8A5A00',
-    vipBg: 'linear-gradient(135deg, #FFE7A3 0%, #FFD36A 52%, #F5B700 100%)',
-    vipBorder: '#E0A11B',
+    vipText: getThemeToken(theme, 'advertisement.badge_text_color', 'var(--advertisement-badge-text)'),
+    vipBg: 'linear-gradient(135deg, var(--advertisement-badge-bg) 0%, var(--app-accent-bg) 52%, var(--app-accent) 100%)',
+    vipBorder: getThemeToken(theme, 'advertisement.card_border_color', 'var(--advertisement-card-border)'),
   };
 
   // ── state ──
@@ -457,23 +441,17 @@ const OtherMemberships = ({ onNavigate }) => {
   const [otherMems, setOtherMems] = useState([]);        // from other_memberships table
   const [loading, setLoading] = useState(initialTrustLinks.length === 0);
   const [error, setError] = useState('');
-  const [memberName, setMemberName] = useState('');
-
-  // Add-form state
-  const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState(EMPTY_FORM);
-  const [submitting, setSubmitting] = useState(false);
-  const [submitError, setSubmitError] = useState('');
-  const [submitSuccess, setSubmitSuccess] = useState('');
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [trustCardModalData, setTrustCardModalData] = useState(null);
-  const [resolvedMemberId, setResolvedMemberId] = useState('');
+  const [trustWebAppOverlay, setTrustWebAppOverlay] = useState(null);
+  const [openingTrustId, setOpeningTrustId] = useState('');
 
   // Delete state
   const [deletingId, setDeletingId] = useState(null);
 
-  // ── derived ──
-  const user = getStoredUser();
+  const sortedOtherMems = useMemo(() => sortMembershipsAlphabetically(otherMems), [otherMems]);
+  const sortedTrustLinks = useMemo(() => sortMembershipsAlphabetically(trustLinks), [trustLinks]);
+  const showCreateNewApp = isFeatureVisible(featureFlags, 'feature_add_community');
 
   // ── fetch data ──
   const loadData = useCallback(async (opts = {}) => {
@@ -495,10 +473,6 @@ const OtherMemberships = ({ onNavigate }) => {
         setLoading(false);
         return;
       }
-      setResolvedMemberId(id);
-      const name = parsedUser?.Name || parsedUser?.name || parsedUser?.full_name || '';
-      setMemberName(name);
-
       const merged = buildTrustLinksFromUserPayload(parsedUser);
 
       setTrustLinks((prev) => (areMembershipCollectionsEqual(prev, merged) ? prev : merged));
@@ -584,52 +558,6 @@ const OtherMemberships = ({ onNavigate }) => {
   }, [isMenuOpen]);
 
   // ── handlers ──
-  const handleFormChange = (field, value) => {
-    setForm(prev => ({ ...prev, [field]: value }));
-  };
-
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    setSubmitError('');
-    setSubmitSuccess('');
-
-    if (!form.membership_no.trim()) {
-      setSubmitError('Membership number is required.');
-      return;
-    }
-    if (!form.organisation_name.trim()) {
-      setSubmitError('Please enter the Trust / Organisation name.');
-      return;
-    }
-
-    setSubmitting(true);
-    try {
-      const id = normalizeText(resolvedMemberId) || await resolveOtherMembershipMemberId(user);
-      const payload = {
-        member_id: id || null,
-        member_name: memberName || null,
-        member_phone: null,
-        trust_id: null,
-        organisation_name: form.organisation_name.trim() || null,
-        membership_no: form.membership_no.trim(),
-        membership_type: form.membership_type.trim() || null,
-        remark: form.remark.trim() || null,
-        is_active: true,
-      };
-      const newRecord = await addOtherMembership(payload);
-      setOtherMems(prev => [newRecord, ...prev]);
-      setForm(EMPTY_FORM);
-      setShowForm(false);
-      setSubmitSuccess('Membership added successfully!');
-      setTimeout(() => setSubmitSuccess(''), 4000);
-    } catch (err) {
-      console.error('Add other membership error:', err);
-      setSubmitError(err?.message || 'Failed to add membership. Try again.');
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
   const handleDelete = async (id) => {
     if (!window.confirm('Remove this membership record?')) return;
     setDeletingId(id);
@@ -640,6 +568,42 @@ const OtherMemberships = ({ onNavigate }) => {
       alert('Failed to delete: ' + (err?.message || 'Unknown error'));
     } finally {
       setDeletingId(null);
+    }
+  };
+
+  const handleCreateNewApp = () => {
+    if (onNavigate) {
+      onNavigate('add-community');
+      return;
+    }
+    navigate('/add-community');
+  };
+
+  const handleOpenTrustWebApp = async (link) => {
+    const trustId = normalizeText(link?.trust_id || link?.Trust?.id);
+    if (!trustId || openingTrustId) return;
+    const trustName = normalizeText(link?.Trust?.name) || 'Trust';
+
+    setOpeningTrustId(trustId);
+    try {
+      const supabase = await getSupabase();
+      const { data, error } = await supabase.rpc('manage_user_panel_by_trust_details', {
+        p_action: 'view',
+        p_trust_id: trustId,
+      });
+      if (error) throw error;
+
+      const webAppUrl = normalizeText(data?.[0]?.web_app_url);
+      if (!webAppUrl) {
+        throw new Error('This trust does not have a web app link yet.');
+      }
+
+      setTrustWebAppOverlay({ url: webAppUrl, name: trustName });
+      setOpeningTrustId('');
+    } catch (err) {
+      console.error('Failed to open trust web app:', err);
+      alert('Failed to open: ' + (err?.message || 'Unknown error'));
+      setOpeningTrustId('');
     }
   };
 
@@ -660,11 +624,11 @@ const OtherMemberships = ({ onNavigate }) => {
     const iconUrl = typeof trust === 'object' ? trust?.icon_url : null;
     return iconUrl ? (
       <img src={iconUrl} alt={name}
-        style={{ width: size, height: size, borderRadius: size * 0.3, objectFit: 'contain', border: `2px solid ${colors.border}`, background: '#F8F9FF', flexShrink: 0 }}
+        style={{ width: size, height: size, borderRadius: size * 0.3, objectFit: 'contain', border: `2px solid ${colors.border}`, background: 'color-mix(in srgb, var(--advertisement-card-bg) 82%, var(--app-accent-bg))', flexShrink: 0 }}
         onError={e => { e.target.style.display = 'none'; e.target.nextSibling.style.display = 'flex'; }}
       />
     ) : (
-      <div style={{ width: size, height: size, borderRadius: size * 0.3, background: `linear-gradient(135deg, ${colors.primary}, ${colors.secondary})`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: size * 0.42, fontWeight: 800, color: '#fff', flexShrink: 0 }}>
+      <div style={{ width: size, height: size, borderRadius: size * 0.3, background: `linear-gradient(135deg, ${colors.primary}, ${colors.secondary})`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: size * 0.42, fontWeight: 800, color: colors.onPrimary, flexShrink: 0 }}>
         {name.charAt(0).toUpperCase()}
       </div>
     );
@@ -726,15 +690,15 @@ const OtherMemberships = ({ onNavigate }) => {
               </h3>
               {showSetuVerifiedBadge && (
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '7px', marginTop: '2px' }}>
-                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '10px', fontWeight: 800, color: '#fff', background: `linear-gradient(135deg, ${colors.primary} 0%, ${colors.secondary} 100%)`, border: `1px solid ${applyOpacity(colors.primary, 0.4)}`, padding: '3px 10px 3px 8px', borderRadius: '999px', letterSpacing: '0.06em', boxShadow: `0 2px 6px ${applyOpacity(colors.primary, 0.35)}` }}>
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '10px', fontWeight: 800, color: colors.onPrimary, background: `linear-gradient(135deg, ${colors.primary} 0%, ${colors.secondary} 100%)`, border: `1px solid ${applyOpacity(colors.primary, 0.4)}`, padding: '3px 10px 3px 8px', borderRadius: '999px', letterSpacing: '0.06em', boxShadow: `0 2px 6px ${applyOpacity(colors.primary, 0.35)}` }}>
                     <BadgeCheck size={11} strokeWidth={2.5} />
                     Setu verified
                   </span>
-                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', fontSize: '10px', fontWeight: 800, color: '#FFF8E1', background: 'linear-gradient(135deg, #6E5300 0%, #B8860B 45%, #D4AF37 100%)', border: '1px solid #E2C66C', padding: '3px 10px', borderRadius: '999px', letterSpacing: '0.08em' }}>
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', fontSize: '10px', fontWeight: 800, color: colors.vipText, background: colors.vipBg, border: `1px solid ${colors.vipBorder}`, padding: '3px 10px', borderRadius: '999px', letterSpacing: '0.08em' }}>
                     {membershipNoText}
                   </span>
                   {membershipTypeText && (
-                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', fontSize: '10px', fontWeight: 800, color: '#FFF8E1', background: 'linear-gradient(135deg, #6E5300 0%, #B8860B 45%, #D4AF37 100%)', border: '1px solid #E2C66C', padding: '3px 10px', borderRadius: '999px', letterSpacing: '0.08em' }}>
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', fontSize: '10px', fontWeight: 800, color: colors.vipText, background: colors.vipBg, border: `1px solid ${colors.vipBorder}`, padding: '3px 10px', borderRadius: '999px', letterSpacing: '0.08em' }}>
                       {membershipTypeText}
                     </span>
                   )}
@@ -758,7 +722,7 @@ const OtherMemberships = ({ onNavigate }) => {
               <button
                 onClick={() => handleDelete(m.id)}
                 disabled={deletingId === m.id}
-                style={{ width: 32, height: 32, borderRadius: '10px', border: 'none', background: '#FEF2F2', color: colors.error, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', flexShrink: 0 }}
+                style={{ width: 32, height: 32, borderRadius: '10px', border: 'none', background: colors.errorBg, color: colors.error, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', flexShrink: 0 }}
                 title="Remove"
               >
                 {deletingId === m.id ? <Loader2 size={14} style={{ animation: 'spin 0.8s linear infinite' }} /> : <X size={14} />}
@@ -782,9 +746,9 @@ const OtherMemberships = ({ onNavigate }) => {
               </div>
             )}
             {shouldShowRemarkRow && (
-              <div style={{ gridColumn: '1/-1', background: '#FFFBEB', borderRadius: '10px', padding: '10px 12px', border: '1px solid #FDE68A', marginTop: 2 }}>
+              <div style={{ gridColumn: '1/-1', background: 'color-mix(in srgb, var(--advertisement-badge-bg) 42%, var(--advertisement-card-bg))', borderRadius: '10px', padding: '10px 12px', border: '1px solid var(--advertisement-card-border)', marginTop: 2 }}>
                 <Label>Remark</Label>
-                <p style={{ fontSize: '12px', color: '#92400e', margin: 0, lineHeight: 1.5, fontWeight: 500 }}>{m.remark}</p>
+                <p style={{ fontSize: '12px', color: 'var(--advertisement-description)', margin: 0, lineHeight: 1.5, fontWeight: 500 }}>{m.remark}</p>
               </div>
             )}
           </div>
@@ -794,23 +758,109 @@ const OtherMemberships = ({ onNavigate }) => {
     );
   };
 
+  const TrustLinkTile = ({ link, onClick, onOpenCard, isLoading }) => {
+    const trustName = link.Trust?.name || link.organisation_name || '—';
+    const legalName = normalizeText(link.Trust?.legal_name);
+
+    const handleKeyDown = (event) => {
+      if (event.target !== event.currentTarget) return;
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        onClick?.();
+      }
+    };
+
+    const handleOpenCardClick = (event) => {
+      event.stopPropagation();
+      onOpenCard?.();
+    };
+
+    return (
+      <div
+        className="other-membership-card"
+        role="button"
+        tabIndex={0}
+        onClick={onClick}
+        onKeyDown={handleKeyDown}
+        style={{
+          background: 'color-mix(in srgb, var(--advertisement-card-bg) 86%, var(--app-accent-bg))',
+          border: '1px solid var(--advertisement-card-border)',
+          borderRadius: '16px',
+          padding: '14px',
+          cursor: isLoading ? 'wait' : 'pointer',
+          opacity: isLoading ? 0.6 : 1,
+          minWidth: 0,
+          overflow: 'hidden',
+        }}
+      >
+        <div style={{ minWidth: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: '12px', minWidth: 0 }}>
+            <TrustAvatar trust={link.Trust || { name: trustName, icon_url: null }} size={48} />
+            <span style={{ display: 'flex', flexDirection: 'column', minWidth: 0, flex: 1 }}>
+              <h3 style={{ fontSize: '15px', fontWeight: 800, color: 'var(--advertisement-title)', margin: '0 0 4px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {trustName}
+              </h3>
+              <button
+                type="button"
+                onClick={handleOpenCardClick}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  alignSelf: 'flex-start',
+                  fontSize: '11px',
+                  fontWeight: 700,
+                  fontFamily: 'inherit',
+                  color: colors.primary,
+                  background: 'transparent',
+                  border: `1px solid ${colors.primary}`,
+                  borderRadius: '999px',
+                  padding: '3px 10px',
+                  cursor: 'pointer',
+                  marginBottom: legalName ? '8px' : 0,
+                }}
+              >
+                <BadgeCheck size={11} strokeWidth={2.5} />
+                Digital ID
+              </button>
+              {legalName && (
+                <div style={{ width: '150%', overflow: 'hidden', position:'relative', left:'-60px' }}>
+                  {legalName.length > 25 ? (
+                    <div className="legal-name-marquee-track">
+                      <span className="legal-name-marquee-text">{legalName}</span>
+                      <span className="legal-name-marquee-text">{legalName}</span>
+                    </div>
+                  ) : (
+                    <p style={{ fontSize: '12px', color: 'var(--advertisement-subtitle)', margin: 0, lineHeight: 1.35, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      {legalName}
+                    </p>
+                  )}
+                </div>
+              )}
+            </span>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   // ── render ──
   return (
     <div
+      className="other-memberships-page"
       style={{
         width: '100%',
         maxWidth: '430px',
         margin: '0 auto',
         minHeight: '100dvh',
         overflow: 'visible',
-        background: `radial-gradient(circle at top, ${applyOpacity(colors.accentBg, 0.9)} 0%, ${applyOpacity(colors.bg, 0.96)} 28%, ${colors.bg} 100%)`,
         fontFamily: "var(--font-family, 'Inter', sans-serif)",
         boxSizing: 'border-box',
       }}
     >
       {/* ── Header ── */}
       <div
-        className="px-4 py-4 flex items-center justify-between sticky top-0 z-50 shadow-md"
+        className="other-memberships-header px-4 py-4 flex items-center justify-between sticky top-0 z-50 shadow-md"
         style={{
           background: navbarTheme?.backgroundStyle || 'var(--navbar-bg, var(--app-navbar-bg))',
           backdropFilter: `blur(${navbarTheme?.blurPx || '12px'})`,
@@ -821,11 +871,11 @@ const OtherMemberships = ({ onNavigate }) => {
         }}
       >
         <button
-          onClick={() => (showForm ? setShowForm(false) : setIsMenuOpen((prev) => !prev))}
+          onClick={() => setIsMenuOpen((prev) => !prev)}
           className="p-2 rounded-xl transition-colors"
           style={{ color: navbarTheme?.textColor || 'var(--navbar-text)', background: 'transparent' }}
         >
-          {showForm ? <ArrowLeft className="h-6 w-6" /> : (isMenuOpen ? <X className="h-6 w-6" /> : <Menu className="h-6 w-6" />)}
+          {isMenuOpen ? <X className="h-6 w-6" /> : <Menu className="h-6 w-6" />}
         </button>
         <h1 className="text-base font-bold tracking-wide" style={{ color: navbarTheme?.textColor || 'var(--navbar-text)' }}>
           Other Memberships
@@ -842,155 +892,68 @@ const OtherMemberships = ({ onNavigate }) => {
       <Sidebar isOpen={isMenuOpen} onClose={() => setIsMenuOpen(false)} onNavigate={onNavigate} currentPage="other-memberships" />
 
       {/* ── Content ── */}
-      <div style={{ width: '100%', margin: '0 auto', padding: '20px 16px 40px', boxSizing: 'border-box' }}>
-
-        {/* Success banner */}
-        {submitSuccess && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', background: colors.successBg, border: `1.5px solid #BBF7D0`, borderRadius: '14px', padding: '12px 16px', marginBottom: '16px', animation: 'fadeUp 0.3s ease-out' }}>
-            <CheckCircle size={18} color={colors.success} />
-            <p style={{ fontSize: '13px', fontWeight: 600, color: '#15803d', margin: 0 }}>{submitSuccess}</p>
-          </div>
-        )}
-
+      <div className="other-memberships-content" style={{ width: '100%', margin: '0 auto', boxSizing: 'border-box' }}>
         {/* Loading spinner */}
         {loading && trustLinks.length === 0 && (
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '60px 0' }}>
-            <div style={{ width: 48, height: 48, border: `3px solid #E0E7FF`, borderTop: `3px solid ${colors.primary}`, borderRadius: '50%', animation: 'spin 0.8s linear infinite', marginBottom: '16px' }} />
+            <div style={{ width: 48, height: 48, border: '3px solid var(--advertisement-card-border)', borderTop: `3px solid ${colors.primary}`, borderRadius: '50%', animation: 'spin 0.8s linear infinite', marginBottom: '16px' }} />
             <p style={{ fontSize: '14px', color: colors.muted, fontWeight: 500 }}>Loading memberships...</p>
           </div>
         )}
 
         {/* Error state */}
         {error && (
-          <div style={{ background: colors.errorBg, border: `1.5px solid #FECACA`, borderRadius: '16px', padding: '20px', textAlign: 'center', marginBottom: '16px' }}>
+          <div style={{ background: colors.errorBg, border: '1.5px solid var(--advertisement-card-border)', borderRadius: '16px', padding: '20px', textAlign: 'center', marginBottom: '16px' }}>
             <AlertCircle size={24} color={colors.error} style={{ margin: '0 auto 8px', display: 'block' }} />
             <p style={{ color: colors.error, fontSize: '14px', fontWeight: 600, margin: '0 0 12px' }}>{error}</p>
-            <button onClick={loadData} style={{ padding: '8px 20px', background: colors.primary, color: '#fff', border: 'none', borderRadius: '10px', fontSize: '13px', fontWeight: 700, cursor: 'pointer' }}>Retry</button>
+            <button onClick={loadData} style={{ padding: '8px 20px', background: colors.primary, color: colors.onPrimary, border: 'none', borderRadius: '10px', fontSize: '13px', fontWeight: 700, cursor: 'pointer' }}>Retry</button>
           </div>
         )}
 
         {!error && (
           <>
-            {/* ── ADD MEMBERSHIP BUTTON ── */}
-            {!showForm && (
+            {showCreateNewApp && (
               <button
-                onClick={() => { setShowForm(true); setSubmitError(''); setSubmitSuccess(''); }}
-                style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px', padding: '14px 20px', background: `linear-gradient(135deg, ${colors.primary}, ${colors.secondary})`, color: '#fff', border: 'none', borderRadius: '16px', fontSize: '15px', fontWeight: 700, cursor: 'pointer', marginBottom: '20px', boxShadow: `0 8px 18px ${applyOpacity(colors.primary, 0.26)}`, letterSpacing: '-0.2px', animation: 'fadeUp 0.3s ease-out' }}
+                type="button"
+                onClick={handleCreateNewApp}
+                style={{
+                  width: '100%',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '10px',
+                  padding: '14px 20px',
+                  background: `linear-gradient(135deg, ${colors.primary}, ${colors.secondary})`,
+                  color: colors.onPrimary,
+                  border: 'none',
+                  borderRadius: '16px',
+                  fontSize: '15px',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  marginBottom: '20px',
+                  boxShadow: `0 8px 18px ${applyOpacity(colors.primary, 0.26)}`,
+                  letterSpacing: 0,
+                  animation: 'fadeUp 0.3s ease-out'
+                }}
               >
                 <Plus size={20} />
-                Add New Membership
+                Create New App
               </button>
-            )}
-
-            {/* ── ADD MEMBERSHIP FORM ── */}
-            {showForm && (
-              <div style={{ background: 'var(--advertisement-card-bg)', borderRadius: '20px', border: '2px solid var(--advertisement-card-border)', boxShadow: '0 12px 32px color-mix(in srgb, var(--advertisement-card-shadow) 26%, transparent)', marginBottom: '24px', overflow: 'hidden', animation: 'fadeUp 0.35s ease-out' }}>
-                <div style={{ background: `linear-gradient(135deg, ${colors.primary}, ${colors.secondary})`, padding: '16px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                    <div style={{ width: 36, height: 36, borderRadius: '10px', background: 'rgba(255,255,255,0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                      <Plus size={18} color="#fff" />
-                    </div>
-                    <div>
-                      <h2 style={{ color: '#fff', fontSize: '15px', fontWeight: 800, margin: 0 }}>Add New Membership</h2>
-                      <p style={{ color: 'rgba(255,255,255,0.85)', fontSize: '11px', margin: 0 }}>Fill in the trust membership details</p>
-                    </div>
-                  </div>
-                  <button onClick={() => { setShowForm(false); setSubmitError(''); setForm(EMPTY_FORM); }}
-                    style={{ width: 32, height: 32, borderRadius: '10px', border: 'none', background: 'rgba(255,255,255,0.15)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>
-                    <X size={16} />
-                  </button>
-                </div>
-
-                <form onSubmit={handleSubmit} style={{ padding: '20px' }}>
-
-                  {/* Trust / Organisation — plain text input */}
-                  <div style={{ marginBottom: '16px' }}>
-                    <Label><Building2 size={10} style={{ display: 'inline', marginRight: 5 }} />Trust / Organisation *</Label>
-                    <input
-                      type="text"
-                      placeholder="Enter trust or organisation name"
-                      value={form.organisation_name}
-                      onChange={e => handleFormChange('organisation_name', e.target.value)}
-                      style={inputStyle}
-                    />
-                  </div>
-
-                  {/* Membership Number */}
-                  <div style={{ marginBottom: '16px' }}>
-                    <Label><Hash size={10} style={{ display: 'inline', marginRight: 5 }} />Membership Number *</Label>
-                    <input
-                      type="text"
-                      placeholder="e.g. MBR-2024-001"
-                      value={form.membership_no}
-                      onChange={e => handleFormChange('membership_no', e.target.value)}
-                      required
-                      style={inputStyle}
-                    />
-                  </div>
-
-                  {/* Membership Type — free text, optional */}
-                  <div style={{ marginBottom: '16px' }}>
-                    <Label><Tag size={10} style={{ display: 'inline', marginRight: 5 }} />Membership Type (optional)</Label>
-                    <input
-                      type="text"
-                      placeholder="e.g. Life Member, Annual Member..."
-                      value={form.membership_type}
-                      onChange={e => handleFormChange('membership_type', e.target.value)}
-                      style={inputStyle}
-                    />
-                  </div>
-
-                  {/* Remark */}
-                  <div style={{ marginBottom: '20px' }}>
-                    <Label><FileText size={10} style={{ display: 'inline', marginRight: 5 }} />Remark (optional)</Label>
-                    <textarea
-                      placeholder="Any notes or remarks..."
-                      value={form.remark}
-                      onChange={e => handleFormChange('remark', e.target.value)}
-                      rows={3}
-                      style={{ ...inputStyle, resize: 'vertical', lineHeight: 1.5 }}
-                    />
-                  </div>
-
-                  {/* Submit error */}
-                  {submitError && (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', background: colors.errorBg, border: `1px solid #FECACA`, borderRadius: '10px', padding: '10px 14px', marginBottom: '14px' }}>
-                      <AlertCircle size={16} color={colors.error} />
-                      <p style={{ fontSize: '13px', color: colors.error, margin: 0, fontWeight: 600 }}>{submitError}</p>
-                    </div>
-                  )}
-
-                  {/* Submit buttons */}
-                  <div style={{ display: 'flex', gap: '10px' }}>
-                    <button type="button"
-                      onClick={() => { setShowForm(false); setSubmitError(''); setForm(EMPTY_FORM); }}
-                      style={{ flex: 1, padding: '12px', background: 'color-mix(in srgb, var(--advertisement-card-bg) 82%, var(--app-accent-bg))', color: 'var(--advertisement-description)', border: '1px solid var(--advertisement-card-border)', borderRadius: '12px', fontSize: '14px', fontWeight: 700, cursor: 'pointer' }}>
-                      Cancel
-                    </button>
-                    <button type="submit" disabled={submitting}
-                      style={{ flex: 2, padding: '12px', background: submitting ? 'var(--body-text-color)' : `linear-gradient(135deg, ${colors.primary}, ${colors.secondary})`, color: '#fff', border: 'none', borderRadius: '12px', fontSize: '14px', fontWeight: 700, cursor: submitting ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', boxShadow: submitting ? 'none' : `0 8px 16px ${applyOpacity(colors.primary, 0.22)}` }}>
-                      {submitting
-                        ? <><Loader2 size={16} style={{ animation: 'spin 0.8s linear infinite' }} /> Saving…</>
-                        : <><Save size={16} /> Save Membership</>}
-                    </button>
-                  </div>
-                </form>
-              </div>
             )}
 
             {/* ── SECTION: Other Memberships (from other_memberships table) ── */}
             {otherMems.length > 0 && (
               <div style={{ marginBottom: '28px' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '14px' }}>
-                  <div style={{ width: 28, height: 28, borderRadius: '8px', background: `linear-gradient(135deg, ${colors.accent}, #e05c53)`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                    <Building2 size={14} color="#fff" />
+                  <div style={{ width: 28, height: 28, borderRadius: '8px', background: `linear-gradient(135deg, ${colors.accent}, ${colors.primary})`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <Building2 size={14} color={colors.onPrimary} />
                   </div>
                   <span style={{ fontSize: '13px', fontWeight: 700, color: colors.accent }}>
                     {otherMems.length} Added Membership{otherMems.length !== 1 ? 's' : ''}
                   </span>
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                  {otherMems.map((m, idx) => (
+                  {sortedOtherMems.map((m, idx) => (
                     <MembershipCard key={m.id} m={m} index={idx} showGoldenMembershipBadge={false} />
                   ))}
                 </div>
@@ -999,27 +962,19 @@ const OtherMemberships = ({ onNavigate }) => {
 
             {/* ── SECTION: Trust Links (from reg_members-backed user payload) ── */}
             {trustLinks.length > 0 && (
-              <div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '14px' }}>
-                  <div style={{ width: 28, height: 28, borderRadius: '8px', background: `linear-gradient(135deg, ${colors.primary}, ${colors.secondary})`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                    <Users size={14} color="#fff" />
-                  </div>
-                  <span style={{ fontSize: '13px', fontWeight: 700, color: colors.primary }}>
-                    {trustLinks.length} Trust{trustLinks.length !== 1 ? 's' : ''} Linked
-                  </span>
-                </div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                  {trustLinks.map((link, index) => (
-                    <MembershipCard
-                      key={link.id || index}
-                      m={link}
-                      index={index}
-                      showGoldenMembershipBadge
-                      clickable
-                      onClick={() => openTrustIdCard(link)}
-                    />
-                  ))}
-                </div>
+              <div
+                className="other-memberships-grid"
+                style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', columnGap: '14px', rowGap: '16px' }}
+              >
+                {sortedTrustLinks.map((link, index) => (
+                  <TrustLinkTile
+                    key={link.id || index}
+                    link={link}
+                    onClick={() => handleOpenTrustWebApp(link)}
+                    onOpenCard={() => openTrustIdCard(link)}
+                    isLoading={openingTrustId === normalizeText(link?.trust_id || link?.Trust?.id)}
+                  />
+                ))}
               </div>
             )}
 
@@ -1051,12 +1006,14 @@ const OtherMemberships = ({ onNavigate }) => {
                 </div>
                 <h3 style={{ fontSize: '16px', fontWeight: 700, color: 'var(--advertisement-description)', margin: '0 0 8px' }}>No Memberships Yet</h3>
                 <p style={{ fontSize: '13px', color: 'var(--advertisement-subtitle)', margin: 0, lineHeight: 1.5 }}>
-                  Tap <strong>"Add New Membership"</strong> to add your first trust membership.
+                  Your linked memberships will appear here when available.
                 </p>
               </div>
             )}
           </>
         )}
+
+      </div>
 
       {trustCardModalData && (
         <div
@@ -1069,31 +1026,30 @@ const OtherMemberships = ({ onNavigate }) => {
             alignItems: 'center',
             justifyContent: 'center',
             padding: '16px',
-            // background: applyOpacity(colors.secondary, 0.78),
             backdropFilter: 'blur(10px)',
             WebkitBackdropFilter: 'blur(10px)',
           }}
           onClick={() => setTrustCardModalData(null)}
         >
-                        <button
-                type="button"
-                onClick={() => setTrustCardModalData(null)}
-                className="absolute right-2 top-2 rounded-full"
-                style={{
-                  width: 33,
-                  height: 36,
-                  border: 'none',
-                  background: 'color-mix(in srgb, var(--surface-color) 82%, var(--app-accent-bg))',
-                  color: colors.primary,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  cursor: 'pointer',
-                }}
-                aria-label="Close trust card"
-              >
-                <X size={16} />
-              </button>
+          <button
+            type="button"
+            onClick={() => setTrustCardModalData(null)}
+            className="absolute right-2 top-2 rounded-full"
+            style={{
+              width: 33,
+              height: 36,
+              border: 'none',
+              background: 'color-mix(in srgb, var(--surface-color) 82%, var(--app-accent-bg))',
+              color: colors.primary,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              cursor: 'pointer',
+            }}
+            aria-label="Close trust card"
+          >
+            <X size={16} />
+          </button>
           <div
             onClick={(event) => event.stopPropagation()}
             style={{
@@ -1102,39 +1058,101 @@ const OtherMemberships = ({ onNavigate }) => {
               maxHeight: '92vh',
               overflow: 'hidden',
               borderRadius: '28px',
-              // border: `1px solid ${applyOpacity(colors.primary, 0.18)}`,
-              // background: 'var(--surface-color)',
-              // boxShadow: `0 24px 60px color-mix(in srgb, var(--brand-navy-dark) 96%, transparent)`,
             }}
           >
-            {/* <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                gap: '12px',
-                padding: '14px 16px',
-                // borderBottom: `1px solid ${applyOpacity(colors.secondary, 0.08)}`,
-                // background: 'color-mix(in srgb, var(--surface-color) 88%, var(--app-accent-bg))',
-              }}
-            >
-              <div>
-                 <p style={{ margin: 0, fontSize: '11px', fontWeight: 800, letterSpacing: '0.18em', textTransform: 'uppercase', color: colors.primary }}>
-                  Trust ID Card
-                </p>
-                <p style={{ margin: '4px 0 0', fontSize: '12px', color: 'var(--advertisement-subtitle)' }}>
-                  Tap outside or press Esc to close
-                </p> 
-              </div>
-
-            </div> */}
             <div style={{ maxHeight: 'calc(92vh - 66px)', overflow: 'auto' }}>
               <TrustIdCard embedded cardData={trustCardModalData} onNavigate={onNavigate} />
             </div>
           </div>
         </div>
       )}
-      </div>
+
+      {trustWebAppOverlay && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 1300,
+            display: 'flex',
+            alignItems: 'stretch',
+            justifyContent: 'center',
+            background: 'var(--page-bg, var(--app-page-bg))',
+          }}
+        >
+          <div
+            style={{
+              width: '100%',
+              maxWidth: '430px',
+              minHeight: '100dvh',
+              display: 'flex',
+              flexDirection: 'column',
+              background: 'var(--page-bg, var(--app-page-bg))',
+            }}
+          >
+            <div
+              className="theme-navbar sticky top-0 z-20 flex-shrink-0"
+              style={{
+                background: navbarTheme?.backgroundStyle || 'var(--navbar-bg, var(--app-navbar-bg))',
+                backdropFilter: `blur(${navbarTheme?.blurPx || '12px'})`,
+                WebkitBackdropFilter: `blur(${navbarTheme?.blurPx || '12px'})`,
+                borderBottom: '1px solid var(--navbar-border)',
+              }}
+            >
+              <div className="h-[3px]" style={{ background: 'var(--navbar-accent)' }} />
+              <div className="px-4 pt-4 pb-4 flex items-center justify-between">
+                <button
+                  type="button"
+                  onClick={() => setTrustWebAppOverlay(null)}
+                  className="p-2 rounded-xl transition-colors"
+                  style={{ color: navbarTheme?.textColor, background: 'transparent' }}
+                  aria-label="Back"
+                >
+                  <ArrowLeft className="h-5 w-5" />
+                </button>
+                <h1
+                  className="text-base font-bold tracking-wide"
+                  style={{ color: navbarTheme?.textColor, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, textAlign: 'center', margin: '0 8px' }}
+                >
+                  {trustWebAppOverlay.name}
+                </h1>
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => window.open(trustWebAppOverlay.url, '_blank', 'noopener,noreferrer')}
+                    className="p-2 rounded-xl transition-colors"
+                    style={{ color: navbarTheme?.textColor, background: 'transparent' }}
+                    aria-label="Open in new tab"
+                  >
+                    <ExternalLink className="h-5 w-5" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setTrustWebAppOverlay(null); navigate(getAppHomePath()); }}
+                    className="p-2 rounded-xl transition-colors"
+                    style={{ color: navbarTheme?.textColor, background: 'transparent' }}
+                    aria-label="Home"
+                  >
+                    <HomeIcon className="h-5 w-5" />
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <iframe
+              title={trustWebAppOverlay.name}
+              src={trustWebAppOverlay.url}
+              className="flex-1 w-full border-0"
+              style={{
+                border: 'none',
+                outline: 'none',
+                display: 'block',
+              }}
+            />
+
+            <BottomNav onNavigate={onNavigate} />
+          </div>
+        </div>
+      )}
 
       <style>{`
         input::placeholder, textarea::placeholder {
@@ -1145,6 +1163,23 @@ const OtherMemberships = ({ onNavigate }) => {
         @keyframes fadeUp {
           from { opacity: 0; transform: translateY(16px); }
           to   { opacity: 1; transform: translateY(0); }
+        }
+        .legal-name-marquee-track {
+          display: flex;
+          width: max-content;
+          animation: legalNameMarquee 10s linear infinite;
+        }
+        .legal-name-marquee-text {
+          flex-shrink: 0;
+          font-size: 12px;
+          color: var(--advertisement-subtitle);
+          line-height: 1.35;
+          white-space: nowrap;
+          padding-right: 28px;
+        }
+        @keyframes legalNameMarquee {
+          0%, 20%   { transform: translateX(0); }
+          80%, 100% { transform: translateX(-50%); }
         }
       `}</style>
     </div>

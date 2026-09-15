@@ -49,7 +49,7 @@ export const fetchMemberTrusts = async (membersId) => {
   // Fetch trust details for all trust IDs
   const { data: trusts, error: trustError } = await supabase
     .from('Trust')
-    .select('id,name,icon_url,remark,created_at,version')
+    .select('id,name,legal_name,icon_url,remark,created_at,version')
     .in('id', trustIds);
 
   if (trustError) {
@@ -66,6 +66,7 @@ export const fetchMemberTrusts = async (membersId) => {
     return {
       id: m.trust_id || null,
       name: t.name || null,
+      legal_name: t.legal_name || null,
       icon_url: t.icon_url || null,
       remark: t.remark || null,
       is_active: m.is_active,
@@ -88,6 +89,7 @@ const mapMembershipRowsWithTrusts = (regMemberships = [], trustById = {}) =>
       id: m?.id || `membership-${index}`,
       trust_id: trustId,
       trust_name: trust?.name || null,
+      trust_legal_name: trust?.legal_name || null,
       trust_icon_url: trust?.icon_url || null,
       trust_remark: trust?.remark || null,
       is_active: m?.is_active,
@@ -107,6 +109,7 @@ const mapActiveTrustResponseToMemberships = (payload = {}) => {
       id: trust?.trust_id || `active-trust-${index}`,
       trust_id: trust?.trust_id || null,
       trust_name: trust?.trust_name || null,
+      trust_legal_name: trust?.trust_legal_name || trust?.legal_name || null,
       trust_icon_url: trust?.icon_url || null,
       trust_remark: trust?.remark || null,
       is_active: trust?.is_active !== false,
@@ -397,18 +400,36 @@ export const fetchShareAppLinksByTrustId = async (trustId) => {
   const normalizedTrustId = String(trustId || '').trim();
   if (!normalizedTrustId) return null;
 
-  const { data, error } = await supabase
-    .from('shareApp_links')
-    .select('trust_id, play_store_link, app_store_link, instagram_link, facebook_link, whatsapp_link, linkedin_link, version')
-    .eq('trust_id', normalizedTrustId)
-    .maybeSingle();
+  const { data, error } = await supabase.rpc(
+    'manage_user_panel_by_trust_details',
+    {
+      p_action: 'view',
+      p_trust_id: normalizedTrustId
+    }
+  );
 
   if (error) {
-    console.warn('Error fetching share app links:', error);
+    console.warn('Error fetching user panel links:', error);
     return null;
   }
 
-  return data || null;
+  const row = Array.isArray(data) ? data[0] : data;
+  if (!row) return null;
+
+  return {
+    trust_id: row.id || normalizedTrustId,
+    name: row.name || null,
+    subscription_type: row.subscription_type || null,
+    icon_url: row.icon_url || null,
+    web_app_url: row.web_app_url || null,
+    play_store_link: row.web_app_url || null,
+    app_store_link: row.web_app_url || null,
+    instagram_link: row.instagram_link || null,
+    facebook_link: row.facebook_link || null,
+    whatsapp_link: row.whatsapp_link || null,
+    linkedin_link: row.linkedin_link || null,
+    youtube_url: row.youtube_url || null,
+  };
 };
 
 export const fetchTrustHelpUrl = async (trustId) => {

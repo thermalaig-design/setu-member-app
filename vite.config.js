@@ -1,6 +1,7 @@
 import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
+import { RESERVED_APP_ROUTES } from './src/constants/reservedRoutes.js'
 
 // Dev/preview-only convenience proxy: in production, Nginx forwards
 // /pwa-manifest/<slug>.webmanifest to the generate-webApp-link Supabase Edge
@@ -21,6 +22,19 @@ const createPwaManifestProxy = (supabaseUrl) => ({
   }
 });
 
+// Replaces the __SETU_RESERVED_APP_ROUTES__ placeholder in index.html's
+// early manifest-injection script with the real reserved-routes list, so
+// that inline bootstrap script (which runs before any JS module, including
+// src/constants/reservedRoutes.js itself, has loaded) uses the exact same
+// list as isReservedSlug() rather than a hand-duplicated copy that could
+// drift out of sync.
+const injectReservedAppRoutes = () => ({
+  name: 'inject-reserved-app-routes',
+  transformIndexHtml(html) {
+    return html.replace('__SETU_RESERVED_APP_ROUTES__', JSON.stringify(RESERVED_APP_ROUTES));
+  }
+});
+
 // https://vite.dev/config/
 export default defineConfig(({ command, mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
@@ -36,6 +50,7 @@ export default defineConfig(({ command, mode }) => {
     },
     plugins: [
       react(),
+      injectReservedAppRoutes(),
       VitePWA({
         registerType: 'autoUpdate',
         // The manifest is served dynamically per Trust at
