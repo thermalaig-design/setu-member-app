@@ -117,7 +117,33 @@ const waitForTenantAppSlug = async (supabase, trustId) => {
   }
 
   return null;
-};
+}
+
+// The web_app_url for a freshly created Trust is generated asynchronously
+// (same pipeline that fills in app_slug), so poll manage_user_panel_by_trust_details
+// — the same RPC OtherMemberships/Sidebar use for "shareAppLinks" — until it
+// shows up against this trust id.
+const waitForTenantWebAppUrl = async (supabase, trustId) => {
+  const normalizedTrustId = normalizeText(trustId);
+  if (!normalizedTrustId) return '';
+
+  const startedAt = Date.now();
+  while (Date.now() - startedAt <= APP_SLUG_POLL_TIMEOUT_MS) {
+    const { data, error } = await supabase.rpc('manage_user_panel_by_trust_details', {
+      p_action: 'view',
+      p_trust_id: normalizedTrustId,
+    });
+
+    if (error) throw error;
+
+    const webAppUrl = normalizeText(data?.[0]?.web_app_url);
+    if (webAppUrl) return webAppUrl;
+
+    await delay(APP_SLUG_POLL_INTERVAL_MS);
+  }
+
+  return '';
+};;
 
 const cacheCreatedTrust = ({ trustId, trustName, legalName, description, iconUrl, trustRow }) => {
   const normalizedTrustId = normalizeText(trustId);
@@ -453,8 +479,15 @@ const AddCommunity = ({ onNavigateBack, variant = 'page' }) => {
     }
 
     setLaunchCycle((prev) => prev + 1);
-    await delay(LAUNCH_ANIMATION_MS);
-    const installUrl = `${window.location.origin}/app/${encodeURIComponent(tenantTrust.app_slug)}?install=1&created=1`;
+    // Fetch the trust's web_app_url (shareAppLinks) alongside the launch
+    // animation delay so we don't wait twice.
+    const webAppUrlPromise = waitForTenantWebAppUrl(supabase, nextTrustId).catch((error) => {
+      console.warn('Failed to fetch web_app_url for new trust:', error);
+      return '';
+    });
+    const [, webAppUrl] = await Promise.all([delay(LAUNCH_ANIMATION_MS), webAppUrlPromise]);
+    const fallbackInstallUrl = `${window.location.origin}/app/${encodeURIComponent(tenantTrust.app_slug)}?install=1&created=1`;
+    const installUrl = webAppUrl || fallbackInstallUrl;
     try {
       sessionStorage.setItem(PENDING_CREATED_APP_URL_KEY, installUrl);
       sessionStorage.setItem(PENDING_CREATED_APP_TS_KEY, String(Date.now()));

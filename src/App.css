@@ -65,6 +65,11 @@
 	border: 1px solid rgba(226,178,39,0.5) !important;
 }
 
+.other-membership-card--light img,
+.other-membership-card--light > div > div > img {
+	border: 1px solid color-mix(in srgb, var(--app-accent, var(--brand-red)) 50%, transparent) !important;
+}
+
 @media (max-width: 560px) {
 	.other-memberships-content {
 		padding: 14px 12px 34px;

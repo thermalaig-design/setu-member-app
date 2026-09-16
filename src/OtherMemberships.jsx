@@ -474,7 +474,41 @@ const areMembershipCollectionsEqual = (left = [], right = []) => {
   return JSON.stringify(left) === JSON.stringify(right);
 };
 
+// Resolves any CSS color (including var(--token)) to its computed rgb() by
+// letting the browser do the resolution, so theme tokens work the same as
+// literal hex/rgb values from a tenant's theme config.
+const resolveCssColorToRgb = (value) => {
+  const raw = String(value || '').trim();
+  if (!raw || typeof document === 'undefined') return null;
+  const probe = document.createElement('div');
+  probe.style.color = raw;
+  probe.style.display = 'none';
+  document.body.appendChild(probe);
+  const computed = getComputedStyle(probe).color;
+  document.body.removeChild(probe);
+  const match = computed.match(/rgba?\(([^)]+)\)/);
+  if (!match) return null;
+  const parts = match[1].split(',').map((part) => parseFloat(part));
+  if (parts.length < 3 || parts.some((n) => !Number.isFinite(n))) return null;
+  return { r: parts[0], g: parts[1], b: parts[2] };
+};
 
+const getRelativeLuminance = ({ r, g, b }) => {
+  const channel = (c) => {
+    const v = c / 255;
+    return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
+  };
+  return 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b);
+};
+
+// Only the tenant's page background decides light vs dark: a light background
+// gets theme-derived card colors, a dark one (e.g. Setu's current navy/gold
+// look) keeps the existing fixed gold styling as-is.
+const isLightBackground = (bgColor) => {
+  const rgb = resolveCssColorToRgb(bgColor);
+  if (!rgb) return false;
+  return getRelativeLuminance(rgb) > 0.6;
+};
 
 const OtherMemberships = ({ onNavigate, variant = 'page' }) => {
   const navigate = useNavigate();
@@ -510,6 +544,11 @@ const OtherMemberships = ({ onNavigate, variant = 'page' }) => {
     vipBg: 'linear-gradient(135deg, var(--advertisement-badge-bg) 0%, var(--app-accent-bg) 52%, var(--app-accent) 100%)',
     vipBorder: getThemeToken(theme, 'advertisement.card_border_color', 'var(--advertisement-card-border)'),
   };
+
+  // Setu's own theme is dark and already looks right with the fixed gold
+  // card styling; only tenants with a light page background get theme-driven
+  // card colors instead.
+  const isLightTheme = useMemo(() => isLightBackground(colors.bg), [colors.bg]);
 
   // ── state ──
   const [trustLinks, setTrustLinks] = useState(initialTrustLinks); // from reg_members-backed user payload
@@ -863,18 +902,51 @@ const OtherMemberships = ({ onNavigate, variant = 'page' }) => {
       onOpenCard?.();
     };
 
+    // Setu's dark theme keeps its fixed gold look; a light tenant theme gets
+    // colors derived from that theme instead so the cards don't clash.
+    const tile = isLightTheme
+      ? {
+          cardBg: `linear-gradient(155deg, ${applyOpacity(colors.secondary, 0.1)} 0%, ${applyOpacity('var(--surface-color)', 0.98)} 62%, ${applyOpacity(colors.primary, 0.06)} 100%)`,
+          border: applyOpacity(colors.primary, 0.22),
+          borderHover: applyOpacity(colors.primary, 0.55),
+          shadow: `0 8px 24px ${applyOpacity(colors.secondary, 0.14)}, inset 0 1px 0 rgba(255,255,255,0.5)`,
+          shadowHover: `0 16px 36px ${applyOpacity(colors.secondary, 0.18)}, 0 0 0 1px ${applyOpacity(colors.primary, 0.16)}, inset 0 1px 0 rgba(255,255,255,0.6)`,
+          accentLine: `linear-gradient(90deg, transparent, ${applyOpacity(colors.primary, 0.7)} 40%, ${applyOpacity(colors.accent, 0.9)} 60%, transparent)`,
+          glow: `radial-gradient(circle, ${applyOpacity(colors.primary, 0.08)}, transparent 70%)`,
+          avatarFrame: `linear-gradient(135deg, ${applyOpacity(colors.primary, 0.3)}, ${applyOpacity(colors.primary, 0.05)})`,
+          badgeText: colors.primary,
+          badgeBg: applyOpacity(colors.primary, 0.08),
+          badgeBorder: applyOpacity(colors.primary, 0.22),
+          nameColor: 'var(--heading-color)',
+          legalColor: 'var(--advertisement-description)',
+        }
+      : {
+          cardBg: 'linear-gradient(155deg, rgba(28,31,45,0.98) 0%, rgba(13,15,24,0.99) 62%, rgba(20,17,10,0.99) 100%)',
+          border: 'rgba(226, 178, 39, 0.22)',
+          borderHover: 'rgba(226, 178, 39, 0.6)',
+          shadow: '0 8px 24px rgba(0,0,0,0.34), inset 0 1px 0 rgba(255,255,255,0.05)',
+          shadowHover: '0 16px 36px rgba(0,0,0,0.4), 0 0 0 1px rgba(226,178,39,0.18), inset 0 1px 0 rgba(255,255,255,0.07)',
+          accentLine: 'linear-gradient(90deg, transparent, rgba(226,178,39,0.75) 40%, rgba(255,213,110,0.95) 60%, transparent)',
+          glow: 'radial-gradient(circle, rgba(226,178,39,0.10), transparent 70%)',
+          avatarFrame: 'linear-gradient(135deg, rgba(226,178,39,0.35), rgba(226,178,39,0.05))',
+          badgeText: 'rgba(226,178,39,0.75)',
+          badgeBg: 'rgba(226,178,39,0.08)',
+          badgeBorder: 'rgba(226,178,39,0.22)',
+          nameColor: '#f6f2e6',
+          legalColor: 'rgba(224,230,241,0.58)',
+        };
 
     return (
       <div
-        className="other-membership-card"
+        className={`other-membership-card${isLightTheme ? ' other-membership-card--light' : ''}`}
         role="button"
         tabIndex={0}
         onClick={onClick}
         onKeyDown={handleKeyDown}
         style={{
           position: 'relative',
-          background: 'linear-gradient(155deg, rgba(28,31,45,0.98) 0%, rgba(13,15,24,0.99) 62%, rgba(20,17,10,0.99) 100%)',
-          border: '1px solid rgba(226, 178, 39, 0.22)',
+          background: tile.cardBg,
+          border: `1px solid ${tile.border}`,
           borderRadius: '18px',
           padding: '14px 13px 12px',
           cursor: isLoading ? 'wait' : 'pointer',
@@ -884,31 +956,31 @@ const OtherMemberships = ({ onNavigate, variant = 'page' }) => {
           display: 'flex',
           flexDirection: 'column',
           gap: '9px',
-          boxShadow: '0 8px 24px rgba(0,0,0,0.34), inset 0 1px 0 rgba(255,255,255,0.05)',
+          boxShadow: tile.shadow,
           transition: 'transform 0.2s cubic-bezier(0.22,1,0.36,1), border-color 0.2s ease, box-shadow 0.2s ease',
         }}
         onMouseEnter={(event) => {
           event.currentTarget.style.transform = 'translateY(-4px) scale(1.015)';
-          event.currentTarget.style.borderColor = 'rgba(226, 178, 39, 0.6)';
-          event.currentTarget.style.boxShadow = '0 16px 36px rgba(0,0,0,0.4), 0 0 0 1px rgba(226,178,39,0.18), inset 0 1px 0 rgba(255,255,255,0.07)';
+          event.currentTarget.style.borderColor = tile.borderHover;
+          event.currentTarget.style.boxShadow = tile.shadowHover;
         }}
         onMouseLeave={(event) => {
           event.currentTarget.style.transform = 'translateY(0) scale(1)';
-          event.currentTarget.style.borderColor = 'rgba(226, 178, 39, 0.22)';
-          event.currentTarget.style.boxShadow = '0 8px 24px rgba(0,0,0,0.34), inset 0 1px 0 rgba(255,255,255,0.05)';
+          event.currentTarget.style.borderColor = tile.border;
+          event.currentTarget.style.boxShadow = tile.shadow;
         }}
       >
-        {/* Gold top accent line */}
+        {/* Theme accent line */}
         <div style={{
           position: 'absolute', top: 0, left: 0, right: 0, height: '2.5px',
-          background: 'linear-gradient(90deg, transparent, rgba(226,178,39,0.75) 40%, rgba(255,213,110,0.95) 60%, transparent)',
+          background: tile.accentLine,
           borderRadius: '18px 18px 0 0',
         }} />
 
         {/* Soft corner glow */}
         <div style={{
           position: 'absolute', top: '-30%', right: '-30%', width: '70%', height: '70%',
-          background: 'radial-gradient(circle, rgba(226,178,39,0.10), transparent 70%)',
+          background: tile.glow,
           pointerEvents: 'none',
         }} />
 
@@ -917,16 +989,16 @@ const OtherMemberships = ({ onNavigate, variant = 'page' }) => {
           <div style={{
             padding: '3px',
             borderRadius: '13px',
-            background: 'linear-gradient(135deg, rgba(226,178,39,0.35), rgba(226,178,39,0.05))',
+            background: tile.avatarFrame,
           }}>
             <TrustAvatar trust={link.Trust || { name: trustName, icon_url: null }} size={36} />
           </div>
           <span style={{
             fontSize: '7px',
             fontWeight: 800,
-            color: 'rgba(226,178,39,0.75)',
-            background: 'rgba(226,178,39,0.08)',
-            border: '1px solid rgba(226,178,39,0.22)',
+            color: tile.badgeText,
+            background: tile.badgeBg,
+            border: `1px solid ${tile.badgeBorder}`,
             borderRadius: '5px',
             padding: '3px 6px',
             letterSpacing: '0.07em',
@@ -938,11 +1010,12 @@ const OtherMemberships = ({ onNavigate, variant = 'page' }) => {
 
         {/* Row 2: Trust name */}
         <MarqueeText
+          speed={20}
           style={{
             fontSize: '12.5px',
             lineHeight: 1.3,
             fontWeight: 800,
-            color: '#f6f2e6',
+            color: tile.nameColor,
             letterSpacing: '-0.01em',
           }}
         >
@@ -952,11 +1025,12 @@ const OtherMemberships = ({ onNavigate, variant = 'page' }) => {
         {/* Row 3: Legal name */}
         {legalName && (
           <MarqueeText
+            speed={20}
             style={{
               fontSize: '9.5px',
               lineHeight: 1.4,
               fontWeight: 500,
-              color: 'rgba(224,230,241,0.58)',
+              color: tile.legalColor,
             }}
           >
             {legalName}
