@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { AlertTriangle, ChevronDown, Home as HomeIcon, Menu, Rocket, Upload, X } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAppTheme } from './context/ThemeContext';
 import Sidebar from './features/sidebar/Sidebar';
 import { getNavbarThemeStyles, getThemeToken } from './utils/themeUtils';
@@ -9,24 +9,15 @@ import { getAppHomePath } from './utils/tenantNavigation';
 import { fetchFeatureFlags } from './services/featureFlags';
 
 const DEFAULT_PAGE_TITLE = 'Add Community';
+const LAST_SELECTED_TRUST_ID_KEY = 'last_selected_trust_id';
+const PENDING_CREATED_APP_URL_KEY = 'pending_created_app_install_url';
+const PENDING_CREATED_APP_TS_KEY = 'pending_created_app_install_url_ts';
 
 const toTitleCase = (value = '') =>
   String(value || '')
     .trim()
     .replace(/\s+/g, ' ')
     .replace(/\w\S*/g, (word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase());
-
-// shareApp_links.web_app_url is a full URL (e.g. https://www.teiltd.in/<slug>)
-// generated asynchronously by the generate-webApp-link Edge Function once
-// create_trust_via_whatsapp's Trust insert trigger fires it — so it isn't
-// guaranteed to exist the instant the RPC call returns. We only need the
-// slug itself (we build the in-app /app/<slug> path ourselves), so just take
-// the last path segment regardless of the URL's exact host/prefix.
-const extractSlugFromWebAppUrl = (url) => {
-  const trimmed = String(url || '').trim().replace(/\/+$/, '');
-  if (!trimmed) return '';
-  return trimmed.split('/').pop() || '';
-};
 
 // Translates known Postgres/PostgREST errors into user-facing copy instead
 // of surfacing raw constraint/SQLSTATE text (e.g. `duplicate key value
@@ -45,26 +36,6 @@ const getFriendlySubmitError = (error, trustName) => {
   return message || 'Failed to create trust. Please try again.';
 };
 
-const pollForAppSlug = async (supabase, trustId, { attempts = 5, intervalMs = 1000 } = {}) => {
-  for (let attempt = 0; attempt < attempts; attempt += 1) {
-    try {
-      const { data } = await supabase
-        .from('shareApp_links')
-        .select('web_app_url')
-        .eq('trust_id', trustId)
-        .maybeSingle();
-      const slug = extractSlugFromWebAppUrl(data?.web_app_url);
-      if (slug) return slug;
-    } catch {
-      // ignore and retry — link generation may still be in flight
-    }
-    if (attempt < attempts - 1) {
-      await new Promise((resolve) => setTimeout(resolve, intervalMs));
-    }
-  }
-  return '';
-};
-
 // Friendlier labels for known sample_app.name values (DB rows are keyed by
 // this raw "keyword" — see apply_sample_app_theme()/create_trust_via_whatsapp
 // in Supabase, which clone that sample app's template/features onto the new
@@ -76,6 +47,27 @@ const SAMPLE_APP_LABELS = {
 };
 const getSampleAppLabel = (sampleApp) =>
   SAMPLE_APP_LABELS[sampleApp?.name] || sampleApp?.name || 'Untitled';
+
+// Minimum time the launch overlay stays up before navigating, so the
+// animation has room to play out even when generate-webApp-link resolves
+// almost instantly. The status-line and progress-fill CSS animations below
+// are keyed to this same duration.
+const LAUNCH_ANIMATION_MS = 10000;
+const APP_SLUG_POLL_INTERVAL_MS = 1000;
+const APP_SLUG_POLL_TIMEOUT_MS = 20000;
+
+const LAUNCH_STARS = [
+  { top: '12%', left: '18%', size: '3px', delay: '0s', duration: '2.2s' },
+  { top: '20%', left: '82%', size: '4px', delay: '0.4s', duration: '2.6s' },
+  { top: '32%', left: '8%', size: '3px', delay: '0.8s', duration: '2s' },
+  { top: '38%', left: '68%', size: '3px', delay: '1.1s', duration: '2.4s' },
+  { top: '58%', left: '14%', size: '4px', delay: '0.2s', duration: '2.8s' },
+  { top: '62%', left: '88%', size: '3px', delay: '1.4s', duration: '2.1s' },
+  { top: '74%', left: '30%', size: '3px', delay: '0.6s', duration: '2.5s' },
+  { top: '78%', left: '62%', size: '4px', delay: '1.7s', duration: '2.3s' },
+  { top: '10%', left: '48%', size: '3px', delay: '1s', duration: '2.7s' },
+  { top: '86%', left: '46%', size: '3px', delay: '0.3s', duration: '2.4s' },
+];
 
 const FieldLabel = ({ children, required = false }) => (
   <div className="mb-2">
@@ -98,8 +90,70 @@ const textInputStyle = {
   boxShadow: '0 10px 24px color-mix(in srgb, var(--advertisement-card-shadow) 20%, transparent)',
 };
 
-const AddCommunity = ({ onNavigateBack }) => {
+const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const normalizeText = (value) => String(value || '').trim();
+
+const waitForTenantAppSlug = async (supabase, trustId) => {
+  const normalizedTrustId = normalizeText(trustId);
+  if (!normalizedTrustId) return null;
+
+  const startedAt = Date.now();
+  while (Date.now() - startedAt <= APP_SLUG_POLL_TIMEOUT_MS) {
+    const { data, error } = await supabase
+      .from('Trust')
+      .select('id,name,legal_name,remark,icon_url,app_slug,pwa_enabled,version')
+      .eq('id', normalizedTrustId)
+      .maybeSingle();
+
+    if (error) throw error;
+
+    const appSlug = normalizeText(data?.app_slug).toLowerCase();
+    if (appSlug && data?.pwa_enabled === true) {
+      return { ...data, app_slug: appSlug };
+    }
+
+    await delay(APP_SLUG_POLL_INTERVAL_MS);
+  }
+
+  return null;
+};
+
+const cacheCreatedTrust = ({ trustId, trustName, legalName, description, iconUrl, trustRow }) => {
+  const normalizedTrustId = normalizeText(trustId);
+  if (!normalizedTrustId) return;
+
+  const cachedTrust = {
+    ...(trustRow || {}),
+    id: normalizedTrustId,
+    name: normalizeText(trustRow?.name) || trustName,
+    legal_name: normalizeText(trustRow?.legal_name) || normalizeText(legalName) || null,
+    remark: normalizeText(trustRow?.remark) || normalizeText(description) || null,
+    icon_url: iconUrl || trustRow?.icon_url || null,
+    is_active: true,
+  };
+
+  localStorage.setItem('selected_trust_id', normalizedTrustId);
+  localStorage.setItem(LAST_SELECTED_TRUST_ID_KEY, normalizedTrustId);
+  localStorage.setItem('selected_trust_name', cachedTrust.name || trustName);
+
+  try {
+    const cached = JSON.parse(localStorage.getItem('trust_list_cache') || '[]');
+    const list = Array.isArray(cached) ? cached : [];
+    const next = [
+      cachedTrust,
+      ...list.filter((trust) => normalizeText(trust?.id) !== normalizedTrustId),
+    ];
+    localStorage.setItem('trust_list_cache', JSON.stringify(next));
+  } catch {
+    localStorage.setItem('trust_list_cache', JSON.stringify([cachedTrust]));
+  }
+};
+
+const AddCommunity = ({ onNavigateBack, variant = 'page' }) => {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const isHomeVariant = variant === 'home';
   const theme = useAppTheme();
   const navbarTheme = getNavbarThemeStyles(theme);
   const [form, setForm] = useState({
@@ -116,6 +170,7 @@ const AddCommunity = ({ onNavigateBack }) => {
   const [logoPreview, setLogoPreview] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [launching, setLaunching] = useState(false);
+  const [launchCycle, setLaunchCycle] = useState(0);
   const [submitError, setSubmitError] = useState('');
   // Live "is this name taken" check, run on blur of the Trust Name field —
   // status: 'idle' | 'checking' | 'taken' | 'available'; checkedValue tracks
@@ -222,6 +277,18 @@ const AddCommunity = ({ onNavigateBack }) => {
     return () => { active = false; };
   }, []);
 
+  // Dev-only preview hook: visiting /add-community?preview=launch shows the
+  // launch overlay for a few seconds without creating a Trust or calling
+  // Supabase, so the animation can be eyeballed on demand. No-ops outside
+  // local dev builds and doesn't affect the real submit flow.
+  useEffect(() => {
+    if (!import.meta.env.DEV) return undefined;
+    if (searchParams.get('preview') !== 'launch') return undefined;
+    setLaunching(true);
+    const timer = setTimeout(() => setLaunching(false), LAUNCH_ANIMATION_MS);
+    return () => clearTimeout(timer);
+  }, [searchParams]);
+
   const handleLogoUpload = (event) => {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -240,6 +307,11 @@ const AddCommunity = ({ onNavigateBack }) => {
     const trustName = String(form.trustName || '').trim();
     if (!trustName) {
       setSubmitError('Trust name is required.');
+      return;
+    }
+
+    if (!form.sampleAppId) {
+      setSubmitError('Please select a Type.');
       return;
     }
 
@@ -263,8 +335,14 @@ const AddCommunity = ({ onNavigateBack }) => {
     const selectedSampleApp = sampleApps.find((app) => app.id === form.sampleAppId) || null;
 
     setSubmitting(true);
+    // Show the launch animation immediately. After the install link is ready,
+    // restart this cycle so the final launch screen gets its full duration.
+    setLaunching(true);
+    setLaunchCycle((prev) => prev + 1);
     const { supabase } = await import('./services/supabaseClient.js');
     let nextTrustId = '';
+    let uploadedIconUrl = null;
+    let tenantTrust = null;
     try {
       // create_trust_via_whatsapp already handles the full "new trust"
       // pipeline (superuser + Trust row + async web-app-link generation).
@@ -282,8 +360,6 @@ const AddCommunity = ({ onNavigateBack }) => {
 
       nextTrustId = String(data || '').trim();
       if (nextTrustId) {
-        let uploadedIconUrl = null;
-
         if (logoFile) {
           const extension = String(logoFile.name || '').split('.').pop()?.toLowerCase() || 'png';
           const safeExtension = extension.replace(/[^a-z0-9]/g, '') || 'png';
@@ -326,8 +402,13 @@ const AddCommunity = ({ onNavigateBack }) => {
           if (trustUpdateError) throw trustUpdateError;
         }
 
-        localStorage.setItem('selected_trust_id', nextTrustId);
-        localStorage.setItem('selected_trust_name', trustName);
+        cacheCreatedTrust({
+          trustId: nextTrustId,
+          trustName,
+          legalName: form.legalName,
+          description: form.description,
+          iconUrl: uploadedIconUrl,
+        });
         window.dispatchEvent(new CustomEvent('trust-changed', {
           detail: {
             trustId: nextTrustId,
@@ -335,10 +416,23 @@ const AddCommunity = ({ onNavigateBack }) => {
             iconUrl: uploadedIconUrl || null,
           }
         }));
+
+        tenantTrust = await waitForTenantAppSlug(supabase, nextTrustId);
+        if (tenantTrust) {
+          cacheCreatedTrust({
+            trustId: nextTrustId,
+            trustName,
+            legalName: form.legalName,
+            description: form.description,
+            iconUrl: uploadedIconUrl,
+            trustRow: tenantTrust,
+          });
+        }
       }
     } catch (error) {
       setSubmitError(getFriendlySubmitError(error, trustName));
       setSubmitting(false);
+      setLaunching(false);
       return;
     }
 
@@ -346,21 +440,38 @@ const AddCommunity = ({ onNavigateBack }) => {
 
     if (!nextTrustId) {
       setSubmitError('Trust was created but could not be confirmed. Please check again.');
+      setLaunching(false);
       return;
     }
 
-    // Show the launch animation while generate-webApp-link (fired
-    // asynchronously by the Trust insert trigger) finishes writing the
-    // app_slug / shareApp_links row, then land the user on their new
-    // tenant app at /app/<slug> instead of leaving them on this form.
-    setLaunching(true);
-    const slug = await pollForAppSlug(supabase, nextTrustId);
-    navigate(slug ? `/app/${slug}` : getAppHomePath(), { replace: true });
+    // Open the tenant install landing after the backend has generated the
+    // slug and enabled PWA metadata for this newly created Trust.
+    if (!tenantTrust?.app_slug) {
+      setSubmitError('App was created, but the install page link is still getting ready. Please try again in a moment.');
+      setLaunching(false);
+      return;
+    }
+
+    setLaunchCycle((prev) => prev + 1);
+    await delay(LAUNCH_ANIMATION_MS);
+    const installUrl = `${window.location.origin}/app/${encodeURIComponent(tenantTrust.app_slug)}?install=1&created=1`;
+    try {
+      sessionStorage.setItem(PENDING_CREATED_APP_URL_KEY, installUrl);
+      sessionStorage.setItem(PENDING_CREATED_APP_TS_KEY, String(Date.now()));
+      localStorage.setItem(PENDING_CREATED_APP_URL_KEY, installUrl);
+      localStorage.setItem(PENDING_CREATED_APP_TS_KEY, String(Date.now()));
+    } catch {
+      // ignore storage failures
+    }
+    window.location.href = installUrl;
+    window.location.replace(installUrl);
   };
 
   const hasTrustName = String(form.trustName || '').trim().length > 0;
+  const hasType = Boolean(form.sampleAppId);
   const isNameTaken = nameCheck.status === 'taken' && nameCheck.checkedValue === form.trustName.trim();
   useEffect(() => {
+    if (isHomeVariant) return undefined;
     if (isMenuOpen) {
       const y = window.scrollY;
       Object.assign(document.body.style, { overflow: 'hidden', position: 'fixed', width: '100%', top: `-${y}px` });
@@ -370,9 +481,10 @@ const AddCommunity = ({ onNavigateBack }) => {
       window.scrollTo(0, Number.isFinite(y) ? y : 0);
     }
     return () => Object.assign(document.body.style, { overflow: '', position: '', width: '', top: '' });
-  }, [isMenuOpen]);
+  }, [isMenuOpen, isHomeVariant]);
 
   useEffect(() => {
+    if (isHomeVariant) return undefined;
     if (!isMenuOpen) return undefined;
     const handleOutside = (event) => {
       if (!event.target.closest('[data-sidebar="true"]') && !event.target.closest('[data-sidebar-overlay="true"]')) {
@@ -381,48 +493,52 @@ const AddCommunity = ({ onNavigateBack }) => {
     };
     document.addEventListener('click', handleOutside, true);
     return () => document.removeEventListener('click', handleOutside, true);
-  }, [isMenuOpen]);
+  }, [isMenuOpen, isHomeVariant]);
 
   useEffect(() => () => {
     if (logoPreview) URL.revokeObjectURL(logoPreview);
   }, [logoPreview]);
 
   return (
-    <div className="min-h-screen" style={{ background: pageShellBg, color: 'var(--body-text-color)' }}>
-      <div
-        className="sticky top-0 z-30 flex items-center justify-between px-4 py-4"
-        style={{
-          background: navbarTheme?.backgroundStyle || 'var(--navbar-bg, var(--app-navbar-bg))',
-          backdropFilter: `blur(${navbarTheme?.blurPx || '12px'})`,
-          WebkitBackdropFilter: `blur(${navbarTheme?.blurPx || '12px'})`,
-          borderBottom: '1px solid var(--navbar-border)',
-          color: navbarTheme?.textColor || 'var(--navbar-text)',
-        }}
-      >
-        <button
-          onClick={() => setIsMenuOpen((prev) => !prev)}
-          className="p-2 rounded-xl transition-colors"
-          style={{ color: navbarTheme?.textColor || 'var(--navbar-text)', background: 'transparent' }}
-          aria-label={isMenuOpen ? 'Close menu' : 'Open menu'}
-        >
-          {isMenuOpen ? <X className="h-6 w-6" /> : <Menu className="h-6 w-6" />}
-        </button>
-        <h1 className="text-base font-bold tracking-wide" style={{ color: navbarTheme?.textColor || 'var(--navbar-text)' }}>
-          {pageTitle}
-        </h1>
-        <button
-          onClick={handleBack}
-          className="p-2 rounded-xl transition-colors"
-          style={{ color: navbarTheme?.textColor || 'var(--navbar-text)', background: 'transparent' }}
-          aria-label="Go back"
-        >
-          <HomeIcon className="h-5 w-5" />
-        </button>
-      </div>
+    <div className={isHomeVariant ? '' : 'min-h-screen'} style={isHomeVariant ? { color: 'var(--body-text-color)' } : { background: pageShellBg, color: 'var(--body-text-color)' }}>
+      {!isHomeVariant && (
+        <>
+          <div
+            className="sticky top-0 z-30 flex items-center justify-between px-4 py-4"
+            style={{
+              background: navbarTheme?.backgroundStyle || 'var(--navbar-bg, var(--app-navbar-bg))',
+              backdropFilter: `blur(${navbarTheme?.blurPx || '12px'})`,
+              WebkitBackdropFilter: `blur(${navbarTheme?.blurPx || '12px'})`,
+              borderBottom: '1px solid var(--navbar-border)',
+              color: navbarTheme?.textColor || 'var(--navbar-text)',
+            }}
+          >
+            <button
+              onClick={() => setIsMenuOpen((prev) => !prev)}
+              className="p-2 rounded-xl transition-colors"
+              style={{ color: navbarTheme?.textColor || 'var(--navbar-text)', background: 'transparent' }}
+              aria-label={isMenuOpen ? 'Close menu' : 'Open menu'}
+            >
+              {isMenuOpen ? <X className="h-6 w-6" /> : <Menu className="h-6 w-6" />}
+            </button>
+            <h1 className="text-base font-bold tracking-wide" style={{ color: navbarTheme?.textColor || 'var(--navbar-text)' }}>
+              {pageTitle}
+            </h1>
+            <button
+              onClick={handleBack}
+              className="p-2 rounded-xl transition-colors"
+              style={{ color: navbarTheme?.textColor || 'var(--navbar-text)', background: 'transparent' }}
+              aria-label="Go back"
+            >
+              <HomeIcon className="h-5 w-5" />
+            </button>
+          </div>
 
-      <Sidebar isOpen={isMenuOpen} onClose={() => setIsMenuOpen(false)} onNavigate={(target) => navigate(target === 'home' ? '/' : `/${target}`)} currentPage="add-community" />
+          <Sidebar isOpen={isMenuOpen} onClose={() => setIsMenuOpen(false)} onNavigate={(target) => navigate(target === 'home' ? '/' : `/${target}`)} currentPage="add-community" />
+        </>
+      )}
 
-      <div className="px-4 pt-5 pb-10 space-y-5">
+      <div className={isHomeVariant ? 'space-y-5' : 'px-4 pt-5 pb-10 space-y-5'}>
         <section
           className="rounded-[28px] border p-5"
           style={{
@@ -440,7 +556,6 @@ const AddCommunity = ({ onNavigateBack }) => {
                 onChange={handleChange('trustName')}
                 onFocus={() => setIsFocused('trustName')}
                 onBlur={() => { setIsFocused(''); checkTrustNameAvailability(); }}
-                placeholder="e.g. Sunrise Healthcare"
                 className="px-4 py-4 font-semibold placeholder:font-medium"
                 style={{
                   ...textInputStyle,
@@ -475,7 +590,6 @@ const AddCommunity = ({ onNavigateBack }) => {
                 onChange={handleChange('legalName')}
                 onFocus={() => setIsFocused('legalName')}
                 onBlur={() => setIsFocused('')}
-                placeholder="e.g. Sunrise Healthcare Trust Foundation"
                 className="px-4 py-4 font-medium placeholder:font-medium"
                 style={{
                   ...textInputStyle,
@@ -488,9 +602,10 @@ const AddCommunity = ({ onNavigateBack }) => {
             </div>
 
             <div>
-              <FieldLabel>Type</FieldLabel>
+              <FieldLabel required>Type</FieldLabel>
               <div className="relative">
                 <select
+                  required
                   value={form.sampleAppId}
                   onChange={handleChange('sampleAppId')}
                   onFocus={() => setIsFocused('sampleAppId')}
@@ -530,7 +645,7 @@ const AddCommunity = ({ onNavigateBack }) => {
             </div>
 
             <div>
-              <FieldLabel>Icon/Logo Upload</FieldLabel>
+              <FieldLabel>Logo Upload</FieldLabel>
               <input
                 ref={fileInputRef}
                 type="file"
@@ -553,7 +668,7 @@ const AddCommunity = ({ onNavigateBack }) => {
                   </div>
                   <div className="min-w-0">
                     <p className="truncate font-medium" style={{ color: logoFile ? 'var(--advertisement-title)' : muted }}>
-                      {logoFile ? logoFile.name : 'Upload community logo'}
+                      {logoFile ? logoFile.name : 'Logo'}
                     </p>
                     <p className="mt-0.5 text-xs" style={{ color: muted }}>
                       JPG, PNG, or WebP
@@ -573,7 +688,6 @@ const AddCommunity = ({ onNavigateBack }) => {
                 onChange={handleChange('description')}
                 onFocus={() => setIsFocused('description')}
                 onBlur={() => setIsFocused('')}
-                placeholder="e.g. A non-profit organization focused on healthcare, support, and meaningful community growth."
                 rows={5}
                 className="resize-none px-4 py-4 font-medium placeholder:font-medium"
                 style={{
@@ -585,14 +699,13 @@ const AddCommunity = ({ onNavigateBack }) => {
                 }}
               />
               <div className="mt-2 flex items-center justify-between text-[11px]" style={{ color: muted }}>
-                <span>Keep it crisp and trust-friendly.</span>
                 <span>{form.description.length}/240</span>
               </div>
             </div>
 
             <button
               type="submit"
-              disabled={!hasTrustName || submitting || isNameTaken}
+              disabled={!hasTrustName || !hasType || submitting || isNameTaken}
               className="w-full rounded-[20px] px-5 py-4 text-sm font-extrabold transition-all active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-60"
               style={{
                 color: 'var(--app-button-text)',
@@ -649,41 +762,71 @@ const AddCommunity = ({ onNavigateBack }) => {
         >
           <div
             className="pointer-events-none absolute inset-0"
-            style={{ background: 'radial-gradient(circle at 50% 42%, var(--app-accent-bg), transparent 60%)', opacity: 0.5 }}
+            style={{ background: 'radial-gradient(circle at 50% 38%, var(--app-accent-bg), transparent 62%)', opacity: 0.45 }}
           />
-          <span className="tenant-star" style={{ top: '18%', left: '22%', background: heading, animationDelay: '0s' }} />
-          <span className="tenant-star" style={{ top: '28%', left: '76%', background: heading, animationDelay: '0.5s' }} />
-          <span className="tenant-star" style={{ top: '64%', left: '16%', background: heading, animationDelay: '0.9s' }} />
-          <span className="tenant-star" style={{ top: '70%', left: '80%', background: heading, animationDelay: '1.3s' }} />
-          <span className="tenant-star" style={{ top: '40%', left: '50%', background: heading, animationDelay: '0.3s' }} />
 
-          <div className="tenant-launch-content relative flex flex-col items-center">
-            <div className="relative flex h-32 w-32 items-center justify-center">
+          {LAUNCH_STARS.map((star, index) => (
+            <span
+              key={index}
+              className="tenant-star"
+              style={{
+                top: star.top,
+                left: star.left,
+                width: star.size,
+                height: star.size,
+                background: heading,
+                animationDelay: star.delay,
+                animationDuration: star.duration,
+              }}
+            />
+          ))}
+
+          <div key={launchCycle} className="tenant-launch-content relative flex flex-col items-center">
+            <div className="relative flex h-40 w-40 items-center justify-center">
               <div
-                className="tenant-orbit-ring absolute inset-0 rounded-full"
-                style={{ borderColor: `color-mix(in srgb, ${heading} 30%, transparent)` }}
+                className="tenant-orbit-ring tenant-orbit-ring--inner absolute inset-0 rounded-full"
+                style={{ borderColor: `color-mix(in srgb, ${heading} 28%, transparent)` }}
               />
               <div
-                className="absolute h-16 w-16 rounded-full"
-                style={{ background: 'var(--app-accent-bg)', opacity: 0.35, filter: 'blur(18px)' }}
+                className="tenant-orbit-ring tenant-orbit-ring--outer absolute rounded-full"
+                style={{ inset: '-14px', borderColor: `color-mix(in srgb, ${heading} 14%, transparent)` }}
               />
               <div
-                className="tenant-rocket-trail absolute"
-                style={{ background: `linear-gradient(180deg, color-mix(in srgb, ${heading} 55%, transparent), transparent)` }}
+                className="absolute h-20 w-20 rounded-full"
+                style={{ background: 'var(--app-accent-bg)', opacity: 0.35, filter: 'blur(22px)' }}
               />
-              <Rocket className="tenant-rocket-fly relative h-12 w-12" style={{ color: heading }} />
+
+              <span className="tenant-smoke" style={{ background: `color-mix(in srgb, ${heading} 45%, transparent)`, animationDelay: '0s' }} />
+              <span className="tenant-smoke" style={{ background: `color-mix(in srgb, ${heading} 45%, transparent)`, animationDelay: '0.5s' }} />
+              <span className="tenant-smoke" style={{ background: `color-mix(in srgb, ${heading} 45%, transparent)`, animationDelay: '1s' }} />
+
+              <div className="tenant-rocket-wrap relative">
+                <div
+                  className="tenant-rocket-flame absolute"
+                  style={{ background: 'linear-gradient(180deg, #ffd27a, #ff8a3d 55%, transparent)' }}
+                />
+                <div
+                  className="tenant-rocket-trail absolute"
+                  style={{ background: `linear-gradient(180deg, color-mix(in srgb, ${heading} 65%, transparent), transparent)` }}
+                />
+                <Rocket className="tenant-rocket-fly relative h-14 w-14" style={{ color: heading }} />
+              </div>
             </div>
 
-            <p className="mt-7 text-center text-lg font-extrabold" style={{ color: heading }}>
+            <p className="mt-8 text-center text-lg font-extrabold" style={{ color: heading }}>
               Launching {form.trustName || 'your app'}
               <span className="tenant-dots" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span>
             </p>
-            <p className="mt-2 text-center text-sm" style={{ color: muted }}>
-              Setting things up, almost there.
-            </p>
 
-            <div className="tenant-progress-track mt-5" style={{ background: `color-mix(in srgb, ${heading} 14%, transparent)` }}>
-              <div className="tenant-progress-bar" style={{ background: 'var(--app-button-bg)' }} />
+            <div className="tenant-status-stack relative mt-2 h-5 w-64 text-center text-sm" style={{ color: muted }}>
+              <span className="tenant-status-line tenant-status-line--1">Setting things up...</span>
+              <span className="tenant-status-line tenant-status-line--2">Preparing your workspace...</span>
+              <span className="tenant-status-line tenant-status-line--3">Configuring your community...</span>
+              <span className="tenant-status-line tenant-status-line--4">Almost there...</span>
+            </div>
+
+            <div className="tenant-progress-track mt-6" style={{ background: `color-mix(in srgb, ${heading} 14%, transparent)` }}>
+              <div className="tenant-progress-fill" style={{ background: 'var(--app-button-bg)' }} />
             </div>
           </div>
 
@@ -691,13 +834,23 @@ const AddCommunity = ({ onNavigateBack }) => {
             @keyframes tenantOverlayIn { from { opacity: 0; } to { opacity: 1; } }
             @keyframes tenantContentIn { from { opacity: 0; transform: translateY(10px) scale(0.97); } to { opacity: 1; transform: none; } }
             @keyframes tenantRocketFly {
-              0%, 100% { transform: translateY(8px) rotate(-45deg); }
-              50% { transform: translateY(-16px) rotate(-45deg); }
+              0%, 100% { transform: translateY(10px) rotate(-45deg); }
+              50% { transform: translateY(-22px) rotate(-42deg); }
             }
             @keyframes tenantOrbitSpin { to { transform: rotate(360deg); } }
+            @keyframes tenantOrbitSpinReverse { to { transform: rotate(-360deg); } }
             @keyframes tenantTrailPulse {
               0%, 100% { opacity: 0.35; transform: scaleY(0.6); }
-              50% { opacity: 0.85; transform: scaleY(1); }
+              50% { opacity: 0.9; transform: scaleY(1); }
+            }
+            @keyframes tenantFlamePulse {
+              0%, 100% { opacity: 0.6; transform: scale(0.85); }
+              50% { opacity: 1; transform: scale(1.15); }
+            }
+            @keyframes tenantSmokeRise {
+              0% { opacity: 0; transform: translate(0, 0) scale(0.4); }
+              20% { opacity: 0.7; }
+              100% { opacity: 0; transform: translate(var(--smoke-x, 14px), 46px) scale(1.4); }
             }
             @keyframes tenantStarTwinkle {
               0%, 100% { opacity: 0.15; transform: scale(0.8); }
@@ -707,30 +860,71 @@ const AddCommunity = ({ onNavigateBack }) => {
               0%, 80%, 100% { opacity: 0.2; }
               40% { opacity: 1; }
             }
-            @keyframes tenantProgressSlide {
-              0% { transform: translateX(-110%); }
-              100% { transform: translateX(240%); }
+            @keyframes tenantProgressFill {
+              from { width: 4%; }
+              to { width: 96%; }
+            }
+            @keyframes tenantStatusCycle1 {
+              0%, 20% { opacity: 1; transform: translateY(0); }
+              25%, 100% { opacity: 0; transform: translateY(-6px); }
+            }
+            @keyframes tenantStatusCycle2 {
+              0%, 20% { opacity: 0; transform: translateY(6px); }
+              25%, 45% { opacity: 1; transform: translateY(0); }
+              50%, 100% { opacity: 0; transform: translateY(-6px); }
+            }
+            @keyframes tenantStatusCycle3 {
+              0%, 50% { opacity: 0; transform: translateY(6px); }
+              55%, 75% { opacity: 1; transform: translateY(0); }
+              80%, 100% { opacity: 0; transform: translateY(-6px); }
+            }
+            @keyframes tenantStatusCycle4 {
+              0%, 80% { opacity: 0; transform: translateY(6px); }
+              85%, 100% { opacity: 1; transform: translateY(0); }
             }
             .tenant-launch-overlay { animation: tenantOverlayIn 0.25s ease-out; }
             .tenant-launch-content { animation: tenantContentIn 0.35s ease-out; }
             .tenant-orbit-ring { border: 1.5px dashed; animation: tenantOrbitSpin 6s linear infinite; }
-            .tenant-rocket-fly { animation: tenantRocketFly 1.4s ease-in-out infinite; }
+            .tenant-orbit-ring--outer { border-style: dotted; animation: tenantOrbitSpinReverse 10s linear infinite; }
+            .tenant-rocket-wrap { animation: tenantRocketFly 1.6s ease-in-out infinite; }
+            .tenant-rocket-fly { display: block; }
+            .tenant-rocket-flame {
+              width: 8px;
+              height: 20px;
+              left: 50%;
+              bottom: 28%;
+              margin-left: -4px;
+              border-radius: 999px;
+              filter: blur(3px);
+              transform-origin: top center;
+              animation: tenantFlamePulse 0.5s ease-in-out infinite;
+            }
             .tenant-rocket-trail {
               width: 10px;
-              height: 30px;
+              height: 34px;
               left: 50%;
-              bottom: 30%;
+              bottom: 26%;
               margin-left: -5px;
               border-radius: 999px;
               filter: blur(2px);
-              animation: tenantTrailPulse 1.4s ease-in-out infinite;
+              animation: tenantTrailPulse 1.6s ease-in-out infinite;
+            }
+            .tenant-smoke {
+              position: absolute;
+              left: 50%;
+              bottom: 22%;
+              width: 10px;
+              height: 10px;
+              border-radius: 50%;
+              filter: blur(3px);
+              animation: tenantSmokeRise 2.4s ease-out infinite;
             }
             .tenant-star {
               position: absolute;
-              width: 4px;
-              height: 4px;
               border-radius: 50%;
-              animation: tenantStarTwinkle 2.2s ease-in-out infinite;
+              animation-name: tenantStarTwinkle;
+              animation-timing-function: ease-in-out;
+              animation-iteration-count: infinite;
             }
             .tenant-dots span {
               display: inline-block;
@@ -738,19 +932,32 @@ const AddCommunity = ({ onNavigateBack }) => {
             }
             .tenant-dots span:nth-child(2) { animation-delay: 0.2s; }
             .tenant-dots span:nth-child(3) { animation-delay: 0.4s; }
+            .tenant-status-stack { display: grid; }
+            .tenant-status-line {
+              grid-area: 1 / 1;
+              opacity: 0;
+              animation-duration: ${LAUNCH_ANIMATION_MS}ms;
+              animation-timing-function: ease-in-out;
+              animation-iteration-count: 1;
+              animation-fill-mode: forwards;
+            }
+            .tenant-status-line--1 { animation-name: tenantStatusCycle1; }
+            .tenant-status-line--2 { animation-name: tenantStatusCycle2; }
+            .tenant-status-line--3 { animation-name: tenantStatusCycle3; }
+            .tenant-status-line--4 { animation-name: tenantStatusCycle4; }
             .tenant-progress-track {
               position: relative;
-              width: 160px;
-              height: 4px;
+              width: 200px;
+              height: 5px;
               border-radius: 999px;
               overflow: hidden;
             }
-            .tenant-progress-bar {
+            .tenant-progress-fill {
               position: absolute;
               inset: 0;
-              width: 40%;
+              width: 4%;
               border-radius: 999px;
-              animation: tenantProgressSlide 1.1s ease-in-out infinite;
+              animation: tenantProgressFill ${LAUNCH_ANIMATION_MS}ms ease-out forwards;
             }
           `}</style>
         </div>
@@ -758,5 +965,7 @@ const AddCommunity = ({ onNavigateBack }) => {
     </div>
   );
 };
+
+export const AddCommunityContent = () => <AddCommunity variant="home" />;
 
 export default AddCommunity;

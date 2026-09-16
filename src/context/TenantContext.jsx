@@ -20,6 +20,12 @@ const readStored = (key) => {
   }
 };
 
+const isStandaloneDisplay = () => {
+  if (typeof window === 'undefined') return false;
+  const mql = window.matchMedia && window.matchMedia('(display-mode: standalone)');
+  return Boolean(mql?.matches) || window.navigator?.standalone === true;
+};
+
 const writeStored = (key, value) => {
   try {
     if (value) {
@@ -59,10 +65,11 @@ export const TenantProvider = ({ children }) => {
   const [tenantError, setTenantError] = useState('');
   const [installedSlug, setInstalledSlug] = useState(() => {
     const urlSlug = getUrlSlug();
-    return urlSlug || readStored(INSTALLED_SLUG_KEY);
+    return urlSlug || (isStandaloneDisplay() ? readStored(INSTALLED_SLUG_KEY) : '');
   });
   const [installedTrustId, setInstalledTrustId] = useState(() => {
     const urlSlug = getUrlSlug();
+    if (!urlSlug && !isStandaloneDisplay()) return '';
     const storedSlug = readStored(INSTALLED_SLUG_KEY);
     // A cached trust id is only trustworthy when it belongs to the same
     // slug the URL is asking for right now (or when this route carries no
@@ -128,6 +135,9 @@ export const TenantProvider = ({ children }) => {
       // resolve finishes — a standalone PWA always launches on its own
       // /app/<slug>/ start_url, and in-app routes drop the slug soon after.
       rememberWindowTenantSlug(urlSlug);
+      return;
+    }
+    if (!isStandaloneDisplay()) {
       return;
     }
     if (installedSlug && !tenantTrust) {

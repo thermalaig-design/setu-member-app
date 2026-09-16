@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback, useMemo } from 'react';
+import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   ArrowLeft, Plus, X, Menu, Home as HomeIcon,
@@ -127,6 +127,80 @@ const Label = ({ children }) => (
     textTransform: 'uppercase', letterSpacing: '0.08em', margin: '0 0 5px'
   }}>{children}</p>
 );
+
+// Marquee: always duplicates text; CSS animation scrolls the inner span.
+// The container clips overflow so text scrolling is seamless.
+const MarqueeText = ({ children, style = {}, speed = 38 }) => {
+  const text = String(children || '').trim();
+  const containerRef = React.useRef(null);
+  // Dedicated, always-unpadded probe used only for width measurement so the
+  // visible (possibly padded/duplicated) marquee span never skews the check.
+  const probeRef = React.useRef(null);
+  const [overflow, setOverflow] = React.useState(false);
+  const [dur, setDur] = React.useState(6);
+
+  React.useEffect(() => {
+    const container = containerRef.current;
+    const probe = probeRef.current;
+    if (!container || !probe) return;
+    const measure = () => {
+      const textW = probe.scrollWidth;
+      const containerW = container.clientWidth;
+      const isOverflow = textW > containerW + 1;
+      setOverflow(isOverflow);
+      // duration proportional to text width so speed feels constant
+      setDur(isOverflow ? Math.max(3, textW / speed) : 0);
+    };
+    measure();
+    // Container width can be stable at mount while a webfont swap later
+    // changes the text's rendered width, so watch both and re-check once
+    // fonts finish loading (fallback timeout covers browsers without it).
+    const ro = new ResizeObserver(measure);
+    ro.observe(container);
+    ro.observe(probe);
+    if (document.fonts?.ready) {
+      document.fonts.ready.then(measure).catch(() => {});
+    }
+    const timeoutId = setTimeout(measure, 300);
+    return () => {
+      ro.disconnect();
+      clearTimeout(timeoutId);
+    };
+  }, [text, speed]);
+
+  if (!text) return null;
+
+  return (
+    <div
+      ref={containerRef}
+      style={{
+        position: 'relative',
+        overflow: 'hidden',
+        whiteSpace: 'nowrap',
+        ...style,
+      }}
+    >
+      <span
+        ref={probeRef}
+        aria-hidden="true"
+        style={{ position: 'absolute', visibility: 'hidden', whiteSpace: 'nowrap', pointerEvents: 'none' }}
+      >
+        {text}
+      </span>
+      <span
+        className="om-marquee-inner"
+        style={{
+          display: 'inline-block',
+          whiteSpace: 'nowrap',
+          animation: overflow ? `om-marquee-scroll ${dur}s linear infinite` : 'none',
+        }}
+      >
+        <span style={{ paddingRight: overflow ? '36px' : '0' }}>{text}</span>
+        {overflow && <span style={{ paddingRight: '36px' }}>{text}</span>}
+      </span>
+    </div>
+  );
+};
 
 // ─── Main Component ────────────────────────────────────────────────────────
 
@@ -402,8 +476,9 @@ const areMembershipCollectionsEqual = (left = [], right = []) => {
 
 
 
-const OtherMemberships = ({ onNavigate }) => {
+const OtherMemberships = ({ onNavigate, variant = 'page' }) => {
   const navigate = useNavigate();
+  const isHomeVariant = variant === 'home';
   const theme = useAppTheme();
   const { flags: featureFlags } = useFeatureFlags();
   const navbarTheme = getNavbarThemeStyles(theme);
@@ -498,6 +573,7 @@ const OtherMemberships = ({ onNavigate }) => {
 
   // Clear any temporary global scroll-lock styles left by previous screens.
   useEffect(() => {
+    if (isHomeVariant) return undefined;
     document.documentElement.style.overflow = '';
     document.documentElement.style.position = '';
     document.body.style.overflow = '';
@@ -505,7 +581,7 @@ const OtherMemberships = ({ onNavigate }) => {
     document.body.style.width = '';
     document.body.style.top = '';
     document.body.style.touchAction = '';
-  }, []);
+  }, [isHomeVariant]);
 
   useEffect(() => {
     const hasCachedTrustLinks = initialTrustLinks.length > 0;
@@ -513,6 +589,7 @@ const OtherMemberships = ({ onNavigate }) => {
   }, [loadData, initialTrustLinks.length]);
 
   useEffect(() => {
+    if (isHomeVariant) return undefined;
     if (isMenuOpen) {
       const y = window.scrollY;
       Object.assign(document.body.style, { overflow: 'hidden', position: 'fixed', width: '100%', top: `-${y}px` });
@@ -522,7 +599,7 @@ const OtherMemberships = ({ onNavigate }) => {
       window.scrollTo(0, Number.isFinite(y) ? y : 0);
     }
     return () => Object.assign(document.body.style, { overflow: '', position: '', width: '', top: '' });
-  }, [isMenuOpen]);
+  }, [isMenuOpen, isHomeVariant]);
 
   useEffect(() => {
     if (!trustCardModalData) return undefined;
@@ -547,6 +624,7 @@ const OtherMemberships = ({ onNavigate }) => {
   }, [trustCardModalData]);
 
   useEffect(() => {
+    if (isHomeVariant) return undefined;
     if (!isMenuOpen) return undefined;
     const handleOutside = (event) => {
       if (!event.target.closest('[data-sidebar="true"]') && !event.target.closest('[data-sidebar-overlay="true"]')) {
@@ -555,7 +633,7 @@ const OtherMemberships = ({ onNavigate }) => {
     };
     document.addEventListener('click', handleOutside, true);
     return () => document.removeEventListener('click', handleOutside, true);
-  }, [isMenuOpen]);
+  }, [isMenuOpen, isHomeVariant]);
 
   // ── handlers ──
   const handleDelete = async (id) => {
@@ -759,8 +837,18 @@ const OtherMemberships = ({ onNavigate }) => {
   };
 
   const TrustLinkTile = ({ link, onClick, onOpenCard, isLoading }) => {
-    const trustName = link.Trust?.name || link.organisation_name || '—';
-    const legalName = normalizeText(link.Trust?.legal_name);
+    const trustName = link.Trust?.name || link.organisation_name || '-';
+    const legalName = normalizeText(
+      link.Trust?.legal_name
+      || link.remark1
+      || link.remark
+      || link.role
+      || link.membership_type
+    );
+    const trustId = normalizeText(link?.trust_id || link?.Trust?.id || link?.id);
+    const portalCode = trustId
+      ? trustId.replace(/[^a-z0-9]/gi, '').slice(-3).toUpperCase()
+      : String(Math.max(1, trustName.length)).padStart(3, '0');
 
     const handleKeyDown = (event) => {
       if (event.target !== event.currentTarget) return;
@@ -775,6 +863,7 @@ const OtherMemberships = ({ onNavigate }) => {
       onOpenCard?.();
     };
 
+
     return (
       <div
         className="other-membership-card"
@@ -783,63 +872,96 @@ const OtherMemberships = ({ onNavigate }) => {
         onClick={onClick}
         onKeyDown={handleKeyDown}
         style={{
-          background: 'color-mix(in srgb, var(--advertisement-card-bg) 86%, var(--app-accent-bg))',
-          border: '1px solid var(--advertisement-card-border)',
-          borderRadius: '16px',
-          padding: '14px',
+          position: 'relative',
+          background: 'linear-gradient(155deg, rgba(28,31,45,0.98) 0%, rgba(13,15,24,0.99) 62%, rgba(20,17,10,0.99) 100%)',
+          border: '1px solid rgba(226, 178, 39, 0.22)',
+          borderRadius: '18px',
+          padding: '14px 13px 12px',
           cursor: isLoading ? 'wait' : 'pointer',
           opacity: isLoading ? 0.6 : 1,
           minWidth: 0,
           overflow: 'hidden',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '9px',
+          boxShadow: '0 8px 24px rgba(0,0,0,0.34), inset 0 1px 0 rgba(255,255,255,0.05)',
+          transition: 'transform 0.2s cubic-bezier(0.22,1,0.36,1), border-color 0.2s ease, box-shadow 0.2s ease',
+        }}
+        onMouseEnter={(event) => {
+          event.currentTarget.style.transform = 'translateY(-4px) scale(1.015)';
+          event.currentTarget.style.borderColor = 'rgba(226, 178, 39, 0.6)';
+          event.currentTarget.style.boxShadow = '0 16px 36px rgba(0,0,0,0.4), 0 0 0 1px rgba(226,178,39,0.18), inset 0 1px 0 rgba(255,255,255,0.07)';
+        }}
+        onMouseLeave={(event) => {
+          event.currentTarget.style.transform = 'translateY(0) scale(1)';
+          event.currentTarget.style.borderColor = 'rgba(226, 178, 39, 0.22)';
+          event.currentTarget.style.boxShadow = '0 8px 24px rgba(0,0,0,0.34), inset 0 1px 0 rgba(255,255,255,0.05)';
         }}
       >
-        <div style={{ minWidth: 0 }}>
-          <div style={{ display: 'flex', alignItems: 'flex-start', gap: '12px', minWidth: 0 }}>
-            <TrustAvatar trust={link.Trust || { name: trustName, icon_url: null }} size={48} />
-            <span style={{ display: 'flex', flexDirection: 'column', minWidth: 0, flex: 1 }}>
-              <h3 style={{ fontSize: '15px', fontWeight: 800, color: 'var(--advertisement-title)', margin: '0 0 4px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {trustName}
-              </h3>
-              <button
-                type="button"
-                onClick={handleOpenCardClick}
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '4px',
-                  alignSelf: 'flex-start',
-                  fontSize: '11px',
-                  fontWeight: 700,
-                  fontFamily: 'inherit',
-                  color: colors.primary,
-                  background: 'transparent',
-                  border: `1px solid ${colors.primary}`,
-                  borderRadius: '999px',
-                  padding: '3px 10px',
-                  cursor: 'pointer',
-                  marginBottom: legalName ? '8px' : 0,
-                }}
-              >
-                <BadgeCheck size={11} strokeWidth={2.5} />
-                Digital ID
-              </button>
-              {legalName && (
-                <div style={{ width: '150%', overflow: 'hidden', position:'relative', left:'-60px' }}>
-                  {legalName.length > 25 ? (
-                    <div className="legal-name-marquee-track">
-                      <span className="legal-name-marquee-text">{legalName}</span>
-                      <span className="legal-name-marquee-text">{legalName}</span>
-                    </div>
-                  ) : (
-                    <p style={{ fontSize: '12px', color: 'var(--advertisement-subtitle)', margin: 0, lineHeight: 1.35, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                      {legalName}
-                    </p>
-                  )}
-                </div>
-              )}
-            </span>
+        {/* Gold top accent line */}
+        <div style={{
+          position: 'absolute', top: 0, left: 0, right: 0, height: '2.5px',
+          background: 'linear-gradient(90deg, transparent, rgba(226,178,39,0.75) 40%, rgba(255,213,110,0.95) 60%, transparent)',
+          borderRadius: '18px 18px 0 0',
+        }} />
+
+        {/* Soft corner glow */}
+        <div style={{
+          position: 'absolute', top: '-30%', right: '-30%', width: '70%', height: '70%',
+          background: 'radial-gradient(circle, rgba(226,178,39,0.10), transparent 70%)',
+          pointerEvents: 'none',
+        }} />
+
+        {/* Row 1: Logo + Portal badge */}
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '8px' }}>
+          <div style={{
+            padding: '3px',
+            borderRadius: '13px',
+            background: 'linear-gradient(135deg, rgba(226,178,39,0.35), rgba(226,178,39,0.05))',
+          }}>
+            <TrustAvatar trust={link.Trust || { name: trustName, icon_url: null }} size={36} />
           </div>
+          <span style={{
+            fontSize: '7px',
+            fontWeight: 800,
+            color: 'rgba(226,178,39,0.75)',
+            background: 'rgba(226,178,39,0.08)',
+            border: '1px solid rgba(226,178,39,0.22)',
+            borderRadius: '5px',
+            padding: '3px 6px',
+            letterSpacing: '0.07em',
+            textTransform: 'uppercase',
+            flexShrink: 0,
+            marginTop: '2px',
+          }}>Portal</span>
         </div>
+
+        {/* Row 2: Trust name */}
+        <MarqueeText
+          style={{
+            fontSize: '12.5px',
+            lineHeight: 1.3,
+            fontWeight: 800,
+            color: '#f6f2e6',
+            letterSpacing: '-0.01em',
+          }}
+        >
+          {trustName}
+        </MarqueeText>
+
+        {/* Row 3: Legal name */}
+        {legalName && (
+          <MarqueeText
+            style={{
+              fontSize: '9.5px',
+              lineHeight: 1.4,
+              fontWeight: 500,
+              color: 'rgba(224,230,241,0.58)',
+            }}
+          >
+            {legalName}
+          </MarqueeText>
+        )}
       </div>
     );
   };
@@ -850,17 +972,19 @@ const OtherMemberships = ({ onNavigate }) => {
       className="other-memberships-page"
       style={{
         width: '100%',
-        maxWidth: '430px',
+	        maxWidth: isHomeVariant ? 'none' : '430px',
         margin: '0 auto',
-        minHeight: '100dvh',
+	        minHeight: isHomeVariant ? 'auto' : '100dvh',
         overflow: 'visible',
         fontFamily: "var(--font-family, 'Inter', sans-serif)",
         boxSizing: 'border-box',
       }}
     >
       {/* ── Header ── */}
-      <div
-        className="other-memberships-header px-4 py-4 flex items-center justify-between sticky top-0 z-50 shadow-md"
+	      {!isHomeVariant && (
+	        <>
+	      <div
+	        className="other-memberships-header px-4 py-4 flex items-center justify-between sticky top-0 z-50 shadow-md"
         style={{
           background: navbarTheme?.backgroundStyle || 'var(--navbar-bg, var(--app-navbar-bg))',
           backdropFilter: `blur(${navbarTheme?.blurPx || '12px'})`,
@@ -889,7 +1013,9 @@ const OtherMemberships = ({ onNavigate }) => {
         </button>
       </div>
 
-      <Sidebar isOpen={isMenuOpen} onClose={() => setIsMenuOpen(false)} onNavigate={onNavigate} currentPage="other-memberships" />
+	      <Sidebar isOpen={isMenuOpen} onClose={() => setIsMenuOpen(false)} onNavigate={onNavigate} currentPage="other-memberships" />
+	        </>
+	      )}
 
       {/* ── Content ── */}
       <div className="other-memberships-content" style={{ width: '100%', margin: '0 auto', boxSizing: 'border-box' }}>
@@ -928,7 +1054,7 @@ const OtherMemberships = ({ onNavigate }) => {
                   border: 'none',
                   borderRadius: '16px',
                   fontSize: '15px',
-                  fontWeight: 700,
+                  fontWeight: 800,
                   cursor: 'pointer',
                   marginBottom: '20px',
                   boxShadow: `0 8px 18px ${applyOpacity(colors.primary, 0.26)}`,
@@ -964,7 +1090,7 @@ const OtherMemberships = ({ onNavigate }) => {
             {trustLinks.length > 0 && (
               <div
                 className="other-memberships-grid"
-                style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', columnGap: '14px', rowGap: '16px' }}
+                style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', columnGap: '9px', rowGap: '10px' }}
               >
                 {sortedTrustLinks.map((link, index) => (
                   <TrustLinkTile
@@ -1160,13 +1286,40 @@ const OtherMemberships = ({ onNavigate }) => {
           opacity: 0.9;
         }
         @keyframes spin { to { transform: rotate(360deg); } }
-        @keyframes fadeUp {
-          from { opacity: 0; transform: translateY(16px); }
-          to   { opacity: 1; transform: translateY(0); }
-        }
-        .legal-name-marquee-track {
-          display: flex;
-          width: max-content;
+	        @keyframes fadeUp {
+	          from { opacity: 0; transform: translateY(16px); }
+	          to   { opacity: 1; transform: translateY(0); }
+	        }
+	        .portal-text-window {
+	          width: 100%;
+	          min-width: 0;
+	          overflow: hidden;
+	          white-space: nowrap;
+	        }
+	        .portal-static-text {
+	          display: block;
+	          overflow: hidden;
+	          text-overflow: ellipsis;
+	          white-space: nowrap;
+	        }
+	        .portal-marquee-track {
+	          display: inline-flex;
+	          width: max-content;
+	          min-width: 100%;
+	          animation: portalTextMarquee 18s linear infinite;
+	        }
+	        .portal-marquee-text {
+	          flex-shrink: 0;
+	          white-space: nowrap;
+	          padding-right: 26px;
+	        }
+	        @keyframes portalTextMarquee {
+	          from { transform: translateX(0); }
+	          to { transform: translateX(-50%); }
+	        }
+	        .legal-name-marquee-track {
+	          display: flex;
+	          width: max-content;
           animation: legalNameMarquee 10s linear infinite;
         }
         .legal-name-marquee-text {
@@ -1185,5 +1338,7 @@ const OtherMemberships = ({ onNavigate }) => {
     </div>
   );
 };
+
+export const OtherMembershipsContent = (props) => <OtherMemberships {...props} variant="home" />;
 
 export default OtherMemberships;

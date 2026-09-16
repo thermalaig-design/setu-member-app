@@ -111,7 +111,7 @@ export const DEFAULT_HOME_LAYOUT = ['gallery', 'quickActions', 'sponsors'];
 export const AVAILABLE_HOME_SECTIONS = ['trustList', 'marquee', 'gallery', 'quickActions', 'sponsors'];
 export const DEFAULT_HOME_LAYOUT_MODES = { gallery: 'box', sponsors: 'box' };
 export const AVAILABLE_HOME_LAYOUT_MODES = ['box', 'content'];
-export const HOME_LAYOUT_MODE_KEYS = ['gallery', 'sponsors'];
+export const HOME_LAYOUT_MODE_KEYS = ['gallery', 'sponsors', 'add-community', 'user-panel'];
 
 // feature_flags.name in the DB is not standardized across trusts — some rows use the
 // "feature_" prefix (feature_sponsors, feature_noticeboard), others use a plain display
@@ -151,6 +151,26 @@ export const HOME_LAYOUT_MODE_KEY_ALIASES = {
   feature_referral: 'reference',
   referral: 'reference',
   references: 'reference',
+  feature_add_community: 'add-community',
+  add_community: 'add-community',
+  addcommunity: 'add-community',
+  'add-community': 'add-community',
+  'launch app': 'add-community',
+  'launch your app': 'add-community',
+  feature_bottom_nav: 'user-panel',
+  bottom_nav: 'user-panel',
+  bottomnav: 'user-panel',
+  'bottom-nav': 'user-panel',
+  'user-panel': 'user-panel',
+  user_panel: 'user-panel',
+  userpanel: 'user-panel',
+  feature_othermembership: 'other-memberships',
+  other_membership: 'other-memberships',
+  othermembership: 'other-memberships',
+  'other-membership': 'other-memberships',
+  'other memberships': 'other-memberships',
+  'other-memberships': 'other-memberships',
+  'app gallery': 'other-memberships',
 };
 
 // Folds alias keys (e.g. "feature_sponsors") onto their canonical key ("sponsors") in a raw

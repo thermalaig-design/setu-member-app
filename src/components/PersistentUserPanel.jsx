@@ -4,11 +4,28 @@ import { useNavigate } from 'react-router-dom';
 import { useAppTheme } from '../context/ThemeContext';
 import { getNavbarThemeStyles } from '../utils/themeUtils';
 import { getAppHomePath } from '../utils/tenantNavigation';
-import { isFeatureVisible } from '../services/featureFlags';
-import { useFeatureFlags } from '../hooks/useFeatureFlags';
 import BottomNav from './BottomNav';
 
 const USER_PANEL_URL = 'https://user-test.teiltd.in/auth/login';
+
+export const UserPanelContent = () => (
+  <section
+    className="overflow-hidden rounded-3xl border"
+    style={{
+      background: 'var(--advertisement-card-bg)',
+      borderColor: 'var(--advertisement-card-border)',
+      boxShadow: '0 10px 28px color-mix(in srgb, var(--advertisement-card-shadow) 24%, transparent)'
+    }}
+  >
+    <div className="h-[3px]" style={{ background: 'var(--app-button-bg)' }} />
+    <iframe
+      title="App Gallery"
+      src={USER_PANEL_URL}
+      className="w-full border-0"
+      style={{ height: 'min(620px, calc(100vh - 210px))', minHeight: 460 }}
+    />
+  </section>
+);
 
 // Rendered once, outside <Routes>, so the /user-panel iframe survives
 // navigating to Home and back via the bottom nav's "+" button. A <Route>
@@ -20,11 +37,11 @@ const PersistentUserPanel = ({ isActive, onNavigate }) => {
   const theme = useAppTheme();
   const navigate = useNavigate();
   const navbarTheme = getNavbarThemeStyles(theme);
-  const { flags, loading } = useFeatureFlags();
-
   const isLoggedIn = localStorage.getItem('isLoggedIn') === 'true';
-  const featureEnabled = !loading && isFeatureVisible(flags, 'feature_bottom_nav');
-  const allowed = isActive && isLoggedIn && featureEnabled;
+  // Not gated behind feature_bottom_nav: that flag only controls the bottom
+  // nav's own "+" button. The top navbar's "+" links here too and must keep
+  // working when the bottom nav is toggled off.
+  const allowed = isActive && isLoggedIn;
 
   // Sticks once true so the iframe, once loaded, is never torn down again —
   // only ever hidden/shown. Guarded so it only fires the one render where

@@ -20,6 +20,9 @@ import { AppointmentsContent } from './Appointments';
 import { CategoriesProductsContent } from './CategoriesProducts';
 import { OrderHistoryContent } from './OrderHistory';
 import { ReferralContent } from './Referral';
+import { AddCommunityContent } from './AddCommunity';
+import { UserPanelContent } from './components/PersistentUserPanel';
+import { OtherMembershipsContent } from './OtherMemberships';
 import { useAppTheme } from './context/ThemeContext';
 import { registerSidebarState, useTrustDataVersion } from './hooks';
 import { supabase } from './services/supabaseClient';
@@ -77,6 +80,9 @@ const HOME_CONTENT_RENDERERS = {
   products: CategoriesProductsContent,
   'order-history': OrderHistoryContent,
   reference: ReferralContent,
+  'add-community': AddCommunityContent,
+  'user-panel': UserPanelContent,
+  'other-memberships': OtherMembershipsContent,
 };
 
 // Resolves the box/content mode for a section, checking each candidate key (canonical
@@ -100,6 +106,9 @@ const resolveHomeSectionMode = (theme, ...candidateKeys) => {
 const DEFAULT_TRUST_NAME = import.meta.env.VITE_DEFAULT_TRUST_NAME || 'Trust';
 const SPONSOR_CHUNK_SIZE = sponsorConfig.CAROUSEL_BATCH_SIZE;
 const LAST_SELECTED_TRUST_ID_KEY = 'last_selected_trust_id';
+const PENDING_CREATED_APP_URL_KEY = 'pending_created_app_install_url';
+const PENDING_CREATED_APP_TS_KEY = 'pending_created_app_install_url_ts';
+const PENDING_CREATED_APP_REDIRECT_MAX_AGE_MS = 2 * 60 * 1000;
 const POWERED_BY_URL = 'https://teiltd.in';
 const getInitialSponsorTrustId = () =>
   localStorage.getItem('selected_trust_id') || import.meta.env.VITE_DEFAULT_TRUST_ID || '';
@@ -383,6 +392,47 @@ const Home = ({ onNavigate, onLogout }) => {
   const trustChipRefs = useRef({});
   const trustSwitchAnimationTimerRef = useRef(null);
   const previousSelectedTrustIdRef = useRef('');
+
+  useEffect(() => {
+    let pendingUrl = '';
+    let pendingTs = 0;
+    try {
+      pendingUrl = sessionStorage.getItem(PENDING_CREATED_APP_URL_KEY)
+        || localStorage.getItem(PENDING_CREATED_APP_URL_KEY)
+        || '';
+      pendingTs = Number(
+        sessionStorage.getItem(PENDING_CREATED_APP_TS_KEY)
+        || localStorage.getItem(PENDING_CREATED_APP_TS_KEY)
+        || 0
+      );
+    } catch {
+      pendingUrl = '';
+      pendingTs = 0;
+    }
+
+    if (!pendingUrl) return;
+    if (pendingTs && Date.now() - pendingTs > PENDING_CREATED_APP_REDIRECT_MAX_AGE_MS) {
+      try {
+        sessionStorage.removeItem(PENDING_CREATED_APP_URL_KEY);
+        sessionStorage.removeItem(PENDING_CREATED_APP_TS_KEY);
+        localStorage.removeItem(PENDING_CREATED_APP_URL_KEY);
+        localStorage.removeItem(PENDING_CREATED_APP_TS_KEY);
+      } catch {
+        // ignore storage failures
+      }
+      return;
+    }
+
+    try {
+      const target = new URL(pendingUrl, window.location.origin);
+      if (target.origin !== window.location.origin || !target.pathname.startsWith('/app/')) return;
+      if (window.location.href !== target.href) {
+        window.location.replace(target.href);
+      }
+    } catch {
+      // ignore invalid pending URLs
+    }
+  }, []);
 
   // Welcome strip: initialize from localStorage instantly to avoid delay
   const [userProfile, setUserProfile] = useState(() => getCachedUserProfileSnapshot());
@@ -2236,6 +2286,9 @@ const Home = ({ onNavigate, onLogout }) => {
     if (value === 'directory' || value === 'healthcare-trustee-directory') return 'directory';
     if (value === 'product' || value === 'products' || value === 'categories-products' || value === 'categoriesproducts') return 'products';
     if (value === 'order-history' || value === 'order_history' || value === 'order history' || value === 'orderhistory') return 'order-history';
+    if (value === 'add-community' || value === 'add_community' || value === 'addcommunity' || value === 'launch-app' || value === 'launch app' || value === 'launch your app') return 'add-community';
+    if (value === 'app-gallery' || value === 'app_gallery' || value === 'app gallery' || value === 'other-memberships' || value === 'other_memberships' || value === 'othermemberships') return 'other-memberships';
+    if (value === 'user-panel' || value === 'user_panel' || value === 'userpanel' || value === 'bottom-nav' || value === 'bottom_nav' || value === 'bottomnav') return 'user-panel';
     return value || '';
   };
 
@@ -2245,6 +2298,8 @@ const Home = ({ onNavigate, onLogout }) => {
     feature_products: 'products',
     feature_order_history: 'order-history',
     feature_othermembership: 'other-memberships',
+    feature_add_community: 'add-community',
+    feature_bottom_nav: 'user-panel',
   };
 
   const resolveQuickRoute = (route, featureKey = '') => {
@@ -2270,6 +2325,8 @@ const Home = ({ onNavigate, onLogout }) => {
       reports: '/icons/quick-access/reports.svg',
       products: '/icons/quick-access/products.svg',
       'order-history': '/icons/quick-access/order-history.svg',
+      'add-community': '/icons/quick-access/directory.svg',
+      'user-panel': '/icons/quick-access/directory.svg',
     };
     return iconByRoute[normalized] || '/icons/quick-access/directory.svg';
   };
@@ -2387,7 +2444,8 @@ const Home = ({ onNavigate, onLogout }) => {
         'developer-info',
         'developerinfo',
         'trustlist',
-        'trust-list'
+        'trust-list',
+        'user-panel'
       ]);
       return !excludedQuickRoutes.has(normalizedRoute);
     })
@@ -2743,8 +2801,20 @@ const Home = ({ onNavigate, onLogout }) => {
             })()}
           </div>
 
-          {/* Bell / placeholder */}
-          <div className="flex-shrink-0">
+          {/* Quick action (+) / bell */}
+          <div className="flex items-center gap-2 flex-shrink-0">
+            <button
+              type="button"
+              onClick={() => onNavigate('user-panel')}
+              aria-label="User Panel"
+              className="w-10 h-10 rounded-2xl flex items-center justify-center transition-all active:scale-95"
+              style={{
+                background: 'color-mix(in srgb, var(--navbar-bg) 72%, var(--surface-color))',
+                boxShadow: 'none',
+              }}
+            >
+              <Plus className="h-[22px] w-[22px]" style={{ color: navbarTextColor }} />
+            </button>
             {ff('feature_notifications') ? (
               <div className="relative">
                 <button
@@ -3024,16 +3094,6 @@ const Home = ({ onNavigate, onLogout }) => {
                 key="marquee"
               >
                 <div className="flex items-stretch">
-                  <div className="flex-shrink-0 px-3 flex items-center gap-2" style={{ background: `color-mix(in srgb, ${theme.secondary} 28%, transparent)` }}>
-                    <span className="relative flex h-2 w-2">
-                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-70" style={{ background: 'var(--marquee-text)' }} />
-                      <span className="relative inline-flex rounded-full h-2 w-2" style={{ background: 'var(--marquee-text)' }} />
-                    </span>
-                    <span className="text-[11px] font-bold uppercase tracking-widest whitespace-nowrap" style={{ color: 'var(--marquee-text)' }}>
-                      {toTitleCase(flagsData?.feature_marquee?.display_name || 'Updates')}
-                    </span>
-                  </div>
-                  <div className="w-px my-1.5" style={{ background: 'color-mix(in srgb, var(--marquee-text) 30%, transparent)' }} />
                   <div className="overflow-hidden flex-1 py-2">
                     <div className="marquee-track flex">
                       {[...marqueeUpdates, ...marqueeUpdates].map((msg, i) => (
@@ -3167,7 +3227,7 @@ const Home = ({ onNavigate, onLogout }) => {
                   const groups = [];
                   let tileBatch = [];
                   enabledQuickActions.forEach((action) => {
-                    const mode = resolveHomeSectionMode(theme, action.route, action.id);
+                    const mode = resolveHomeSectionMode(theme, action.route, action.id, action.displayName);
                     const ContentRenderer = mode === 'content' ? HOME_CONTENT_RENDERERS[action.route] : null;
                     if (ContentRenderer) {
                       if (tileBatch.length > 0) {

@@ -1531,13 +1531,14 @@ const HospitalTrusteeApp = () => {
           path="/user-panel"
           element={
             <ProtectedRoute>
-              <FeatureGuard featureKey="feature_bottom_nav">
-                {/* Actual content is PersistentUserPanel below, kept mounted
-                    outside <Routes> so its iframe survives navigating away
-                    and back. This route only exists so ProtectedRoute /
-                    FeatureGuard can gate direct/refresh navigation here. */}
-                {null}
-              </FeatureGuard>
+              {/* Actual content is PersistentUserPanel below, kept mounted
+                  outside <Routes> so its iframe survives navigating away and
+                  back. This route only exists so ProtectedRoute can gate
+                  direct/refresh navigation here. Not gated behind
+                  feature_bottom_nav: that flag only controls the bottom
+                  nav's own "+" button — the top navbar's "+" links here too
+                  and must keep working when the bottom nav is toggled off. */}
+              {null}
             </ProtectedRoute>
           }
         />

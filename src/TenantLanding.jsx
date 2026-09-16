@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { useNavigate, useParams, Navigate } from 'react-router-dom';
+import { useLocation, useNavigate, useParams, Navigate } from 'react-router-dom';
 import { useTenant } from './context/TenantContext';
 import { isReservedSlug } from './constants/reservedRoutes';
 import { fetchMemberTrustMemberships, resolveTenantAppAccess, syncTenantMembershipName } from './services/trustService';
@@ -11,6 +11,8 @@ import Home from './Home';
 import TenantProfileModal from './components/TenantProfileModal';
 
 const LAST_SELECTED_TRUST_ID_KEY = 'last_selected_trust_id';
+const PENDING_CREATED_APP_URL_KEY = 'pending_created_app_install_url';
+const PENDING_CREATED_APP_TS_KEY = 'pending_created_app_install_url_ts';
 const normalizeText = (value) => String(value || '').trim();
 
 // Module-scoped (not component state): survives TenantLanding unmount/remount
@@ -229,9 +231,11 @@ const getTenantPalette = (backgroundColor) => {
 function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
   const { appSlug } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
   const { tenantTrust, tenantLoading, tenantError, resolveTenantFromSlug, installedSlug } = useTenant();
 
   const normalizedAppSlug = normalizeText(appSlug).toLowerCase();
+  const forceInstallLanding = new URLSearchParams(location.search || '').get('install') === '1';
   // TenantProvider wraps the whole app and outlives TenantLanding, so a
   // matching tenantTrust here means this slug was already resolved earlier
   // this page session (e.g. we're remounting because the user opened
@@ -327,12 +331,32 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
   // renders Home immediately instead of flashing the membership-check
   // spinner again.
   const [showTenantHome, setShowTenantHome] = useState(() => {
+    if (forceInstallLanding) return false;
     if (!alreadyResolvedThisSlug || !isStandaloneDisplay()) return false;
     const cacheKey = getStandaloneVerificationKey(tenantTrust?.id);
     return Boolean(cacheKey) && verifiedStandaloneEntries.has(cacheKey);
   });
 
   const reserved = isReservedSlug(appSlug);
+
+  useEffect(() => {
+    if (!forceInstallLanding) return;
+    try {
+      sessionStorage.removeItem(PENDING_CREATED_APP_URL_KEY);
+      sessionStorage.removeItem(PENDING_CREATED_APP_TS_KEY);
+      localStorage.removeItem(PENDING_CREATED_APP_URL_KEY);
+      localStorage.removeItem(PENDING_CREATED_APP_TS_KEY);
+    } catch {
+      // ignore storage failures
+    }
+    setShowTenantHome(false);
+    setTenantAccessState(null);
+    setTenantAccessPayload(null);
+    setIsInstalled(false);
+    setInstallOutcome('');
+    setInstallPhase('idle');
+    setAutoEntering(false);
+  }, [forceInstallLanding, normalizedAppSlug]);
 
   useEffect(() => {
     if (reserved) return;
@@ -378,6 +402,7 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
   // risk this effect must never introduce.
   useEffect(() => {
     if (!normalizedAppSlug) return;
+    if (forceInstallLanding) return;
 
     // Running standalone already means THIS exact tenant PWA is what
     // launched this window — no ambiguity, no API call needed.
@@ -424,7 +449,7 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
       });
 
     return () => { cancelled = true; };
-  }, [normalizedAppSlug]);
+  }, [normalizedAppSlug, forceInstallLanding]);
 
   // Keep a ref mirror of isInstalled so the safety-timeout callback below
   // (started from handleInstallClick, possibly still pending several
@@ -815,6 +840,7 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
   // lands you inside another Trust.
   useEffect(() => {
     if (!resolvedOnce || !tenantTrust) return;
+    if (forceInstallLanding) return;
     if (!isStandaloneDisplay()) return;
     // Already showing Home this render (e.g. synchronous init from the
     // same-session verification cache) — nothing left to do.
@@ -826,7 +852,7 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
     }
     enterTenantTrust();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [resolvedOnce, tenantTrust, showTenantHome]);
+  }, [resolvedOnce, tenantTrust, showTenantHome, forceInstallLanding]);
 
   if (reserved) {
     return <Navigate to={getAppHomePath()} replace />;
