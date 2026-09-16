@@ -256,8 +256,15 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
   const postInstallGraceTimeoutRef = useRef(null);
   const finalizeCheckTimeoutRef = useRef(null);
   const finalizeMaxTimeoutRef = useRef(null);
-  // Guards handleOpenApp below against firing more than once per tap.
+  // Guards handleOpenApp below against firing more than once per tap —
+  // but only for a short debounce window (openAppResetTimeoutRef clears
+  // it again), NOT permanently. The hand-off to an installed PWA is
+  // best-effort and often just doesn't happen at all (Chrome stays on
+  // this browser page instead) — if this flag were never reset, that
+  // single failed attempt would silently disable the button for the rest
+  // of the page's life, forcing a full refresh to use it again.
   const openAppInFlightRef = useRef(false);
+  const openAppResetTimeoutRef = useRef(null);
   const [resolvedOnce, setResolvedOnce] = useState(() => alreadyResolvedThisSlug);
   const [membershipMessage, setMembershipMessage] = useState('');
   // Set by enterTenantTrust when resolveTenantAppAccess reports an
@@ -498,10 +505,17 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
   // fires setState after this component is gone. (The finalizing timers
   // started from handleAppInstalled above are cleaned up by that same
   // effect's own cleanup, since they're created and torn down together.)
+  // Also clears handleOpenApp's debounce-reset timeout for the same
+  // reason — it only ever touches a plain ref, but no pending timer
+  // should outlive the component regardless.
   useEffect(() => () => {
     if (acceptedTimeoutRef.current) {
       clearTimeout(acceptedTimeoutRef.current);
       acceptedTimeoutRef.current = null;
+    }
+    if (openAppResetTimeoutRef.current) {
+      clearTimeout(openAppResetTimeoutRef.current);
+      openAppResetTimeoutRef.current = null;
     }
   }, []);
 
@@ -772,8 +786,8 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
 
   // Full-screen transition covering the ENTIRE install flow from the
   // moment the user taps Install (replacing the tenant card entirely — no
-  // card, no "Powered by Setu", no install instructions) through to
-  // verified-installed:
+  // card, no "Powered by Setu", no install instructions, no Open App, no
+  // success checkmark) through to verified-installed:
   // - 'prompting': deferredPrompt.prompt() is awaiting the user's choice
   //   in the native browser dialog. This must render too, not just
   //   'launching' — otherwise the Install App card is still what's
@@ -783,26 +797,61 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
   //   event.
   // - 'finalizing': appinstalled fired, but Android's WebAPK package can
   //   still be mid-install for a few more seconds — waiting on
-  //   handleAppInstalled's verification (or its fallback/max-wait) before
-  //   trusting the app is actually launchable.
+  //   handleAppInstalled's verification (or its fallback/max-wait) below
+  //   before trusting the app is actually launchable. Gets its own,
+  //   more active-looking UI (indeterminate progress bar) since this is
+  //   the phase most likely to run long enough on a slow Android device
+  //   that a plain spinner reads as "stuck"/"failed" to the user.
   // See handleInstallClick/handleAppInstalled above for the state
   // transitions and the safety-timeout fallbacks. ('idle' — e.g. the user
   // dismissed the dialog — correctly falls through to the normal card
   // below; only a genuine dismissal should ever bring it back.)
-  if (installPhase === 'prompting' || installPhase === 'launching' || installPhase === 'finalizing') {
-    const phaseCopy = installPhase === 'prompting'
-      ? { heading: 'Preparing installation…', subtext: 'Please respond to the browser prompt.' }
-      : installPhase === 'finalizing'
-        ? { heading: 'Finalizing your app…', subtext: 'This can take a few extra seconds on some devices.' }
-        : { heading: 'Launching your app…', subtext: 'Please wait while we finish setting things up.' };
+  if (installPhase === 'finalizing') {
+    return (
+      <div style={{ ...styles.page, background: backgroundColor }}>
+        <div style={{ ...styles.spinner, borderTopColor: accent.from }} />
+        <h2 style={{ ...styles.loadingText, color: palette.textPrimary, fontSize: '18px', fontWeight: 800, marginTop: '18px' }}>
+          Installing on your device…
+        </h2>
+        <p style={{ ...styles.loadingText, color: palette.textSecondary, marginTop: '6px' }}>
+          Almost ready — this can take a few extra seconds.
+        </p>
+        <div style={{ width: '220px', maxWidth: '72vw', height: '6px', borderRadius: '999px', overflow: 'hidden', marginTop: '22px', background: palette.cardBorder }}>
+          {/* Indeterminate only — Chrome exposes no real WebAPK install
+              byte progress, so this must never show a fake percentage. */}
+          <div
+            className="tenant-install-progress-bar"
+            style={{ width: '40%', height: '100%', borderRadius: '999px', background: accentGradient }}
+          />
+        </div>
+        <p style={{ ...styles.loadingText, color: palette.textMuted, marginTop: '12px', fontSize: '12px' }}>
+          Please keep this screen open.
+        </p>
+        <style>{`
+          @keyframes spin { to { transform: rotate(360deg); } }
+          @keyframes tenantInstallProgress {
+            0% { transform: translateX(-140%); }
+            50% { transform: translateX(120%); }
+            100% { transform: translateX(340%); }
+          }
+          .tenant-install-progress-bar {
+            animation: tenantInstallProgress 1.4s ease-in-out infinite;
+          }
+        `}</style>
+      </div>
+    );
+  }
+
+  if (installPhase === 'prompting' || installPhase === 'launching') {
+    const isPrompting = installPhase === 'prompting';
     return (
       <div style={{ ...styles.page, background: backgroundColor }}>
         <div style={{ ...styles.spinner, borderTopColor: accent.from }} />
         <p style={{ ...styles.loadingText, color: palette.textPrimary, fontSize: '15px', fontWeight: 700, marginTop: '18px' }}>
-          {phaseCopy.heading}
+          {isPrompting ? 'Preparing installation…' : 'Launching your app…'}
         </p>
         <p style={{ ...styles.loadingText, color: palette.textSecondary, marginTop: '4px' }}>
-          {phaseCopy.subtext}
+          {isPrompting ? 'Complete the install prompt to continue.' : 'Please wait while we finish setting things up.'}
         </p>
         <style>{'@keyframes spin { to { transform: rotate(360deg); } }'}</style>
       </div>
@@ -857,6 +906,10 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
     }
   };
 
+  // How long a tap "locks" handleOpenApp against a duplicate tap before
+  // automatically unlocking again (see the ref's own comment above).
+  const OPEN_APP_RETRY_RESET_MS = 1500;
+
   // The primary launch action, and the only one that is user-initiated
   // (this click is what makes it a real user gesture) — a top-level
   // navigation (not client-side routing) to the exact tenant URL, so
@@ -867,20 +920,50 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
   // at their Home Screen icon as the fallback.
   //
   // Guarded against firing more than once per tap (openAppInFlightRef,
-  // declared with the component's other refs above): a second
+  // declared with the component's other refs above), but only for a
+  // short debounce window (OPEN_APP_RETRY_RESET_MS): a second
   // window.location.assign() call while the first is still in flight
   // (double-tap, or the click landing on both the button and the card's
-  // own onClick below) aborts that first navigation and restarts it —
-  // which is exactly the kind of "sometimes it just doesn't do anything"
-  // flakiness this button was reported to have.
+  // own onClick below) aborts that first navigation and restarts it. That
+  // debounce window MUST expire on its own though — the hand-off to an
+  // installed PWA is best-effort and the common case is Chrome just
+  // staying on this page, not unloading it, so a permanent lock here
+  // would silently disable the button after its first (failed) attempt
+  // until the user refreshes.
+  //
+  // The installPhase/isInstalled check up front is a defensive repeat of
+  // the button's own render gate below (installPhase === 'installed' &&
+  // isInstalled) — this function must never actually launch anything
+  // while Android could still be finishing installation, even if it were
+  // ever invoked some other way.
   const handleOpenApp = () => {
+    if (installPhase !== 'installed' || !isInstalled) return;
+
     if (openAppInFlightRef.current) return;
+
     openAppInFlightRef.current = true;
+
     // Exactly one trailing slash, always — matches the installed PWA's
     // own scope/start_url so Chrome/Android has the best chance of
     // recognizing this as "the same app" instead of an ordinary page.
     const slugPath = String(normalizedAppSlug || '').replace(/^\/+|\/+$/g, '');
+
+    if (!slugPath) {
+      openAppInFlightRef.current = false;
+      return;
+    }
+
     const tenantUrl = `${window.location.origin}/app/${encodeURIComponent(slugPath)}/`;
+
+    if (openAppResetTimeoutRef.current) {
+      window.clearTimeout(openAppResetTimeoutRef.current);
+    }
+
+    openAppResetTimeoutRef.current = window.setTimeout(() => {
+      openAppInFlightRef.current = false;
+      openAppResetTimeoutRef.current = null;
+    }, OPEN_APP_RETRY_RESET_MS);
+
     window.location.assign(tenantUrl);
   };
 
@@ -936,7 +1019,7 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
           )}
           <h1 style={{ ...styles.trustName, color: palette.textPrimary }}>{tenantTrust.name}</h1>
 
-          {isInstalled ? (
+          {installPhase === 'installed' && isInstalled ? (
             <>
               <div style={{ ...styles.installedBadge, background: accentGradient, color: accent.text }} aria-hidden="true">✓</div>
               <p style={{ ...styles.installedHeading, color: palette.textPrimary }}>
