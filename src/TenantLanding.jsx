@@ -265,6 +265,27 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
   // of the page's life, forcing a full refresh to use it again.
   const openAppInFlightRef = useRef(false);
   const openAppResetTimeoutRef = useRef(null);
+  // One-shot, in-memory only (never persisted — a plain ref resets on every
+  // remount/page load on its own). Set true ONLY when the user accepts the
+  // native install prompt during THIS session (see handleInstallClick), and
+  // read/cleared by the auto-entry effect declared after enterTenantTrust
+  // below. This is what scopes "automatically continue into the tenant app"
+  // to the fresh-install journey specifically — the separate "already
+  // installed before this session" detection effect above never touches
+  // this ref, so it keeps showing the existing Installed/Open App card
+  // exactly as before, with no auto-navigation and no loop risk.
+  const autoEnterAfterInstallRef = useRef(false);
+  // True from the moment a fresh (this-session) install is verified
+  // through to enterTenantTrust()'s async membership check settling — set
+  // by markInstalled() itself (in the same batch as installPhase, so there
+  // is no render in between where it could be stale) and read by the
+  // finalizing render guard below, so the Installed/Open App card never
+  // renders for that gap. Reset to false only on a failed resolution (see
+  // the auto-entry effect below); on success, enterTenantTrust's own state
+  // changes (showTenantHome / tenantAccessState) take over rendering
+  // before this is ever consulted again, so no explicit "done" reset is
+  // needed there.
+  const [autoEntering, setAutoEntering] = useState(false);
   const [resolvedOnce, setResolvedOnce] = useState(() => alreadyResolvedThisSlug);
   const [membershipMessage, setMembershipMessage] = useState('');
   // Set by enterTenantTrust when resolveTenantAppAccess reports an
@@ -318,6 +339,18 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
   // beforeinstallprompt fired/didn't fire — that event's absence has many
   // unrelated causes (already prompted too recently, browser policy,
   // ineligible criteria, etc.) and is not an install-state signal.
+  //
+  // ALREADY-INSTALLED PAGE BEHAVIOR — deliberately different from the
+  // fresh-install journey below: this effect sets isInstalled/
+  // installOutcome/installPhase directly (skipping Install App straight to
+  // the existing Installed/Open App page, for the user to tap Open App
+  // themselves) but NEVER sets autoEnterAfterInstallRef.current = true and
+  // NEVER calls enterTenantTrust() itself. Auto-entry is reserved
+  // exclusively for an install accepted THIS session (see
+  // handleInstallClick/the auto-entry effect after enterTenantTrust below)
+  // — wiring it up here too would auto-navigate on every ordinary browser
+  // visit to an already-installed tenant's URL, which is a navigation-loop
+  // risk this effect must never introduce.
   useEffect(() => {
     if (!normalizedAppSlug) return;
 
@@ -348,7 +381,8 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
         if (cancelled) return;
         // Per-tenant match against THIS slug's own manifest — a different
         // tenant PWA installed on the same device/browser must never flip
-        // this tenant's card to the installed/Open App state.
+        // this tenant's card to the installed/Open App state; that tenant
+        // must still show Install App unless it is itself installed.
         const matchesThisTenant = (Array.isArray(relatedApps) ? relatedApps : []).some((app) => {
           const url = String(app?.url || '').toLowerCase();
           const id = String(app?.id || '').toLowerCase();
@@ -439,6 +473,17 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
       clearAllFinalizeTimers();
       setIsInstalled(true);
       setInstallOutcome('installed');
+      // For a fresh install accepted this session, flip autoEntering in
+      // the SAME batch as installPhase below — React 18 batches these
+      // into one commit, so the finalizing/autoEntering render guard never
+      // sees installPhase === 'installed' with autoEntering still false.
+      // Doing this from the separate auto-entry effect instead (which only
+      // runs after this commit has already painted) left exactly that one
+      // render — and the Installed/Open App card flashing during it —
+      // uncovered.
+      if (autoEnterAfterInstallRef.current) {
+        setAutoEntering(true);
+      }
       setInstallPhase('installed');
     };
 
@@ -634,6 +679,48 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
     }
   }, [navigate, tenantTrust, normalizedAppSlug, grantTenantHome]);
 
+  // Fresh-install auto-continue: once a verified-installed state is
+  // reached FOR AN INSTALL ACCEPTED THIS SESSION (autoEnterAfterInstallRef
+  // — set only in handleInstallClick's accepted branch above, never by the
+  // separate "already installed before this session" detection effect),
+  // immediately run the exact same tenant-access flow the installed PWA
+  // itself uses instead of leaving the user on an Installed/Open App card
+  // they'd have to tap through. Reusing enterTenantTrust() as-is means
+  // login/public/private/pending/needs-profile behavior is 100% unchanged
+  // — this effect only decides WHEN to call it, never what it does.
+  // (autoEntering itself is already set to true by markInstalled above, in
+  // the same batch as installPhase — not here — so there is no render in
+  // between where the finalizing guard could miss it.)
+  //
+  // Loop protection: the ref is reset to false BEFORE calling
+  // enterTenantTrust(), so this can only ever fire once per accepted
+  // install — later re-renders (including the ones enterTenantTrust's own
+  // state updates cause) see the ref already false and no-op immediately.
+  // The ref is an in-memory-only useRef, so it can't survive a page
+  // refresh either; a refreshed page starts at autoEnterAfterInstallRef =
+  // false, same as any other fresh mount.
+  useEffect(() => {
+    if (!autoEnterAfterInstallRef.current) return;
+    if (installPhase !== 'installed' || !isInstalled) return;
+
+    autoEnterAfterInstallRef.current = false;
+    enterTenantTrust()
+      .then((success) => {
+        // A successful outcome moves rendering on via showTenantHome /
+        // tenantAccessState (checked earlier in the render than the
+        // finalizing/autoEntering branch below), so no "done" reset is
+        // needed there. A failure (e.g. a transient network error) must
+        // not strand the user on the finalizing loader forever though —
+        // fall back to the existing Installed/Open App card, which
+        // already surfaces enterTenantTrust's own membershipMessage and
+        // still lets them continue manually via Open App.
+        if (!success) setAutoEntering(false);
+      })
+      .catch(() => {
+        setAutoEntering(false);
+      });
+  }, [installPhase, isInstalled, enterTenantTrust]);
+
   // Called when TenantProfileModal's form is submitted: saves the profile
   // (existing saveProfile — writes Members.Name/Email directly), syncs the
   // denormalized reg_members.Name so a later resolve doesn't keep asking for
@@ -802,11 +889,17 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
   //   more active-looking UI (indeterminate progress bar) since this is
   //   the phase most likely to run long enough on a slow Android device
   //   that a plain spinner reads as "stuck"/"failed" to the user.
+  // - autoEntering (fresh-install path only, see the effect declared after
+  //   enterTenantTrust above): installPhase has already reached 'installed'
+  //   but enterTenantTrust()'s own async membership check is still in
+  //   flight — this keeps the SAME finalizing UI up instead of letting the
+  //   Installed/Open App card render for that gap, so a fresh install
+  //   never shows that card at all before continuing into the tenant app.
   // See handleInstallClick/handleAppInstalled above for the state
   // transitions and the safety-timeout fallbacks. ('idle' — e.g. the user
   // dismissed the dialog — correctly falls through to the normal card
   // below; only a genuine dismissal should ever bring it back.)
-  if (installPhase === 'finalizing') {
+  if (installPhase === 'finalizing' || autoEntering) {
     return (
       <div style={{ ...styles.page, background: backgroundColor }}>
         <div style={{ ...styles.spinner, borderTopColor: accent.from }} />
@@ -874,6 +967,11 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
       setInstallOutcome(outcome);
       setDeferredPrompt(null);
       if (outcome === 'accepted') {
+        // This is what scopes the auto-continue-into-app-flow behavior
+        // (see the effect declared after enterTenantTrust below) to THIS
+        // fresh install specifically — never a tenant detected as already
+        // installed from an earlier session.
+        autoEnterAfterInstallRef.current = true;
         setInstallPhase('launching');
         // Safety net for browser/version inconsistencies where appinstalled
         // never fires after 'accepted' — don't leave the user stuck on the
@@ -884,11 +982,16 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
         acceptedTimeoutRef.current = setTimeout(() => {
           acceptedTimeoutRef.current = null;
           if (!isInstalledRef.current) {
+            // Gave up waiting on this attempt — it's no longer "in
+            // progress", so a later, unrelated install-detection isn't
+            // mistaken for this one.
+            autoEnterAfterInstallRef.current = false;
             setInstallOutcome('');
             setInstallPhase('idle');
           }
         }, 20000);
       } else {
+        autoEnterAfterInstallRef.current = false;
         setInstallPhase('idle');
       }
       return;
@@ -975,7 +1078,7 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
       handleOpenApp();
       return;
     }
-    if (installPhase === 'prompting' || installPhase === 'launching' || installPhase === 'finalizing') return;
+    if (installPhase === 'prompting' || installPhase === 'launching' || installPhase === 'finalizing' || autoEntering) return;
     handleInstallClick();
   };
 
@@ -1063,7 +1166,7 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
             </button>
           )}
 
-          {isInstalled && (
+          {installPhase === 'installed' && isInstalled && (
             <p style={{ ...styles.instructions, color: palette.textMuted }}>
               If the app does not open automatically, tap the app icon on your Home Screen.
             </p>
