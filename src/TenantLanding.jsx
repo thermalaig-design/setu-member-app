@@ -89,6 +89,31 @@ const isStandaloneDisplay = () => {
   return Boolean(mql?.matches) || window.navigator?.standalone === true;
 };
 
+const buildTenantUrl = (slug) => {
+  const slugPath = String(slug || '').replace(/^\/+|\/+$/g, '');
+  if (!slugPath) return '';
+  return `${window.location.origin}/app/${encodeURIComponent(slugPath)}/`;
+};
+
+// An ordinary https navigation to an in-scope URL is handled by Chrome
+// itself — it stays in the tab, which is why "Open App" so often just
+// reloads the page instead of switching to the installed app. An
+// `intent://` URL is resolved by ANDROID instead of by Chrome, so a WebAPK
+// registered for these URLs can actually be launched by it. This is the
+// only mechanism a web page has for that; it is still not a guarantee (the
+// OS decides), which is what S.browser_fallback_url is for — if nothing
+// handles the intent, Chrome lands on the normal https URL exactly as
+// before instead of showing an error.
+const buildAndroidIntentUrl = (httpsUrl) => {
+  try {
+    const parsed = new URL(httpsUrl);
+    const fallback = encodeURIComponent(httpsUrl);
+    return `intent://${parsed.host}${parsed.pathname}#Intent;scheme=https;S.browser_fallback_url=${fallback};end`;
+  } catch {
+    return '';
+  }
+};
+
 // Local public assets (e.g. '/assets/setu-logo.png') are only ever deployed
 // under Vite's configured base ('/' in dev, '/_setu-app/' in production) —
 // a bare '/' path resolves against the host's domain root instead, which
@@ -720,9 +745,13 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
     // this tab is completely unaffected and the enterTenantTrust() call
     // below still continues the tenant app flow here exactly as before.
     try {
-      const slugPath = String(normalizedAppSlug || '').replace(/^\/+|\/+$/g, '');
-      if (slugPath) {
-        window.open(`${window.location.origin}/app/${encodeURIComponent(slugPath)}/`, '_blank', 'noopener');
+      const tenantUrl = buildTenantUrl(normalizedAppSlug);
+      // On Android an intent:// URL is what the OS (not Chrome) resolves,
+      // so the freshly installed WebAPK can actually pick it up; elsewhere
+      // there is no such mechanism, so the plain URL is all there is.
+      const launchUrl = (isAndroid() && buildAndroidIntentUrl(tenantUrl)) || tenantUrl;
+      if (launchUrl) {
+        window.open(launchUrl, '_blank', 'noopener');
       }
     } catch {
       // ignore — enterTenantTrust() below still continues in this tab
@@ -1073,14 +1102,12 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
     // Exactly one trailing slash, always — matches the installed PWA's
     // own scope/start_url so Chrome/Android has the best chance of
     // recognizing this as "the same app" instead of an ordinary page.
-    const slugPath = String(normalizedAppSlug || '').replace(/^\/+|\/+$/g, '');
+    const tenantUrl = buildTenantUrl(normalizedAppSlug);
 
-    if (!slugPath) {
+    if (!tenantUrl) {
       openAppInFlightRef.current = false;
       return;
     }
-
-    const tenantUrl = `${window.location.origin}/app/${encodeURIComponent(slugPath)}/`;
 
     if (openAppResetTimeoutRef.current) {
       window.clearTimeout(openAppResetTimeoutRef.current);
@@ -1091,7 +1118,14 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
       openAppResetTimeoutRef.current = null;
     }, OPEN_APP_RETRY_RESET_MS);
 
-    window.location.assign(tenantUrl);
+    // Android: hand the URL to the OS intent resolver rather than
+    // navigating this tab, so an installed WebAPK can actually take it
+    // (see buildAndroidIntentUrl). Its browser_fallback_url means a device
+    // without the app installed still lands on the normal URL, i.e. the
+    // exact behavior this button had before. Everywhere else (desktop,
+    // iOS) there is no such mechanism at all — plain navigation as before.
+    const androidIntentUrl = isAndroid() ? buildAndroidIntentUrl(tenantUrl) : '';
+    window.location.assign(androidIntentUrl || tenantUrl);
   };
 
   // Single click handler shared by the whole card (see cardBody below) so

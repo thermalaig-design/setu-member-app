@@ -2,6 +2,7 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useR
 import { fetchTrustByAppSlug } from '../services/trustService';
 import { applyTenantManifest } from '../utils/pwaManifest';
 import { isReservedSlug } from '../constants/reservedRoutes';
+import { rememberWindowTenantSlug } from '../utils/tenantNavigation';
 
 // These keys represent the identity of THIS installed PWA / customer link.
 // They are set once when a valid Trust slug is resolved and must never be
@@ -93,6 +94,11 @@ export const TenantProvider = ({ children }) => {
       setTenantTrust(trust);
       writeStored(INSTALLED_TRUST_ID_KEY, String(trust.id));
       writeStored(INSTALLED_SLUG_KEY, normalizedSlug);
+      // Per-window (sessionStorage) copy — the two keys above are shared by
+      // every tenant PWA on this origin, so they can't tell this window's
+      // tenant apart from one opened in another window/tab. getAppHomePath()
+      // reads this one, so in-app "Home" never jumps to another tenant.
+      rememberWindowTenantSlug(normalizedSlug);
       setInstalledTrustId(String(trust.id));
       setInstalledSlug(normalizedSlug);
 
@@ -116,7 +122,14 @@ export const TenantProvider = ({ children }) => {
   useEffect(() => {
     if (rehydratedRef.current) return;
     rehydratedRef.current = true;
-    if (getUrlSlug()) return;
+    const urlSlug = getUrlSlug();
+    if (urlSlug) {
+      // Claim this window for this tenant immediately, before the (async)
+      // resolve finishes — a standalone PWA always launches on its own
+      // /app/<slug>/ start_url, and in-app routes drop the slug soon after.
+      rememberWindowTenantSlug(urlSlug);
+      return;
+    }
     if (installedSlug && !tenantTrust) {
       resolveTenantFromSlug(installedSlug);
     }
