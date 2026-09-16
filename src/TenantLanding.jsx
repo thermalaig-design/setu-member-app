@@ -704,6 +704,30 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
     if (installPhase !== 'installed' || !isInstalled) return;
 
     autoEnterAfterInstallRef.current = false;
+
+    // Single best-effort attempt (never repeated — this effect only ever
+    // runs once per accepted install, same guard as above) to hand off to
+    // the just-installed standalone app, same idea as apps like AppSheet.
+    // Deliberately a NEW browsing context, not a same-tab
+    // window.location.assign(): a same-tab attempt that fails to hand off
+    // would reload THIS tab back to /app/<slug>/, discarding the in-memory
+    // autoEnterAfterInstallRef/fresh-install state and losing the "no
+    // success page" guarantee (the reloaded page would show the plain
+    // Installed/Open App card instead, via the separate already-installed
+    // detection effect). A new-context attempt can only ever help — if
+    // Android hands it off, the app opens in its own window; if it's
+    // blocked as a non-gesture popup or just opens another browser tab,
+    // this tab is completely unaffected and the enterTenantTrust() call
+    // below still continues the tenant app flow here exactly as before.
+    try {
+      const slugPath = String(normalizedAppSlug || '').replace(/^\/+|\/+$/g, '');
+      if (slugPath) {
+        window.open(`${window.location.origin}/app/${encodeURIComponent(slugPath)}/`, '_blank', 'noopener');
+      }
+    } catch {
+      // ignore — enterTenantTrust() below still continues in this tab
+    }
+
     enterTenantTrust()
       .then((success) => {
         // A successful outcome moves rendering on via showTenantHome /
@@ -719,7 +743,7 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
       .catch(() => {
         setAutoEntering(false);
       });
-  }, [installPhase, isInstalled, enterTenantTrust]);
+  }, [installPhase, isInstalled, enterTenantTrust, normalizedAppSlug]);
 
   // Called when TenantProfileModal's form is submitted: saves the profile
   // (existing saveProfile — writes Members.Name/Email directly), syncs the
