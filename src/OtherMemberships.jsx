@@ -1,11 +1,10 @@
 import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  ArrowLeft, Plus, X, Menu, Home as HomeIcon,
-  AlertCircle, Building2, Loader2, ChevronRight, BadgeCheck, ExternalLink
+  Plus, X, Menu, Home as HomeIcon,
+  AlertCircle, Building2, Loader2, ChevronRight, BadgeCheck
 } from 'lucide-react';
 import Sidebar from './features/sidebar/Sidebar';
-import BottomNav from './components/BottomNav';
 import TrustIdCard from './TrustIdCard';
 import { useAppTheme } from './context/ThemeContext';
 import { applyOpacity } from './utils/colorUtils';
@@ -557,7 +556,6 @@ const OtherMemberships = ({ onNavigate, variant = 'page' }) => {
   const [error, setError] = useState('');
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [trustCardModalData, setTrustCardModalData] = useState(null);
-  const [trustWebAppOverlay, setTrustWebAppOverlay] = useState(null);
   const [openingTrustId, setOpeningTrustId] = useState('');
 
   // Delete state
@@ -699,7 +697,6 @@ const OtherMemberships = ({ onNavigate, variant = 'page' }) => {
   const handleOpenTrustWebApp = async (link) => {
     const trustId = normalizeText(link?.trust_id || link?.Trust?.id);
     if (!trustId || openingTrustId) return;
-    const trustName = normalizeText(link?.Trust?.name) || 'Trust';
 
     setOpeningTrustId(trustId);
     try {
@@ -715,7 +712,7 @@ const OtherMemberships = ({ onNavigate, variant = 'page' }) => {
         throw new Error('This trust does not have a web app link yet.');
       }
 
-      setTrustWebAppOverlay({ url: webAppUrl, name: trustName });
+      window.open(webAppUrl, '_blank', 'noopener,noreferrer');
       setOpeningTrustId('');
     } catch (err) {
       console.error('Failed to open trust web app:', err);
@@ -1263,93 +1260,6 @@ const OtherMemberships = ({ onNavigate, variant = 'page' }) => {
             <div style={{ maxHeight: 'calc(92vh - 66px)', overflow: 'auto' }}>
               <TrustIdCard embedded cardData={trustCardModalData} onNavigate={onNavigate} />
             </div>
-          </div>
-        </div>
-      )}
-
-      {trustWebAppOverlay && (
-        <div
-          style={{
-            position: 'fixed',
-            inset: 0,
-            zIndex: 1300,
-            display: 'flex',
-            alignItems: 'stretch',
-            justifyContent: 'center',
-            background: 'var(--page-bg, var(--app-page-bg))',
-          }}
-        >
-          <div
-            style={{
-              width: '100%',
-              maxWidth: '430px',
-              minHeight: '100dvh',
-              display: 'flex',
-              flexDirection: 'column',
-              background: 'var(--page-bg, var(--app-page-bg))',
-            }}
-          >
-            <div
-              className="theme-navbar sticky top-0 z-20 flex-shrink-0"
-              style={{
-                background: navbarTheme?.backgroundStyle || 'var(--navbar-bg, var(--app-navbar-bg))',
-                backdropFilter: `blur(${navbarTheme?.blurPx || '12px'})`,
-                WebkitBackdropFilter: `blur(${navbarTheme?.blurPx || '12px'})`,
-                borderBottom: '1px solid var(--navbar-border)',
-              }}
-            >
-              <div className="h-[3px]" style={{ background: 'var(--navbar-accent)' }} />
-              <div className="px-4 pt-4 pb-4 flex items-center justify-between">
-                <button
-                  type="button"
-                  onClick={() => setTrustWebAppOverlay(null)}
-                  className="p-2 rounded-xl transition-colors"
-                  style={{ color: navbarTheme?.textColor, background: 'transparent' }}
-                  aria-label="Back"
-                >
-                  <ArrowLeft className="h-5 w-5" />
-                </button>
-                <h1
-                  className="text-base font-bold tracking-wide"
-                  style={{ color: navbarTheme?.textColor, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, textAlign: 'center', margin: '0 8px' }}
-                >
-                  {trustWebAppOverlay.name}
-                </h1>
-                <div className="flex items-center gap-1">
-                  <button
-                    type="button"
-                    onClick={() => window.open(trustWebAppOverlay.url, '_blank', 'noopener,noreferrer')}
-                    className="p-2 rounded-xl transition-colors"
-                    style={{ color: navbarTheme?.textColor, background: 'transparent' }}
-                    aria-label="Open in new tab"
-                  >
-                    <ExternalLink className="h-5 w-5" />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => { setTrustWebAppOverlay(null); navigate(getAppHomePath()); }}
-                    className="p-2 rounded-xl transition-colors"
-                    style={{ color: navbarTheme?.textColor, background: 'transparent' }}
-                    aria-label="Home"
-                  >
-                    <HomeIcon className="h-5 w-5" />
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            <iframe
-              title={trustWebAppOverlay.name}
-              src={trustWebAppOverlay.url}
-              className="flex-1 w-full border-0"
-              style={{
-                border: 'none',
-                outline: 'none',
-                display: 'block',
-              }}
-            />
-
-            <BottomNav onNavigate={onNavigate} />
           </div>
         </div>
       )}

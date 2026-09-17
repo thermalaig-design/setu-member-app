@@ -106,11 +106,14 @@ const buildTenantUrl = (slug) => {
 // OS decides), which is what S.browser_fallback_url is for — if nothing
 // handles the intent, Chrome lands on the normal https URL exactly as
 // before instead of showing an error.
-const buildAndroidIntentUrl = (httpsUrl) => {
+const buildAndroidIntentUrl = (httpsUrl, { includeFallback = true } = {}) => {
   try {
     const parsed = new URL(httpsUrl);
-    const fallback = encodeURIComponent(httpsUrl);
-    return `intent://${parsed.host}${parsed.pathname}#Intent;scheme=https;S.browser_fallback_url=${fallback};end`;
+    const intentHead = `intent://${parsed.host}${parsed.pathname}#Intent;scheme=https;`;
+    const fallbackPart = includeFallback
+      ? `S.browser_fallback_url=${encodeURIComponent(httpsUrl)};`
+      : '';
+    return `${intentHead}${fallbackPart}end`;
   } catch {
     return '';
   }
@@ -294,6 +297,11 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
   // of the page's life, forcing a full refresh to use it again.
   const openAppInFlightRef = useRef(false);
   const openAppResetTimeoutRef = useRef(null);
+  // ANDROID FRESH-INSTALL PATH ONLY: the short "did the intent hand-off
+  // actually leave this tab?" grace timer started right after
+  // window.location.href = intentUrl below. Cleared the moment the page
+  // is confirmed hidden/unloading (hand-off worked) or on unmount.
+  const androidHandoffFallbackTimeoutRef = useRef(null);
   // One-shot, in-memory only (never persisted — a plain ref resets on every
   // remount/page load on its own). Set true ONLY when the user accepts the
   // native install prompt during THIS session (see handleInstallClick), and
@@ -315,6 +323,15 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
   // before this is ever consulted again, so no explicit "done" reset is
   // needed there.
   const [autoEntering, setAutoEntering] = useState(false);
+  // ANDROID FRESH-INSTALL PATH ONLY: true only once the post-intent grace
+  // timer (see androidHandoffFallbackTimeoutRef) expires while this page is
+  // STILL VISIBLE — i.e. Android did not visibly switch away to the
+  // installed PWA. Never set on iOS/desktop, and never set while the
+  // hand-off attempt is still pending (the finalizing/autoEntering loader
+  // stays up for that whole window). Renders a minimal "Open App" screen —
+  // never enterTenantTrust()/tenant Home in Chrome, never the Install App
+  // card again.
+  const [freshInstallHandoffBlocked, setFreshInstallHandoffBlocked] = useState(false);
   const [resolvedOnce, setResolvedOnce] = useState(() => alreadyResolvedThisSlug);
   const [membershipMessage, setMembershipMessage] = useState('');
   // Set by enterTenantTrust when resolveTenantAppAccess reports an
@@ -356,6 +373,11 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
     setInstallOutcome('');
     setInstallPhase('idle');
     setAutoEntering(false);
+    setFreshInstallHandoffBlocked(false);
+    if (androidHandoffFallbackTimeoutRef.current) {
+      clearTimeout(androidHandoffFallbackTimeoutRef.current);
+      androidHandoffFallbackTimeoutRef.current = null;
+    }
   }, [forceInstallLanding, normalizedAppSlug]);
 
   useEffect(() => {
@@ -750,33 +772,117 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
   // refresh either; a refreshed page starts at autoEnterAfterInstallRef =
   // false, same as any other fresh mount.
   useEffect(() => {
-    if (!autoEnterAfterInstallRef.current) return;
-    if (installPhase !== 'installed' || !isInstalled) return;
+    if (!autoEnterAfterInstallRef.current) return undefined;
+    if (installPhase !== 'installed' || !isInstalled) return undefined;
 
     autoEnterAfterInstallRef.current = false;
 
-    // Single best-effort attempt (never repeated — this effect only ever
-    // runs once per accepted install, same guard as above) to hand off to
-    // the just-installed standalone app, same idea as apps like AppSheet.
-    // Deliberately a NEW browsing context, not a same-tab
-    // window.location.assign(): a same-tab attempt that fails to hand off
-    // would reload THIS tab back to /app/<slug>/, discarding the in-memory
-    // autoEnterAfterInstallRef/fresh-install state and losing the "no
-    // success page" guarantee (the reloaded page would show the plain
-    // Installed/Open App card instead, via the separate already-installed
-    // detection effect). A new-context attempt can only ever help — if
-    // Android hands it off, the app opens in its own window; if it's
-    // blocked as a non-gesture popup or just opens another browser tab,
-    // this tab is completely unaffected and the enterTenantTrust() call
-    // below still continues the tenant app flow here exactly as before.
+    if (isAndroid()) {
+      // ANDROID-ONLY: best-effort, SAME-CONTEXT OS hand-off to the
+      // just-installed WebAPK via a top-level navigation to an intent://
+      // URL — never window.open/'_blank' (that opens a separate Chrome
+      // tab instead of asking Android to resolve the intent for this
+      // context). Built WITHOUT S.browser_fallback_url on purpose — if
+      // Android doesn't hand this off (e.g. the WebAPK isn't registered
+      // yet), the fallback would otherwise reload this tab on the plain
+      // tenant URL, wiping the fresh-install state and bringing back the
+      // Install/Installed card.
+      //
+      // The hand-off is asynchronous: Chrome doesn't unload/hide this tab
+      // synchronously just because location.href was set to an intent://
+      // URL, so we can't tell success from failure on the same tick. The
+      // finalizing/autoEntering loader (already up from markInstalled)
+      // stays visible while we wait up to ANDROID_HANDOFF_FALLBACK_MS for
+      // either sign of success — the page being hidden (visibilitychange)
+      // or actually unloading (pagehide) — before ever concluding the
+      // hand-off failed and showing the Open App fallback screen. This is
+      // what prevents a flash of Open App a split second before Android
+      // switches apps anyway.
+      const ANDROID_HANDOFF_FALLBACK_MS = 1400;
+      let settled = false;
+
+      const clearHandoffWatchers = () => {
+        if (androidHandoffFallbackTimeoutRef.current) {
+          clearTimeout(androidHandoffFallbackTimeoutRef.current);
+          androidHandoffFallbackTimeoutRef.current = null;
+        }
+        document.removeEventListener('visibilitychange', handleVisibilityChange);
+        window.removeEventListener('pagehide', handlePageHide);
+      };
+
+      // The hand-off worked — Android switched to the installed PWA and
+      // this tab is now backgrounded (or being torn down). Cancel the
+      // fallback timer and do nothing else: never flip autoEntering/
+      // freshInstallHandoffBlocked here, so a hidden tab never paints the
+      // Open App screen even if it's later brought back to the foreground.
+      const markHandedOff = () => {
+        if (settled) return;
+        settled = true;
+        clearHandoffWatchers();
+      };
+      const handleVisibilityChange = () => {
+        if (document.visibilityState === 'hidden') markHandedOff();
+      };
+      const handlePageHide = () => markHandedOff();
+
+      document.addEventListener('visibilitychange', handleVisibilityChange);
+      window.addEventListener('pagehide', handlePageHide);
+
+      let intentAttempted = false;
+      try {
+        const tenantUrl = buildTenantUrl(normalizedAppSlug);
+        const intentUrl = tenantUrl && buildAndroidIntentUrl(tenantUrl, { includeFallback: false });
+        if (intentUrl) {
+          intentAttempted = true;
+          window.location.href = intentUrl;
+        }
+      } catch {
+        // fall through — treated the same as "nothing to attempt" below
+      }
+
+      if (!intentAttempted) {
+        // Nothing to hand off to (couldn't build a URL/intent) — no point
+        // waiting out the grace period, go straight to the fallback screen.
+        settled = true;
+        clearHandoffWatchers();
+        setAutoEntering(false);
+        setFreshInstallHandoffBlocked(true);
+        return undefined;
+      }
+
+      // No enterTenantTrust() anywhere in this branch — a fresh Android
+      // install must never continue the tenant flow inside Chrome. The
+      // installed PWA itself runs standalone and drives its own
+      // enterTenantTrust() via the separate isStandaloneDisplay() effect
+      // above.
+      androidHandoffFallbackTimeoutRef.current = setTimeout(() => {
+        androidHandoffFallbackTimeoutRef.current = null;
+        if (settled) return;
+        settled = true;
+        clearHandoffWatchers();
+        // Still here AND still visible after the grace period — the
+        // hand-off didn't happen (or Chrome blocked it outright, since
+        // appinstalled can fire without user activation). Surface the
+        // one-tap fallback instead of leaving the loader spinning forever.
+        if (document.visibilityState !== 'hidden') {
+          setAutoEntering(false);
+          setFreshInstallHandoffBlocked(true);
+        }
+      }, ANDROID_HANDOFF_FALLBACK_MS);
+
+      return () => {
+        clearHandoffWatchers();
+      };
+    }
+
+    // NON-ANDROID: unchanged from today — new-context attempt at the plain
+    // tenant URL, then continue the tenant flow in this tab exactly as
+    // before. iOS/desktop Safari/Chrome have no intent-style OS hand-off
+    // mechanism, so this behavior is intentionally left untouched.
     try {
       const tenantUrl = buildTenantUrl(normalizedAppSlug);
-      // On Android an intent:// URL is what the OS (not Chrome) resolves,
-      // so the freshly installed WebAPK can actually pick it up; elsewhere
-      // there is no such mechanism, so the plain URL is all there is.
-      const launchUrl = (isAndroid() && buildAndroidIntentUrl(tenantUrl)) || tenantUrl;
-      if (launchUrl) {
-        window.open(launchUrl, '_blank', 'noopener');
+      if (tenantUrl) {
+        window.open(tenantUrl, '_blank', 'noopener');
       }
     } catch {
       // ignore — enterTenantTrust() below still continues in this tab
@@ -797,6 +903,7 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
       .catch(() => {
         setAutoEntering(false);
       });
+    return undefined;
   }, [installPhase, isInstalled, enterTenantTrust, normalizedAppSlug]);
 
   // Called when TenantProfileModal's form is submitted: saves the profile
@@ -1010,6 +1117,39 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
             animation: tenantInstallProgress 1.4s ease-in-out infinite;
           }
         `}</style>
+      </div>
+    );
+  }
+
+  // ANDROID FRESH-INSTALL PATH ONLY. Only reached once the grace-period
+  // timer above has confirmed the page is still visible — i.e. Android
+  // did not switch to the installed PWA. Deliberately its own minimal
+  // screen — not the Install App / Installed card, not tenant Home — with
+  // a single Open App button driven by a real tap, which Android is far
+  // more likely to honor than the earlier non-gesture attempt.
+  if (freshInstallHandoffBlocked) {
+    return (
+      <div style={{ ...styles.page, background: backgroundColor }}>
+        <p style={{ ...styles.loadingText, color: palette.textPrimary, fontSize: '16px', fontWeight: 700 }}>
+          {tenantTrust.name} is installed
+        </p>
+        <p style={{ ...styles.loadingText, color: palette.textSecondary, marginTop: '4px', marginBottom: '22px' }}>
+          Tap below to open it.
+        </p>
+        <button
+          type="button"
+          className="tenant-install-btn"
+          style={{ ...styles.installBtn, background: accentGradient, color: accent.text, boxShadow: `0 10px 26px ${accentGlow(0.4)}` }}
+          onClick={() => {
+            const tenantUrl = buildTenantUrl(normalizedAppSlug);
+            if (!tenantUrl) return;
+            const intentUrl = isAndroid() ? buildAndroidIntentUrl(tenantUrl, { includeFallback: false }) : tenantUrl;
+            window.location.href = intentUrl || tenantUrl;
+          }}
+        >
+          <span>Open App</span>
+          <span className="tenant-install-btn-arrow" aria-hidden="true">→</span>
+        </button>
       </div>
     );
   }
