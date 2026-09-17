@@ -231,6 +231,8 @@ const AddCommunity = ({ onNavigateBack, variant = 'page' }) => {
   // result never lingers after the user edits the field again.
   const [nameCheck, setNameCheck] = useState({ status: 'idle', checkedValue: '' });
   const fileInputRef = useRef(null);
+  const externalHandoffRef = useRef(false);
+  const returningFromHandoffRef = useRef(false);
 
   const panelBorder = 'var(--advertisement-card-border)';
   const muted = 'var(--advertisement-subtitle)';
@@ -341,6 +343,49 @@ const AddCommunity = ({ onNavigateBack, variant = 'page' }) => {
     const timer = setTimeout(() => setLaunching(false), LAUNCH_ANIMATION_MS);
     return () => clearTimeout(timer);
   }, [searchParams]);
+
+  // If the production install URL handoff opens an external browser (e.g.
+  // Chrome on a standalone/Capacitor install) instead of navigating this
+  // page away, this page's React state — including the launch loader —
+  // stays mounted in the background. externalHandoffRef is armed right
+  // before that navigation; once this page is actually hidden afterward,
+  // clear the local launch/submit UI state so returning to SETU doesn't
+  // show a stuck loader. Never fires on ordinary backgrounding, since the
+  // ref is only set true immediately before the handoff itself.
+  useEffect(() => {
+    const resetFormAfterHandoff = () => {
+      if (!returningFromHandoffRef.current) return;
+      returningFromHandoffRef.current = false;
+      setForm({ trustName: '', legalName: '', description: '', sampleAppId: '' });
+      setLogoFile(null);
+      setLogoPreview((previous) => {
+        if (previous) URL.revokeObjectURL(previous);
+        return '';
+      });
+      setSubmitError('');
+      setNameCheck({ status: 'idle', checkedValue: '' });
+    };
+    const clearHandoffState = () => {
+      if (!externalHandoffRef.current) return;
+      externalHandoffRef.current = false;
+      returningFromHandoffRef.current = true;
+      setLaunching(false);
+      setSubmitting(false);
+    };
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        clearHandoffState();
+      } else if (document.visibilityState === 'visible') {
+        resetFormAfterHandoff();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('pagehide', clearHandoffState);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('pagehide', clearHandoffState);
+    };
+  }, []);
 
   const handleLogoUpload = (event) => {
     const file = event.target.files?.[0];
@@ -519,6 +564,7 @@ const AddCommunity = ({ onNavigateBack, variant = 'page' }) => {
     // intentionally does NOT auto-enter Home; the destination is the
     // tenant's install screen.
     const installUrl = `https://www.teiltd.in/app/${encodeURIComponent(tenantTrust.app_slug)}?install=1`;
+    externalHandoffRef.current = true;
     window.location.replace(installUrl);
   };
 

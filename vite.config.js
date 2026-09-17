@@ -39,9 +39,19 @@ const injectReservedAppRoutes = () => ({
 export default defineConfig(({ command, mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
   const pwaManifestProxy = env.VITE_SUPABASE_URL ? createPwaManifestProxy(env.VITE_SUPABASE_URL) : undefined;
+  // The website is deployed under /_setu-app/ (Nginx serves the member app
+  // from that subpath — see TenantLanding.jsx's SETU_POWERED_LOGO comment
+  // and the generate-webApp-link Edge Function's APP_SHELL_URL). Capacitor's
+  // Android/iOS WebView instead serves this same `dist` output from its own
+  // root, so a build carrying that prefix leaves every asset URL 404ing —
+  // the app installs and shows its native splash screen, then a permanently
+  // blank WebView, since no JS ever loads. `npm run build:capacitor` (mode
+  // "capacitor", see .env.capacitor) is the only thing that should ever set
+  // this; the ordinary website build/deploy is untouched.
+  const isCapacitorBuild = env.VITE_CAPACITOR_BUILD === 'true';
 
   return {
-    base: command === 'serve' ? '/' : '/_setu-app/',
+    base: (command === 'serve' || isCapacitorBuild) ? '/' : '/_setu-app/',
     server: {
       proxy: pwaManifestProxy
     },
