@@ -512,14 +512,14 @@ const AddCommunity = ({ onNavigateBack, variant = 'page' }) => {
 
     setLaunchCycle((prev) => prev + 1);
     await delay(LAUNCH_ANIMATION_MS);
-    // Navigate (in-app, same origin — window.location.origin, not the
-    // hardcoded production BASE_URL, so this also works under a local dev
-    // server) straight to this Trust's own generated app route: the exact
-    // /app/<slug> path the generate-webApp-link Edge Function writes into
-    // shareApp_links.web_app_url. `install=1` is TenantLanding's existing
-    // flag for its Install/Download landing card — this intentionally does
-    // NOT auto-enter Home; the destination is the tenant's install screen.
-    navigate(`/app/${encodeURIComponent(tenantTrust.app_slug)}?install=1`, { replace: true });
+    // Full-page navigation to the canonical production tenant URL — the
+    // exact /app/<slug> path the generate-webApp-link Edge Function writes
+    // into shareApp_links.web_app_url. `install=1` is TenantLanding's
+    // existing flag for its Install/Download landing card — this
+    // intentionally does NOT auto-enter Home; the destination is the
+    // tenant's install screen.
+    const installUrl = `https://www.teiltd.in/app/${encodeURIComponent(tenantTrust.app_slug)}?install=1`;
+    window.location.replace(installUrl);
   };
 
   const hasTrustName = String(form.trustName || '').trim().length > 0;
