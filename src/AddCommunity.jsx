@@ -9,9 +9,6 @@ import { getAppHomePath } from './utils/tenantNavigation';
 import { fetchFeatureFlags } from './services/featureFlags';
 
 const DEFAULT_PAGE_TITLE = 'Add Community';
-const LAST_SELECTED_TRUST_ID_KEY = 'last_selected_trust_id';
-const PENDING_CREATED_APP_URL_KEY = 'pending_created_app_install_url';
-const PENDING_CREATED_APP_TS_KEY = 'pending_created_app_install_url_ts';
 
 const toTitleCase = (value = '') =>
   String(value || '')
@@ -120,6 +117,20 @@ const waitForTenantAppSlug = async (supabase, trustId) => {
 }
 
 
+// Deliberately does NOT touch selected_trust_id/selected_trust_name (or fire
+// 'trust-changed') — this flow navigates straight to the new tenant's
+// install landing at /app/<slug>, never through Home, so there is nothing
+// here that needs the newly created Trust to become "currently selected".
+// Making it selected here previously caused every already-mounted
+// trust-aware component (most importantly Home's own theme-driven
+// quick-action rendering) to switch to the brand-new Trust's identity while
+// the launch loader was still up, which — for a Home theme configured to
+// show Add Community as inline "content" — unmounted the loader/AddCommunity
+// itself and exposed the underlying Home content before navigation ran.
+// Only the trust list cache (read by Home's trust switcher UI) is updated
+// here; whoever actually enters the tenant app later (TenantLanding's
+// enterTenantTrust/grantTenantHome) is what sets selected_trust_id, exactly
+// as it already does for every other "open a tenant app" entry point.
 const cacheCreatedTrust = ({ trustId, trustName, legalName, description, iconUrl, trustRow }) => {
   const normalizedTrustId = normalizeText(trustId);
   if (!normalizedTrustId) return;
@@ -133,10 +144,6 @@ const cacheCreatedTrust = ({ trustId, trustName, legalName, description, iconUrl
     icon_url: iconUrl || trustRow?.icon_url || null,
     is_active: true,
   };
-
-  localStorage.setItem('selected_trust_id', normalizedTrustId);
-  localStorage.setItem(LAST_SELECTED_TRUST_ID_KEY, normalizedTrustId);
-  localStorage.setItem('selected_trust_name', cachedTrust.name || trustName);
 
   try {
     const cached = JSON.parse(localStorage.getItem('trust_list_cache') || '[]');
@@ -154,10 +161,8 @@ const cacheCreatedTrust = ({ trustId, trustName, legalName, description, iconUrl
 // Home.jsx rebuilds its trust switcher from the `user` object's own
 // hospital_memberships on every mount (e.g. a page refresh) — it never reads
 // trust_list_cache/selected_trust_id for that list. Without this, a freshly
-// created trust is invisible to that rebuild, selected_trust_id no longer
-// matches anything in the rebuilt list, and Home falls back to whichever
-// trust sorts first, silently switching the user away from the trust they
-// just created and landed on.
+// created trust would stay invisible to that rebuild the next time the user
+// opens Home, even though they now own it.
 const addTrustToUserMemberships = ({ trustId, trustName, iconUrl, description }) => {
   const normalizedTrustId = normalizeText(trustId);
   if (!normalizedTrustId) return;
@@ -463,13 +468,12 @@ const AddCommunity = ({ onNavigateBack, variant = 'page' }) => {
           iconUrl: uploadedIconUrl,
           description: form.description,
         });
-        window.dispatchEvent(new CustomEvent('trust-changed', {
-          detail: {
-            trustId: nextTrustId,
-            trustName,
-            iconUrl: uploadedIconUrl || null,
-          }
-        }));
+        // No 'trust-changed' dispatch here — this flow never makes the new
+        // Trust "currently selected" before navigating (see cacheCreatedTrust's
+        // own comment above), so there is nothing for any listener to react
+        // to yet. Firing it here previously switched every mounted
+        // trust-aware component (including Home's own quick-action rendering)
+        // over to the new Trust while the launch loader was still showing.
 
         tenantTrust = await waitForTenantAppSlug(supabase, nextTrustId);
         if (tenantTrust) {
@@ -498,33 +502,24 @@ const AddCommunity = ({ onNavigateBack, variant = 'page' }) => {
       return;
     }
 
-    // Open the tenant install landing after the backend has generated the
-    // slug and enabled PWA metadata for this newly created Trust.
+    // Only proceed to the app once the backend has generated the slug and
+    // enabled PWA metadata for this newly created Trust.
     if (!tenantTrust?.app_slug) {
-      setSubmitError('App was created, but the install page link is still getting ready. Please try again in a moment.');
+      setSubmitError('App was created, but it is still getting ready. Please try again in a moment.');
       setLaunching(false);
       return;
     }
 
     setLaunchCycle((prev) => prev + 1);
     await delay(LAUNCH_ANIMATION_MS);
-    // Deterministic, purpose-built URL for this flow: `install=1` gates
-    // TenantLanding's forceInstallLanding path and its neutral
-    // `tenantLoading || !resolvedOnce` spinner, so no other trust's Home
-    // (e.g. the app's default "Setu" fallback) can render in between. The
-    // DB's shareAppLinks/web_app_url is a different, general-purpose "open
-    // link" used elsewhere (Sidebar/OtherMemberships) and must not be mixed
-    // into this redirect.
-    const installUrl = `${window.location.origin}/app/${encodeURIComponent(tenantTrust.app_slug)}?install=1&created=1`;
-    try {
-      sessionStorage.setItem(PENDING_CREATED_APP_URL_KEY, installUrl);
-      sessionStorage.setItem(PENDING_CREATED_APP_TS_KEY, String(Date.now()));
-      localStorage.setItem(PENDING_CREATED_APP_URL_KEY, installUrl);
-      localStorage.setItem(PENDING_CREATED_APP_TS_KEY, String(Date.now()));
-    } catch {
-      // ignore storage failures
-    }
-    window.location.replace(installUrl);
+    // Navigate (in-app, same origin — window.location.origin, not the
+    // hardcoded production BASE_URL, so this also works under a local dev
+    // server) straight to this Trust's own generated app route: the exact
+    // /app/<slug> path the generate-webApp-link Edge Function writes into
+    // shareApp_links.web_app_url. `install=1` is TenantLanding's existing
+    // flag for its Install/Download landing card — this intentionally does
+    // NOT auto-enter Home; the destination is the tenant's install screen.
+    navigate(`/app/${encodeURIComponent(tenantTrust.app_slug)}?install=1`, { replace: true });
   };
 
   const hasTrustName = String(form.trustName || '').trim().length > 0;
