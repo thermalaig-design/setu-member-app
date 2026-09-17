@@ -110,6 +110,59 @@ const PENDING_CREATED_APP_URL_KEY = 'pending_created_app_install_url';
 const PENDING_CREATED_APP_TS_KEY = 'pending_created_app_install_url_ts';
 const PENDING_CREATED_APP_REDIRECT_MAX_AGE_MS = 2 * 60 * 1000;
 const POWERED_BY_URL = 'https://teiltd.in';
+
+// Reads and validates a pending "just created this app, still finishing the
+// redirect to /app/<slug>" URL left by AddCommunity.jsx, clearing it if
+// stale/invalid. Called synchronously from a lazy useState initializer (see
+// below) so Home can skip painting its own branded content — instead of
+// only noticing this in a useEffect, which would always flash the current
+// trust's full Home UI (marquee, cards, navbar) first.
+const getValidPendingCreatedAppUrl = () => {
+  let pendingUrl = '';
+  let pendingTs = 0;
+  try {
+    pendingUrl = sessionStorage.getItem(PENDING_CREATED_APP_URL_KEY)
+      || localStorage.getItem(PENDING_CREATED_APP_URL_KEY)
+      || '';
+    pendingTs = Number(
+      sessionStorage.getItem(PENDING_CREATED_APP_TS_KEY)
+      || localStorage.getItem(PENDING_CREATED_APP_TS_KEY)
+      || 0
+    );
+  } catch {
+    return '';
+  }
+
+  if (!pendingUrl) return '';
+
+  const clearPending = () => {
+    try {
+      sessionStorage.removeItem(PENDING_CREATED_APP_URL_KEY);
+      sessionStorage.removeItem(PENDING_CREATED_APP_TS_KEY);
+      localStorage.removeItem(PENDING_CREATED_APP_URL_KEY);
+      localStorage.removeItem(PENDING_CREATED_APP_TS_KEY);
+    } catch {
+      // ignore storage failures
+    }
+  };
+
+  if (pendingTs && Date.now() - pendingTs > PENDING_CREATED_APP_REDIRECT_MAX_AGE_MS) {
+    clearPending();
+    return '';
+  }
+
+  try {
+    const target = new URL(pendingUrl, window.location.origin);
+    if (target.origin !== window.location.origin || !target.pathname.startsWith('/app/')) {
+      clearPending();
+      return '';
+    }
+    return target.href;
+  } catch {
+    clearPending();
+    return '';
+  }
+};
 const getInitialSponsorTrustId = () =>
   localStorage.getItem('selected_trust_id') || import.meta.env.VITE_DEFAULT_TRUST_ID || '';
 const BASE_TRUST_ID = String(import.meta.env.VITE_DEFAULT_TRUST_ID || '').trim();
@@ -384,6 +437,10 @@ const Home = ({ onNavigate, onLogout }) => {
     if (lowered === 'null' || lowered === 'undefined' || lowered === 'nan') return '';
     return normalized;
   };
+  // Computed synchronously (lazy initializer, not an effect) so the very
+  // first render already knows to skip Home's own branded content when a
+  // just-created-app redirect is still pending.
+  const [pendingCreatedAppUrl] = useState(() => getValidPendingCreatedAppUrl());
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const mainContainerRef = useRef(null);
   const channelRef = useRef(null);
@@ -394,45 +451,11 @@ const Home = ({ onNavigate, onLogout }) => {
   const previousSelectedTrustIdRef = useRef('');
 
   useEffect(() => {
-    let pendingUrl = '';
-    let pendingTs = 0;
-    try {
-      pendingUrl = sessionStorage.getItem(PENDING_CREATED_APP_URL_KEY)
-        || localStorage.getItem(PENDING_CREATED_APP_URL_KEY)
-        || '';
-      pendingTs = Number(
-        sessionStorage.getItem(PENDING_CREATED_APP_TS_KEY)
-        || localStorage.getItem(PENDING_CREATED_APP_TS_KEY)
-        || 0
-      );
-    } catch {
-      pendingUrl = '';
-      pendingTs = 0;
+    if (!pendingCreatedAppUrl) return;
+    if (window.location.href !== pendingCreatedAppUrl) {
+      window.location.replace(pendingCreatedAppUrl);
     }
-
-    if (!pendingUrl) return;
-    if (pendingTs && Date.now() - pendingTs > PENDING_CREATED_APP_REDIRECT_MAX_AGE_MS) {
-      try {
-        sessionStorage.removeItem(PENDING_CREATED_APP_URL_KEY);
-        sessionStorage.removeItem(PENDING_CREATED_APP_TS_KEY);
-        localStorage.removeItem(PENDING_CREATED_APP_URL_KEY);
-        localStorage.removeItem(PENDING_CREATED_APP_TS_KEY);
-      } catch {
-        // ignore storage failures
-      }
-      return;
-    }
-
-    try {
-      const target = new URL(pendingUrl, window.location.origin);
-      if (target.origin !== window.location.origin || !target.pathname.startsWith('/app/')) return;
-      if (window.location.href !== target.href) {
-        window.location.replace(target.href);
-      }
-    } catch {
-      // ignore invalid pending URLs
-    }
-  }, []);
+  }, [pendingCreatedAppUrl]);
 
   // Welcome strip: initialize from localStorage instantly to avoid delay
   const [userProfile, setUserProfile] = useState(() => getCachedUserProfileSnapshot());
@@ -2683,6 +2706,38 @@ const Home = ({ onNavigate, onLogout }) => {
 
     return mergedLayout;
   }, [theme?.homeLayout]);
+
+  // A just-created-app redirect is still pending (see getValidPendingCreatedAppUrl
+  // above and the effect that fires it) — never paint this trust's own Home
+  // content (navbar, marquee, cards) in that window, or it flashes before the
+  // redirect to /app/<slug> takes over. Neutral loader only, then hand off.
+  if (pendingCreatedAppUrl) {
+    return (
+      <div
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          minHeight: '100dvh',
+          background: '#101014',
+          gap: '14px',
+        }}
+      >
+        <div
+          style={{
+            width: 40,
+            height: 40,
+            border: '3px solid rgba(255,255,255,0.15)',
+            borderTopColor: '#e2b227',
+            borderRadius: '50%',
+            animation: 'homePendingRedirectSpin 0.8s linear infinite',
+          }}
+        />
+        <style>{'@keyframes homePendingRedirectSpin { to { transform: rotate(360deg); } }'}</style>
+      </div>
+    );
+  }
 
   return (
     <div

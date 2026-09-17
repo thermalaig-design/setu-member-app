@@ -119,31 +119,6 @@ const waitForTenantAppSlug = async (supabase, trustId) => {
   return null;
 }
 
-// The web_app_url for a freshly created Trust is generated asynchronously
-// (same pipeline that fills in app_slug), so poll manage_user_panel_by_trust_details
-// — the same RPC OtherMemberships/Sidebar use for "shareAppLinks" — until it
-// shows up against this trust id.
-const waitForTenantWebAppUrl = async (supabase, trustId) => {
-  const normalizedTrustId = normalizeText(trustId);
-  if (!normalizedTrustId) return '';
-
-  const startedAt = Date.now();
-  while (Date.now() - startedAt <= APP_SLUG_POLL_TIMEOUT_MS) {
-    const { data, error } = await supabase.rpc('manage_user_panel_by_trust_details', {
-      p_action: 'view',
-      p_trust_id: normalizedTrustId,
-    });
-
-    if (error) throw error;
-
-    const webAppUrl = normalizeText(data?.[0]?.web_app_url);
-    if (webAppUrl) return webAppUrl;
-
-    await delay(APP_SLUG_POLL_INTERVAL_MS);
-  }
-
-  return '';
-};;
 
 const cacheCreatedTrust = ({ trustId, trustName, legalName, description, iconUrl, trustRow }) => {
   const normalizedTrustId = normalizeText(trustId);
@@ -173,6 +148,53 @@ const cacheCreatedTrust = ({ trustId, trustName, legalName, description, iconUrl
     localStorage.setItem('trust_list_cache', JSON.stringify(next));
   } catch {
     localStorage.setItem('trust_list_cache', JSON.stringify([cachedTrust]));
+  }
+};
+
+// Home.jsx rebuilds its trust switcher from the `user` object's own
+// hospital_memberships on every mount (e.g. a page refresh) — it never reads
+// trust_list_cache/selected_trust_id for that list. Without this, a freshly
+// created trust is invisible to that rebuild, selected_trust_id no longer
+// matches anything in the rebuilt list, and Home falls back to whichever
+// trust sorts first, silently switching the user away from the trust they
+// just created and landed on.
+const addTrustToUserMemberships = ({ trustId, trustName, iconUrl, description }) => {
+  const normalizedTrustId = normalizeText(trustId);
+  if (!normalizedTrustId) return;
+
+  let parsedUser = {};
+  try {
+    parsedUser = JSON.parse(localStorage.getItem('user') || '{}') || {};
+  } catch {
+    parsedUser = {};
+  }
+
+  const existingMemberships = Array.isArray(parsedUser?.hospital_memberships)
+    ? parsedUser.hospital_memberships
+    : [];
+  if (existingMemberships.some((m) => normalizeText(m?.trust_id || m?.id) === normalizedTrustId)) return;
+
+  const membersId = normalizeText(parsedUser?.members_id || parsedUser?.member_id);
+  const newMembership = {
+    trust_id: normalizedTrustId,
+    trust_name: trustName,
+    trust_icon_url: iconUrl || null,
+    trust_remark: description || null,
+    is_active: true,
+    role: 'owner',
+    membership_number: null,
+    members_id: membersId || null,
+  };
+
+  const updatedUser = {
+    ...parsedUser,
+    hospital_memberships: [newMembership, ...existingMemberships],
+  };
+
+  try {
+    localStorage.setItem('user', JSON.stringify(updatedUser));
+  } catch {
+    // ignore storage failures
   }
 };
 
@@ -435,6 +457,12 @@ const AddCommunity = ({ onNavigateBack, variant = 'page' }) => {
           description: form.description,
           iconUrl: uploadedIconUrl,
         });
+        addTrustToUserMemberships({
+          trustId: nextTrustId,
+          trustName,
+          iconUrl: uploadedIconUrl,
+          description: form.description,
+        });
         window.dispatchEvent(new CustomEvent('trust-changed', {
           detail: {
             trustId: nextTrustId,
@@ -479,15 +507,15 @@ const AddCommunity = ({ onNavigateBack, variant = 'page' }) => {
     }
 
     setLaunchCycle((prev) => prev + 1);
-    // Fetch the trust's web_app_url (shareAppLinks) alongside the launch
-    // animation delay so we don't wait twice.
-    const webAppUrlPromise = waitForTenantWebAppUrl(supabase, nextTrustId).catch((error) => {
-      console.warn('Failed to fetch web_app_url for new trust:', error);
-      return '';
-    });
-    const [, webAppUrl] = await Promise.all([delay(LAUNCH_ANIMATION_MS), webAppUrlPromise]);
-    const fallbackInstallUrl = `${window.location.origin}/app/${encodeURIComponent(tenantTrust.app_slug)}?install=1&created=1`;
-    const installUrl = webAppUrl || fallbackInstallUrl;
+    await delay(LAUNCH_ANIMATION_MS);
+    // Deterministic, purpose-built URL for this flow: `install=1` gates
+    // TenantLanding's forceInstallLanding path and its neutral
+    // `tenantLoading || !resolvedOnce` spinner, so no other trust's Home
+    // (e.g. the app's default "Setu" fallback) can render in between. The
+    // DB's shareAppLinks/web_app_url is a different, general-purpose "open
+    // link" used elsewhere (Sidebar/OtherMemberships) and must not be mixed
+    // into this redirect.
+    const installUrl = `${window.location.origin}/app/${encodeURIComponent(tenantTrust.app_slug)}?install=1&created=1`;
     try {
       sessionStorage.setItem(PENDING_CREATED_APP_URL_KEY, installUrl);
       sessionStorage.setItem(PENDING_CREATED_APP_TS_KEY, String(Date.now()));
@@ -496,7 +524,6 @@ const AddCommunity = ({ onNavigateBack, variant = 'page' }) => {
     } catch {
       // ignore storage failures
     }
-    window.location.href = installUrl;
     window.location.replace(installUrl);
   };
 
