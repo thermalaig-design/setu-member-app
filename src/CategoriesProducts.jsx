@@ -866,6 +866,70 @@ export function CategoriesProductsContent({
           width: 100%;
           height: 1px;
         }
+
+        @media (min-width: 1024px) {
+          .ws-scroll {
+            padding: 0 24px 24px;
+          }
+
+          .ws-circle-row {
+            gap: 14px;
+            padding: 18px 0 6px;
+          }
+
+          .ws-circle-item {
+            min-width: 78px;
+            gap: 6px;
+          }
+
+          .ws-circle-item > div:first-child {
+            width: 78px !important;
+            height: 78px !important;
+          }
+
+          .ws-circle-label {
+            font-size: 12px;
+            max-width: 86px;
+          }
+
+          .ws-section {
+            padding: 16px 0 8px;
+          }
+
+          .ws-section-title {
+            font-size: 15px;
+            margin-bottom: 10px;
+          }
+
+          .ws-card-rows {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+            gap: 16px;
+          }
+
+          .ws-grid {
+            display: contents;
+          }
+
+          .ws-tile {
+            gap: 7px;
+            min-width: 0;
+          }
+
+          .ws-tile > div:first-child {
+            width: 100% !important;
+            height: 251px;
+            aspect-ratio: auto !important;
+            border-radius: 12px !important;
+            margin: 0 !important;
+          }
+
+          .ws-tile-label {
+            font-size: 12px;
+            font-weight: 600;
+            line-height: 1.2;
+          }
+        }
       `}</style>
     </main>
   );

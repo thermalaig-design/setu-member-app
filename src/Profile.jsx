@@ -674,6 +674,23 @@ const Profile = ({ onNavigate, onProfileUpdate }) => {
     else { onNavigate(target); }
   };
 
+  const SaveProfileButton = ({ className = '', style = {} }) => (
+    <button
+      type="button"
+      onClick={handleSave}
+      disabled={saving}
+      className={`py-4 rounded-2xl font-bold text-base active:scale-[0.98] transition-all flex items-center justify-center gap-2 disabled:opacity-50 ${className}`}
+      style={{
+        color: 'var(--surface-color)',
+        background: 'linear-gradient(135deg, var(--brand-red) 0%, var(--brand-red-dark) 40%, var(--brand-navy) 100%)',
+        boxShadow: '0 8px 24px color-mix(in srgb, var(--brand-red) 30%, transparent)',
+        ...style
+      }}
+    >
+      {saving ? <><div className="animate-spin rounded-full h-5 w-5 border-2 border-white border-t-transparent" /> Saving...</> : <><Save className="h-5 w-5" /> Save Profile</>}
+    </button>
+  );
+
   return (
     <div ref={mainContainerRef} className="min-h-screen font-sans" style={{ background: 'var(--page-bg, var(--app-page-bg))' }}>
 
@@ -767,7 +784,7 @@ const Profile = ({ onNavigate, onProfileUpdate }) => {
       </div>
 
       {/* Tabs */}
-      <div className="flex border-b sticky top-[64px] z-40" style={{ borderColor: 'color-mix(in srgb, var(--advertisement-card-border) 62%, transparent)', background: 'color-mix(in srgb, var(--page-bg) 70%, var(--advertisement-card-bg))' }}>
+      <div className="flex border-b top-[64px] z-40" style={{ borderColor: 'color-mix(in srgb, var(--advertisement-card-border) 62%, transparent)', background: 'color-mix(in srgb, var(--page-bg) 70%, var(--advertisement-card-bg))' }}>
         {TABS.map(tab => (
           <button key={tab} onClick={() => setActiveTab(tab)}
             className="flex-1 py-4 text-sm font-bold transition-all border-b-2"
@@ -871,6 +888,12 @@ const Profile = ({ onNavigate, onProfileUpdate }) => {
                 <RowField label="Instagram" value={profileData.instagram} onChange={set('instagram')} placeholder="Instagram handle" />
                 <RowField label="LinkedIn" value={profileData.linkedin} onChange={set('linkedin')} placeholder="LinkedIn URL" />
               </SectionCard>
+              <div className="hidden lg:flex justify-end pt-2 pb-8">
+                <SaveProfileButton
+                  className="px-8 min-w-[220px]"
+                  style={{ paddingTop: '14px', paddingBottom: '14px' }}
+                />
+              </div>
             </div>
           )}
 
@@ -1064,12 +1087,8 @@ const Profile = ({ onNavigate, onProfileUpdate }) => {
 
       {/* Sticky Save Button */}
       {isEditMode && (
-        <div className="fixed bottom-0 left-0 right-0 z-40 px-4 pb-5 pt-4 max-w-full md:max-w-[430px] md:mx-auto pointer-events-none" style={{ background: 'linear-gradient(to top, var(--surface-color), color-mix(in srgb, var(--surface-color) 82%, transparent), transparent)' }}>
-          <button onClick={handleSave} disabled={saving}
-            className="pointer-events-auto w-full py-4 rounded-2xl font-bold text-base active:scale-[0.98] transition-all flex items-center justify-center gap-2 disabled:opacity-50"
-            style={{ color: 'var(--surface-color)', background: 'linear-gradient(135deg, var(--brand-red) 0%, var(--brand-red-dark) 40%, var(--brand-navy) 100%)', boxShadow: '0 8px 24px color-mix(in srgb, var(--brand-red) 30%, transparent)' }}>
-            {saving ? <><div className="animate-spin rounded-full h-5 w-5 border-2 border-white border-t-transparent" /> Saving...</> : <><Save className="h-5 w-5" /> Save Profile</>}
-          </button>
+        <div className="profile-save-bar fixed bottom-0 left-0 right-0 z-40 px-4 pb-5 pt-4 max-w-full md:max-w-[430px] md:mx-auto pointer-events-none lg:hidden" style={{ background: 'linear-gradient(to top, var(--surface-color), color-mix(in srgb, var(--surface-color) 82%, transparent), transparent)' }}>
+          <SaveProfileButton className="pointer-events-auto w-full" />
         </div>
       )}
 

@@ -2742,13 +2742,14 @@ const Home = ({ onNavigate, onLogout }) => {
   return (
     <div
       ref={mainContainerRef}
-      className={`flex flex-col relative ${isMenuOpen ? 'overflow-hidden max-h-screen' : 'overflow-hidden'}`}
+      className={`home-desktop-shell flex flex-col relative ${isMenuOpen ? 'overflow-hidden max-h-screen' : 'overflow-hidden'}`}
       style={{ background: 'var(--page-bg, var(--app-page-bg))', minHeight: '100%' }}
     >
+      <div className="home-main-content flex min-w-0 flex-1 flex-col">
       {/* Decorative blobs (theme-aware) */}
       <div
         aria-hidden="true"
-        className="pointer-events-none absolute"
+        className="home-decor-blob pointer-events-none absolute"
         style={{
           top: '-110px',
           left: '-120px',
@@ -2761,7 +2762,7 @@ const Home = ({ onNavigate, onLogout }) => {
       />
       <div
         aria-hidden="true"
-        className="pointer-events-none absolute"
+        className="home-decor-blob pointer-events-none absolute"
         style={{
           bottom: '-140px',
           right: '-110px',
@@ -2774,7 +2775,7 @@ const Home = ({ onNavigate, onLogout }) => {
       />
       <div
         aria-hidden="true"
-        className="pointer-events-none absolute"
+        className="home-decor-blob pointer-events-none absolute"
         style={{
           top: '35%',
           left: '55%',
@@ -2789,7 +2790,7 @@ const Home = ({ onNavigate, onLogout }) => {
       {/* ══ Light Navbar (theme-aware) ══ */}
       <div
         role="navigation"
-        className="theme-navbar sticky top-0 z-50 w-full"
+        className="theme-navbar home-navbar sticky top-0 z-50 w-full"
         style={{
           background: 'var(--navbar-bg, var(--app-navbar-bg))',
           backdropFilter: 'blur(var(--navbar-blur, 12px))',
@@ -2803,7 +2804,7 @@ const Home = ({ onNavigate, onLogout }) => {
 
         {/* Top row: hamburger | logo+name | bell */}
         <div
-          className="flex items-center justify-between"
+          className="home-navbar-row flex items-center justify-between"
           style={{
             paddingTop: 'max(24px, calc(env(safe-area-inset-top, 0px) + 24px))',
             paddingBottom: '10px',
@@ -2815,7 +2816,7 @@ const Home = ({ onNavigate, onLogout }) => {
           {/* Hamburger */}
           <button
             onClick={() => setIsMenuOpen(!isMenuOpen)}
-            className="w-10 h-10 rounded-2xl flex items-center justify-center transition-all flex-shrink-0 active:scale-95"
+            className="w-10 h-10 rounded-2xl flex items-center justify-center transition-all flex-shrink-0 active:scale-95 lg:hidden"
             style={{
               background: isMenuOpen
                 ? appButtonBg
@@ -2829,17 +2830,16 @@ const Home = ({ onNavigate, onLogout }) => {
           </button>
 
           {/* Trust logo + name */}
-          <div className="flex items-center flex-1 justify-center mx-2 min-w-0">
+          <div className="home-navbar-title-wrap flex items-center gap-2.5 flex-1 justify-center">
             {(() => {
               const trustName = activeTrust?.name || trustInfo?.name || defaultTrust?.name || '';
-              const isLongName = trustName.length > 35;
-              
+              const isLongName = trustName.length > 20;
+
               return isLongName ? (
                 <div className="overflow-hidden w-full flex items-center">
                   <h1
-                    className="trust-heading-marquee font-extrabold text-[15px] whitespace-nowrap min-w-max"
-                    style={{ color: navbarTextColor }}
-                    aria-label={trustName}
+                    className="home-navbar-title font-extrabold text-[15px] whitespace-nowrap"
+                    style={{ color: navbarTextColor, animation: 'marquee 15s linear infinite', maxWidth: '9rem' }}
                   >
                     <span>{trustName}&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span>
                     <span aria-hidden="true">{trustName}&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span>
@@ -2847,7 +2847,7 @@ const Home = ({ onNavigate, onLogout }) => {
                 </div>
               ) : (
                 <h1
-                  className="font-extrabold text-[15px]"
+                  className="home-navbar-title font-extrabold text-[15px]"
                   style={{ color: navbarTextColor }}
                 >
                   {trustName}
@@ -3006,8 +3006,8 @@ const Home = ({ onNavigate, onLogout }) => {
         </div>
 
         {/* Welcome strip / member banner */}
-        {showMemberBannerFeature && (userProfile?.name || showSelectedTrustMemberBanner) && (
-          <div className="px-4 pb-3">
+        {(userProfile?.name || showSelectedTrustMemberBanner) && (
+          <div className="px-4 pb-3 home-navbar-member-banner">
             <div
               className="rounded-[22px] px-3 py-2"
               style={{
@@ -3093,7 +3093,9 @@ const Home = ({ onNavigate, onLogout }) => {
       </div>
 
 
-      <Sidebar isOpen={isMenuOpen} onClose={() => setIsMenuOpen(false)} onNavigate={onNavigate} currentPage="home" onLogout={onLogout} />
+      <div className="lg:hidden">
+        <Sidebar isOpen={isMenuOpen} onClose={() => setIsMenuOpen(false)} onNavigate={onNavigate} currentPage="home" onLogout={onLogout} />
+      </div>
 
       {/* ── Dynamic Section Renderer (order from theme.homeLayout) ── */}
       <div
@@ -3109,7 +3111,8 @@ const Home = ({ onNavigate, onLogout }) => {
           const sponsorsHomeMode = resolveHomeSectionMode(theme, 'sponsors', 'feature_sponsors');
           const SECTIONS = {
             trustList: showTrustSelector && (selectedTrust || otherTrusts.length > 0) ? (
-              <div key="trustList">
+              <div className="home-section home-section-full" key="trustList">
+                <p className="text-sm font-semibold text-muted-foreground ml-4 mt-1" style={{color: ` ${theme.primary}`}}>My trusts</p>
                 <div
                   className="flex items-center gap-2 px-4 py-2"
                   style={{
@@ -3140,7 +3143,7 @@ const Home = ({ onNavigate, onLogout }) => {
             ) : null,
             marquee: ff('feature_marquee') && marqueeUpdates.length > 0 ? (
               <div
-                className="mt-0 mb-2 w-full overflow-hidden"
+                className="home-section home-section-full mt-0 mb-2 w-full overflow-hidden"
                 style={{
                   background: 'var(--marquee-bg)',
                   boxShadow: `0 2px 12px ${applyOpacity(theme.primary, 0.3)}`,
@@ -3159,13 +3162,8 @@ const Home = ({ onNavigate, onLogout }) => {
                 </div>
               </div>
             ) : null,
-            gallery: ff('feature_gallery') && isFeaturePlacedInHome('feature_gallery') ? (
-              galleryHomeMode === 'content' ? (
-                <div className="relative px-4 mt-5 mb-3" style={{ animation: resolveAnimation('gallery', 'zoomIn') }} key="gallery">
-                  <GalleryContent variant="home" onNavigate={onNavigate} />
-                </div>
-              ) : (
-              <div className="relative px-4 mt-5 mb-3" style={{ animation: resolveAnimation('gallery', 'zoomIn') }} key="gallery">
+            gallery: ff('feature_gallery') ? (
+              <div className="home-section home-section-row home-section-gallery relative px-4 mt-5 mb-3" style={{ animation: resolveAnimation('gallery', 'zoomIn') }} key="gallery">
                 <div className="pointer-events-none absolute -top-1.5 left-7 z-20 ">
                   <span
                     className="inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[10px] font-extrabold uppercase tracking-[0.18em] relative top-[12px]  flex-shrink-0"
@@ -3184,7 +3182,7 @@ const Home = ({ onNavigate, onLogout }) => {
                 </div>
 
                 <div
-                  className="rounded-3xl overflow-hidden"
+                  className="home-gallery-card rounded-3xl overflow-hidden"
                   style={{
                     boxShadow: `0 10px 32px ${applyOpacity(theme.secondary, 0.16)}, 0 2px 8px ${applyOpacity(theme.primary, 0.08)}`,
                     border: `1px solid ${applyOpacity(theme.primary, 0.1)}`,
@@ -3192,7 +3190,7 @@ const Home = ({ onNavigate, onLogout }) => {
                 >
                   <div className="h-[3px]" style={{ background: `linear-gradient(90deg, ${theme.primary}, ${theme.secondary})` }} />
                   {showGalleryLoader ? (
-                    <div className="w-full h-[200px] flex items-center justify-center" style={{ background: theme.accentBg }}>
+                    <div className="home-gallery-fill w-full h-[200px] flex items-center justify-center" style={{ background: theme.accentBg }}>
                       <div className="flex flex-col items-center gap-2">
                         <div className="w-8 h-8 rounded-full border-2 border-t-transparent animate-spin" style={{ borderColor: theme.primary, borderTopColor: 'transparent' }} />
                         <p className="text-xs font-medium" style={{ color: theme.secondary }}>Loading gallery...</p>
@@ -3203,7 +3201,7 @@ const Home = ({ onNavigate, onLogout }) => {
                   ) : (
                     <button
                       onClick={() => onNavigate('gallery')}
-                      className="w-full h-[200px] flex flex-col items-center justify-center gap-3"
+                      className="home-gallery-fill w-full h-[200px] flex flex-col items-center justify-center gap-3"
                       style={{
                         background: 'color-mix(in srgb, var(--app-page-bg) 80%, var(--surface-color))'
                       }}
@@ -3233,25 +3231,21 @@ const Home = ({ onNavigate, onLogout }) => {
             ) : null,
 
             quickActions: enabledQuickActions.length > 0 ? (
-              <div className="px-4 mt-5 mb-4" style={{ animation: resolveAnimation('quickActions', 'cards') }} key="quickActions">
-                {(() => {
-                  const renderTile = (action) => (
-                    <button
-                      key={action.id}
-                      onClick={() => onNavigate(action.route)}
-                      className="rounded-2xl text-left transition-all active:scale-[0.97] duration-150"
-                      style={{
-                        background: quickActionsBg,
-                        border: `1px solid color-mix(in srgb, ${quickActionsText} 22%, transparent)`,
-                        boxShadow: `0 4px 16px color-mix(in srgb, ${quickActionsText} 14%, transparent), 0 1px 4px color-mix(in srgb, ${quickActionsText} 10%, transparent)`,
-                        overflow: 'hidden',
-                      }}
-                    >
-                      <div
-                        className="h-[4px]"
-                        style={{ background: `linear-gradient(90deg, ${quickActionsText} 0%, color-mix(in srgb, ${quickActionsText} 60%, var(--surface-color)) 100%)` }}
-                      />
-                      <div className="p-3.5">
+              <div className="home-section home-section-full home-section-quick-actions px-4 mt-5 mb-4" style={{ animation: resolveAnimation('quickActions', 'cards') }} key="quickActions">
+                <div className="grid grid-cols-2 gap-3">
+                  {enabledQuickActions.map((action) => {
+                    return (
+                      <button
+                        key={action.id}
+                        onClick={() => onNavigate(action.route)}
+                        className="rounded-2xl text-left transition-all active:scale-[0.97] duration-150"
+                        style={{
+                          background: quickActionsBg,
+                          border: `1px solid color-mix(in srgb, ${quickActionsText} 22%, transparent)`,
+                          boxShadow: `0 4px 16px color-mix(in srgb, ${quickActionsText} 14%, transparent), 0 1px 4px color-mix(in srgb, ${quickActionsText} 10%, transparent)`,
+                          overflow: 'hidden',
+                        }}
+                      >
                         <div
                           className="w-10 h-10 rounded-xl flex items-center justify-center mb-2.5"
                           style={{
@@ -3323,17 +3317,12 @@ const Home = ({ onNavigate, onLogout }) => {
               </div>
             ) : null,
 
-            sponsors: ff('feature_sponsors') && isFeaturePlacedInHome('feature_sponsors') ? (
-              sponsorsHomeMode === 'content' ? (
-                <div className="px-4 mt-5 mb-4" style={{ animation: resolveAnimation('sponsors', 'cards') }} key="sponsors">
-                  <SponsorsContent variant="home" onNavigate={onNavigate} />
-                </div>
-              ) : (
-              <div className="px-4 mt-5 mb-4" style={{ animation: resolveAnimation('sponsors', 'cards') }} key="sponsors">
+            sponsors: ff('feature_sponsors') ? (
+              <div className="home-section home-section-row home-section-sponsors px-4 mt-5 mb-4" style={{ animation: resolveAnimation('sponsors', 'cards') }} key="sponsors">
                 {sponsors.length > 0 ? (
                   <div className="relative">
                     <div
-                      className="relative overflow-hidden rounded-3xl"
+                      className="home-sponsor-card relative overflow-hidden rounded-3xl"
                       onTouchStart={handleSponsorTouchStart}
                       onTouchMove={handleSponsorTouchMove}
                       onTouchEnd={handleSponsorTouchEnd}
@@ -3344,7 +3333,7 @@ const Home = ({ onNavigate, onLogout }) => {
                           background: sponsorOverlayBackground,
                         }}
                       />
-                      <div className="relative min-h-[196px]">
+                      <div className="home-sponsor-fill relative min-h-[196px]">
                         {visibleSponsors.map((sponsor, idx) => {
                           if (!sponsor?.id) return null;
                           const isActive = idx === activeVisibleSponsorIndex;
@@ -3461,7 +3450,7 @@ const Home = ({ onNavigate, onLogout }) => {
                   </div>
                 ) : isSponsorSectionLoading ? (
                   <div
-                    className="relative overflow-hidden rounded-3xl"
+                    className="home-sponsor-card relative overflow-hidden rounded-3xl"
                     style={{
                       boxShadow: `0 8px 24px ${applyOpacity(theme.secondary, 0.07)}`
                     }}
@@ -3479,7 +3468,7 @@ const Home = ({ onNavigate, onLogout }) => {
                       }}
                     >
                       <div
-                        className="relative rounded-3xl p-4 min-h-[168px] overflow-hidden"
+                        className="home-sponsor-fill relative rounded-3xl p-4 min-h-[168px] overflow-hidden"
                         style={{
                           background: applyOpacity(sponsorTheme.cardBgColor, sponsorTheme.cardBgOpacity),
                           backdropFilter: 'blur(8px)',
@@ -3508,7 +3497,7 @@ const Home = ({ onNavigate, onLogout }) => {
                   </div>
                 ) : (
                   <div
-                    className="relative overflow-hidden rounded-3xl"
+                    className="home-sponsor-card relative overflow-hidden rounded-3xl"
                     style={{
                       boxShadow: `0 8px 24px ${applyOpacity(theme.secondary, 0.07)}`
                     }}
@@ -3526,7 +3515,7 @@ const Home = ({ onNavigate, onLogout }) => {
                       }}
                     >
                       <div
-                        className="relative rounded-3xl p-4 min-h-[168px] overflow-hidden"
+                        className="home-sponsor-fill relative rounded-3xl p-4 min-h-[168px] overflow-hidden"
                         style={{
                           background: applyOpacity(sponsorTheme.cardBgColor, sponsorTheme.cardBgOpacity),
                           backdropFilter: 'blur(8px)',
@@ -3562,10 +3551,17 @@ const Home = ({ onNavigate, onLogout }) => {
             ) : null,
           };
 
-          return resolvedHomeLayout.map((key) => {
-            if (key === 'trustList' && !showTrustSelector) return null;
-            return SECTIONS[key] || null;
-          });
+          return (
+            <div
+              key={`home-sections-${normalizeTrustId(selectedTrustId || trustInfo?.id || '')}`}
+              className="home-section-layout home-load-sequence"
+            >
+              {resolvedHomeLayout.map((key) => {
+                if (key === 'trustList' && !showTrustSelector) return null;
+                return SECTIONS[key] || null;
+              })}
+            </div>
+          );
         })()}
       </div>
 
@@ -3608,6 +3604,330 @@ const Home = ({ onNavigate, onLogout }) => {
         @keyframes themeZoomIn {
           from { opacity: 0; transform: scale(0.98); }
           to { opacity: 1; transform: scale(1); }
+        }
+
+        .home-section-layout {
+          width: 100%;
+        }
+
+        @media (min-width: 1024px) {
+          .home-desktop-shell {
+            animation: homeDesktopPageIn 460ms cubic-bezier(0.22, 1, 0.36, 1) both;
+          }
+
+          .home-desktop-shell {
+            overflow: visible !important;
+            min-height: 100% !important;
+          }
+
+          .home-main-content {
+            flex: 1 0 auto;
+            overflow: visible !important;
+          }
+
+          .home-decor-blob {
+            display: none !important;
+          }
+
+          .home-footer {
+            margin-top: auto !important;
+            position: static;
+            flex-shrink: 0;
+            box-shadow: none;
+          }
+
+          .home-navbar {
+            position: sticky;
+            top: 0;
+            z-index: 55;
+            box-shadow: 0 10px 26px color-mix(in srgb, var(--brand-navy-dark) 16%, transparent) !important;
+            animation: homeDesktopNavbarIn 520ms cubic-bezier(0.22, 1, 0.36, 1) both;
+          }
+
+          .home-navbar-row {
+            padding: 14px 16px !important;
+            justify-content: flex-start !important;
+            gap: 24px;
+          }
+          .home-navbar-member-banner{
+            display:none !important;
+          }
+
+          .home-navbar-title-wrap {
+            justify-content: flex-start !important;
+            min-width: 0;
+          }
+
+          .home-navbar-title-wrap > .overflow-hidden {
+            width: auto !important;
+            max-width: min(52vw, 760px);
+          }
+
+          .home-navbar-title {
+            font-size: 1.3em !important;
+            line-height: 1.1;
+            max-width: min(52vw, 760px) !important;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            animation: none !important;
+            letter-spacing: 0;
+          }
+
+          .home-navbar-row > .flex-shrink-0:last-child {
+            margin-left: auto;
+          }
+
+          .home-navbar .notification-button {
+            
+            border-radius: 16px !important;
+            background: transparent !important;
+            transition: transform 180ms ease, background 180ms ease, box-shadow 180ms ease;
+          }
+
+          .home-navbar .notification-button:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 10px 22px color-mix(in srgb, var(--navbar-text) 12%, transparent);
+          }
+
+          .home-navbar .notification-dropdown {
+            top: 82px !important;
+            right: 32px !important;
+            transform-origin: top right;
+            animation: homeDesktopDropdownIn 180ms cubic-bezier(0.22, 1, 0.36, 1) both;
+          }
+
+          .home-section-layout {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 18px;
+            padding: 0;
+            align-items: stretch;
+            animation: homeDesktopContentIn 560ms cubic-bezier(0.22, 1, 0.36, 1) 90ms both;
+          }
+
+          .home-section-full {
+            grid-column: 1 / -1;
+          }
+
+          .home-section-row {
+            min-width: 0;
+            margin-top: 0 !important;
+            margin-bottom: 0 !important;
+            padding-left: 0 !important;
+            padding-right: 0 !important;
+          }
+
+          .home-load-sequence > .home-section {
+            opacity: 0;
+            animation: homeDesktopSectionIn 620ms cubic-bezier(0.22, 1, 0.36, 1) both !important;
+            will-change: transform, opacity;
+          }
+
+          .home-load-sequence > .home-section:nth-child(1) { animation-delay: 120ms !important; }
+          .home-load-sequence > .home-section:nth-child(2) { animation-delay: 190ms !important; }
+          .home-load-sequence > .home-section:nth-child(3) { animation-delay: 260ms !important; }
+          .home-load-sequence > .home-section:nth-child(4) { animation-delay: 330ms !important; }
+          .home-load-sequence > .home-section:nth-child(5) { animation-delay: 400ms !important; }
+
+          .home-section-gallery {
+            order: 20;
+            margin-left: 1rem !important;
+          }
+
+          .home-section-sponsors {
+            order: 21;
+            margin-right: 1rem !important;
+          }
+
+          .home-section-quick-actions {
+            order: 30;
+          }
+
+          .home-gallery-card,
+          .home-sponsor-card {
+            height: 260px;
+            transition:
+              transform 260ms cubic-bezier(0.22, 1, 0.36, 1),
+              box-shadow 260ms ease,
+              filter 260ms ease;
+            will-change: transform;
+          }
+
+          .home-gallery-card {
+            display: flex;
+            flex-direction: column;
+          }
+
+          .home-gallery-card:hover,
+          .home-sponsor-card:hover {
+            transform: translateY(-4px);
+            filter: saturate(1.03);
+          }
+
+          .home-gallery-card img,
+          .home-sponsor-card img {
+            transition: transform 420ms cubic-bezier(0.22, 1, 0.36, 1), filter 280ms ease;
+          }
+
+          .home-gallery-card:hover img,
+          .home-sponsor-card:hover img {
+            transform: scale(1.035);
+          }
+
+          .home-section-quick-actions button {
+            position: relative;
+            opacity: 0;
+            transform: translateY(0);
+            animation: homeDesktopQuickCardIn 520ms cubic-bezier(0.22, 1, 0.36, 1) both;
+            transition:
+              transform 220ms cubic-bezier(0.22, 1, 0.36, 1),
+              box-shadow 220ms ease,
+              border-color 220ms ease,
+              filter 220ms ease;
+            will-change: transform;
+          }
+
+          .home-section-quick-actions button:nth-child(1) { animation-delay: 420ms; }
+          .home-section-quick-actions button:nth-child(2) { animation-delay: 490ms; }
+          .home-section-quick-actions button:nth-child(3) { animation-delay: 560ms; }
+          .home-section-quick-actions button:nth-child(4) { animation-delay: 630ms; }
+          .home-section-quick-actions button:nth-child(5) { animation-delay: 700ms; }
+          .home-section-quick-actions button:nth-child(6) { animation-delay: 770ms; }
+          .home-section-quick-actions button:nth-child(7) { animation-delay: 840ms; }
+          .home-section-quick-actions button:nth-child(8) { animation-delay: 910ms; }
+          .home-section-quick-actions button:nth-child(9) { animation-delay: 980ms; }
+          .home-section-quick-actions button:nth-child(n + 10) { animation-delay: 1050ms; }
+
+          .home-section-quick-actions button::after {
+            content: '';
+            position: absolute;
+            inset: 0;
+            pointer-events: none;
+            opacity: 0;
+            background: linear-gradient(120deg, transparent 0%, color-mix(in srgb, var(--surface-color) 42%, transparent) 48%, transparent 78%);
+            transform: translateX(-32%);
+            transition: opacity 220ms ease, transform 420ms cubic-bezier(0.22, 1, 0.36, 1);
+          }
+
+          .home-section-quick-actions button:hover {
+            transform: translateY(-3px);
+            filter: saturate(1.04);
+          }
+
+          .home-section-quick-actions button:hover::after {
+            opacity: 0.42;
+            transform: translateX(32%);
+          }
+
+          .home-section-quick-actions button img,
+          .home-section-quick-actions button svg {
+            transition: transform 220ms cubic-bezier(0.22, 1, 0.36, 1);
+          }
+
+          .home-section-quick-actions button:hover img,
+          .home-section-quick-actions button:hover svg {
+            transform: scale(1.08);
+          }
+
+          .home-section-full:first-child button,
+          .home-section-full:first-child img {
+            transition:
+              transform 220ms cubic-bezier(0.22, 1, 0.36, 1),
+              box-shadow 220ms ease,
+              filter 220ms ease;
+          }
+
+          .home-section-full:first-child button:hover {
+            transform: translateY(-2px);
+          }
+
+          .home-gallery-card > div:first-child {
+            flex: 0 0 3px;
+          }
+
+          .home-gallery-card > div:not(:first-child),
+          .home-gallery-card > button,
+          .home-gallery-card .relative.w-full.overflow-hidden,
+          .home-gallery-card .flex.transition-transform,
+          .home-gallery-card .w-full.flex-shrink-0,
+          .home-gallery-card img,
+          .home-gallery-fill,
+          .home-sponsor-card > .relative:not(.absolute),
+          .home-sponsor-fill {
+            height: 100% !important;
+            min-height: 0 !important;
+          }
+
+          .home-footer {
+            animation: homeDesktopFooterIn 520ms cubic-bezier(0.22, 1, 0.36, 1) 420ms both;
+          }
+        }
+
+        @keyframes homeDesktopPageIn {
+          from { opacity: 0; }
+          to { opacity: 1; }
+        }
+
+        @keyframes homeDesktopNavbarIn {
+          from { opacity: 0; transform: translateY(-12px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+
+        @keyframes homeDesktopContentIn {
+          from { opacity: 0; transform: translateY(10px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+
+        @keyframes homeDesktopSectionIn {
+          from { opacity: 0; transform: translateY(16px) scale(0.985); }
+          to { opacity: 1; transform: translateY(0) scale(1); }
+        }
+
+        @keyframes homeDesktopDropdownIn {
+          from { opacity: 0; transform: translateY(-6px) scale(0.98); }
+          to { opacity: 1; transform: translateY(0) scale(1); }
+        }
+
+        @keyframes homeDesktopQuickCardIn {
+          from { opacity: 0; transform: translateY(18px) scale(0.98); }
+          to { opacity: 1; transform: translateY(0) scale(1); }
+        }
+
+        @keyframes homeDesktopFooterIn {
+          from { opacity: 0; transform: translateY(8px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+
+        @media (min-width: 1024px) and (prefers-reduced-motion: reduce) {
+          .home-desktop-shell,
+          .home-navbar,
+          .home-section-layout,
+          .home-section,
+          .home-footer,
+          .home-navbar .notification-dropdown {
+            animation: none !important;
+            opacity: 1 !important;
+            transform: none !important;
+          }
+
+          .home-gallery-card,
+          .home-sponsor-card,
+          .home-section-quick-actions button,
+          .home-section-quick-actions button::after,
+          .home-section-quick-actions button img,
+          .home-section-quick-actions button svg,
+          .home-gallery-card img,
+          .home-sponsor-card img,
+          .home-navbar .notification-button {
+            transition: none !important;
+          }
+
+          .home-section-quick-actions button {
+            animation: none !important;
+            opacity: 1 !important;
+            transform: none !important;
+          }
         }
 
         /* Decorative home blobs animations */
@@ -3666,7 +3986,7 @@ const Home = ({ onNavigate, onLogout }) => {
 
       {/* ── Footer ── */}
       <footer
-        className="mt-auto py-3 px-6"
+        className="home-footer mt-auto py-3 px-6"
         style={{
           borderTop: '1px solid var(--footer-border)',
           background: 'var(--footer-bg)',
@@ -3697,6 +4017,7 @@ const Home = ({ onNavigate, onLogout }) => {
         loading={termsModalLoading}
         error={termsModalError}
       />
+      </div>
     </div>
   );
 };

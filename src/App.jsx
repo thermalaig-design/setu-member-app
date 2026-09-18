@@ -41,6 +41,7 @@ import SponsorsList from './SponsorsList';
 import DeveloperDetails from './DeveloperDetails';
 import PersistentUserPanel from './components/PersistentUserPanel';
 import FeatureGuard from './components/FeatureGuard';
+import Sidebar from './features/sidebar/Sidebar';
 
 import TermsAndConditions from './TermsAndConditions';
 import PrivacyPolicy from './PrivacyPolicy';
@@ -1118,17 +1119,20 @@ const HospitalTrusteeApp = () => {
     }
   }, [location.pathname, selectedDetailMember, selectedMember, previousScreen, previousScreenName]);
 
+  const normalizedPath = String(location.pathname || '/').replace(/^\/+/, '').replace(/\/.*$/, '');
+  const currentSidebarPage = normalizedPath || 'home';
+  const showDesktopSidebar = !PUBLIC_ROUTES.includes(location.pathname) && localStorage.getItem('isLoggedIn') === 'true';
+
   const appContent = (
     <div
       className={`min-h-screen relative shadow-2xl overflow-x-hidden app-route-shell ${(location.pathname === '/login' || location.pathname === '/otp-verification' || location.pathname === '/profile' || location.pathname === '/vip-login') ? 'overflow-hidden' : 'overflow-y-auto'
-        } w-full max-w-[430px] mx-auto`}
+        } w-full mx-auto`}
       style={{
         background: 'var(--page-bg, var(--app-page-bg))',
         color: 'var(--body-text-color)',
         fontFamily: "var(--font-family, 'Inter', sans-serif)",
         marginInline: 'auto',
-        width: 'min(100%, 430px)',
-        maxWidth: '430px',
+        width: '100%',
         flexShrink: 0,
       }}
     >
@@ -1665,15 +1669,29 @@ const HospitalTrusteeApp = () => {
     <ThemeContext.Provider value={appTheme}>
       <GalleryProvider>
         <div
-          className="min-h-screen w-full flex justify-center overflow-x-hidden app-root-shell"
+          className={`min-h-screen w-full flex overflow-x-hidden app-root-shell ${showDesktopSidebar ? 'has-desktop-sidebar' : ''}`}
           data-theme-scope="trust-app"
           style={{
             display: 'flex',
-            justifyContent: 'center',
             width: '100%',
           }}
         >
-          {appContent}
+          {showDesktopSidebar && (
+            <div className="app-desktop-sidebar hidden lg:block flex-shrink-0">
+              <Sidebar
+                isOpen={false}
+                onClose={() => {}}
+                onNavigate={handleNavigate}
+                currentPage={currentSidebarPage}
+                onLogout={() => clearAuthAndRedirectToLogin('logout')}
+                variant="persistent"
+                isCollapsed={false}
+              />
+            </div>
+          )}
+          <div className="app-main-column min-w-0 flex-1">
+            {appContent}
+          </div>
         </div>
       </GalleryProvider>
     </ThemeContext.Provider>

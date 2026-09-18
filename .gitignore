@@ -1,7 +1,6 @@
 node_modules/
 dist/
 .env
+.env.local
 backend/.env
-
 backend/node_modules/
-.vite/

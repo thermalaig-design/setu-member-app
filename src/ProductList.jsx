@@ -251,14 +251,12 @@ const isVisibleProduct = (product) => {
 
 const isActiveImage = (image) => {
   const status = pickText(image?.status).toLowerCase();
-  if (['inactive', 'disabled', 'deleted', 'archived'].includes(status)) return false;
-  if (image?.is_active === false || image?.isActive === false) return false;
-  return true;
+  return !status || status === 'active';
 };
 
 const resolveProductImages = (product) =>
   (Array.isArray(product?.images) ? product.images : [])
-    .filter((image) => pickText(image?.image_url) && isActiveImage(image))
+    .filter((image) => isActiveImage(image) && pickText(image?.image_url))
     .sort((a, b) => normalizeOrder(a?.sort_order) - normalizeOrder(b?.sort_order));
 
 const resolveProductPrice = (product) => {
@@ -1926,8 +1924,8 @@ const ProductList = ({ categoryId, onBack, onOpenProduct }) => {
         .ws-plp-name { font-size: 15px; color: ${navbarTextColor}; line-height: 1.3; }
         .ws-plp-code { margin-top: 2px; font-size: 11px; color: ${T.inkSoft}; line-height: 1.25; }
         .ws-price-row { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; }
-        .ws-sheet-overlay { position: fixed; inset: 0; background: rgba(28,27,25,0.4); z-index: 20; display: flex; align-items: flex-end; max-width: 430px; margin: 0 auto; }
-        .ws-sheet { background: ${T.bg}; width: 100%; border-radius: 18px 18px 0 0; max-height: 72vh; display: flex; flex-direction: column; }
+        .ws-sheet-overlay { position: fixed; inset: 0; background: rgba(28,27,25,0.4); z-index: 20; display: flex; align-items: flex-end;  margin: 0 auto; }
+        .ws-sheet { background: ${T.bg}; width: 100%; max-width: 430px; margin: 0 auto; border-radius: 18px 18px 0 0; max-height: 72vh; display: flex; flex-direction: column; }
         .ws-sheet-handle { width: 36px; height: 4px; background: ${T.line}; border-radius: 999px; margin: 10px auto 4px; }
         .ws-sheet-header { display: flex; align-items: center; justify-content: space-between; padding: 10px 18px 14px; border-bottom: 1px solid ${T.line}; }
         .ws-sheet-title { font-family: 'Playfair Display', serif; font-size: 17px; font-weight: 600; }
@@ -1968,6 +1966,61 @@ const ProductList = ({ categoryId, onBack, onOpenProduct }) => {
         .ws-pdp-meta-row span:last-child { color: ${T.ink}; font-weight: 500; }
         .ws-pdp-cta-bar { position: sticky; bottom: 0; background: ${T.bg}; border-top: 1px solid ${T.line}; padding: 12px 18px; }
         .ws-pdp-cta { width: 100%; }
+
+        @media (min-width: 1024px) {
+          .ws-breadcrumb {
+            padding: 14px 24px 0;
+          }
+
+          .ws-plp-toolbar {
+            padding: 12px 24px;
+            display: grid;
+            grid-template-columns: minmax(260px, 1fr) auto;
+            align-items: center;
+          }
+
+          .ws-plp-toolbar-actions {
+            justify-content: flex-end;
+          }
+
+          .ws-plp-grid {
+            grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+            gap: 18px 16px;
+            margin-top: 12px;
+            padding: 0 24px 24px;
+          }
+
+          .ws-plp-card {
+            gap: 8px;
+          }
+
+          .ws-plp-carousel,
+          .ws-plp-img {
+            height: 251px;
+            aspect-ratio: auto;
+            border-radius: 8px;
+          }
+
+          .ws-plp-name {
+            font-size: 13px;
+            line-height: 1.25;
+          }
+
+          .ws-price-row span:first-child {
+            font-size: 13px !important;
+          }
+
+          .ws-heart-btn {
+            width: 30px;
+            height: 30px;
+            top: 8px;
+            right: 8px;
+          }
+
+          .ws-plp-dots {
+            bottom: 8px;
+          }
+        }
       `}</style>
     </div>
   );

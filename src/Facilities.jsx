@@ -324,7 +324,7 @@ export const FacilitiesContent = ({ onNavigate, variant = 'page' }) => {
       )}
 
       {!loading && !error && (
-        <div className="px-6 py-4 space-y-4">
+        <div className="facilities-list px-6 py-4 space-y-4">
           {facilities.map((facility, index) => {
             const dateLabel = formatTimestamp(facility.created_at, facility.updated_at);
             const rawAttachments = Array.isArray(facility.attachments) ? facility.attachments : [];
@@ -350,7 +350,7 @@ export const FacilitiesContent = ({ onNavigate, variant = 'page' }) => {
                 <button
                   key={facility.id}
                   onClick={() => openFacilityDetail(facility.id)}
-                  className="w-full text-left rounded-2xl p-4 sm:p-5 border transition-all hover:shadow-md active:scale-[0.995] border-l-4 shadow-sm"
+                  className="facility-card w-full text-left rounded-2xl p-4 sm:p-5 border transition-all hover:shadow-md active:scale-[0.995] border-l-4 shadow-sm"
                   style={{
                   borderLeftColor: theme.primary,
                   borderColor: 'var(--advertisement-card-border)',
@@ -381,7 +381,7 @@ export const FacilitiesContent = ({ onNavigate, variant = 'page' }) => {
 
                 {firstAttachment && (
                   <div
-                    className="mb-3 rounded-xl overflow-hidden border"
+                    className="facility-card-media mb-3 rounded-xl overflow-hidden border"
                     style={{ borderColor: 'color-mix(in srgb, var(--brand-navy) 12%, transparent)' }}
                   >
                     {firstAttachment.type === 'image' ? (
@@ -428,6 +428,60 @@ export const FacilitiesContent = ({ onNavigate, variant = 'page' }) => {
 
         </div>
       )}
+      <style>{`
+        @media (min-width: 1024px) {
+          .facilities-list {
+            padding-left: 2rem;
+            padding-right: 2rem;
+          }
+
+          .facility-card {
+            display: grid;
+            grid-template-columns: minmax(280px, 34%) minmax(0, 1fr);
+            grid-template-areas:
+              "media meta"
+              "media title"
+              "media description"
+              "media footer";
+            column-gap: 1.25rem;
+            align-items: start;
+            min-height: 180px;
+          }
+
+          .facility-card > .flex:first-child {
+            grid-area: meta;
+            margin-bottom: 0.45rem;
+          }
+
+          .facility-card > h3 {
+            grid-area: title;
+            margin-bottom: 0.4rem;
+          }
+
+          .facility-card > div:has(> p.line-clamp-3) {
+            grid-area: description;
+            margin-bottom: 0.75rem;
+          }
+
+          .facility-card-media {
+            grid-area: media;
+            margin-bottom: 0 !important;
+            height: 160px;
+            align-self: stretch;
+          }
+
+          .facility-card-media img,
+          .facility-card-media > div {
+            height: 100% !important;
+          }
+
+          .facility-card > .pt-3 {
+            grid-area: footer;
+            align-self: end;
+            margin-top: auto;
+          }
+        }
+      `}</style>
     </div>
   );
 };

@@ -158,121 +158,126 @@ function Login() {
   const isDisabled = loading || phoneNumber.length < 10;
 
   return (
-    <div style={styles.page}>
-      <div style={styles.card}>
+    <div className="login-page" style={styles.page}>
+      <div className="login-shell">
 
-        {/* Gold top bar */}
-        <div style={styles.accentBar} />
-
-        <div style={styles.cardBody}>
-
-          {/* Tenant Trust branding (white-label /app/<slug> installs only) */}
-          {isTenantMode && trustInfo?.name && (
-            <div style={styles.tenantBrand}>
-              {trustInfo.icon_url && (
-                <img
-                  src={trustInfo.icon_url}
-                  alt={trustInfo.name}
-                  style={styles.tenantLogo}
-                  onError={(e) => { e.currentTarget.style.display = 'none'; }}
-                />
-              )}
-              <span style={styles.tenantName}>{trustInfo.name}</span>
-            </div>
-          )}
-
-          {/* Heading */}
-          <div style={styles.headingGroup}>
-            <h1 style={styles.heading}>Login</h1>
-            <p style={styles.subheading}>Enter your mobile number to continue</p>
-          </div>
-
-          {/* Form */}
-          <form onSubmit={handleCheckPhone} style={styles.form}>
-            <div style={styles.fieldGroup}>
-              <label style={styles.label}>MOBILE NUMBER</label>
-              <div style={{ ...styles.inputRow, ...(focused ? styles.inputRowFocus : {}) }}>
-                <div style={styles.codeBox}>
-                  <span style={styles.flag}>🇮🇳</span>
-                  <span style={styles.code}>+91</span>
-                </div>
-                <input
-                  type="tel"
-                  className="login-mobile-input"
-                  name="phone"
-                  placeholder="10-digit mobile number"
-                  value={phoneNumber}
-                  onChange={(e) => setPhoneNumber(e.target.value.replace(/\D/g, '').slice(0, 10))}
-                  maxLength={10}
-                  required
-                  onFocus={() => setFocused(true)}
-                  onBlur={() => setFocused(false)}
-                  style={styles.input}
-                  autoComplete="tel-national"
-                  inputMode="numeric"
-                />
-              </div>
-            </div>
-
-            {error && (
-              <div style={styles.errorBox}>
-                <span style={styles.errorIcon}>!</span>
-                {error}
-              </div>
-            )}
-
-            <button
-              type="submit"
-              disabled={isDisabled}
-              style={{ ...styles.btn, ...(isDisabled ? styles.btnDisabled : {}) }}
-            >
-              {loading ? (
-                <span style={styles.btnLoading}>
-                  <span style={styles.spinner} />
-                  Verifying...
-                </span>
-              ) : (
-                <>
-                  Continue
-                  <span style={styles.btnArrow}>→</span>
-                </>
-              )}
-            </button>
-          </form>
-
-          {/* Footer links */}
-          <div style={styles.footer}>
-            <div style={styles.footerLinks}>
-              <Link to="/terms-and-conditions" style={styles.footerLink}>Terms</Link>
-              <span style={styles.footerSep} />
-              <Link to="/privacy-policy" style={styles.footerLink}>Privacy Policy</Link>
-            </div>
-            <p style={styles.versionText}>App Version {displayTrustVersion}</p>
-          </div>
-
-        </div>
-      </div>
-
-      {/* Powered by SETU */}
-      <div style={styles.poweredBy}>
-        {/* Elegant fading divider */}
-        <div style={styles.poweredDivider} />
-
-        <span style={styles.poweredLabel}>Powered by</span>
-
-        {/* Logo + wordmark row */}
-        <div style={styles.poweredRow}>
-          <div style={styles.poweredLogoRing}>
+        {/* Branding panel — desktop only (≥1024px), hidden on mobile/tablet */}
+        <div className="login-branding-panel">
+          <div style={styles.brandLogoRing}>
             <img
               src={SETU_POWERED_LOGO}
               alt="SETU"
-              style={styles.poweredLogo}
+              style={styles.brandLogo}
               onError={(e) => { e.currentTarget.style.display = 'none'; }}
             />
           </div>
-          <div style={styles.poweredTextGroup}>
-            <span style={styles.poweredBrand}>S&nbsp;E&nbsp;T&nbsp;U</span>
-            <span style={styles.poweredTagline}>Where AI connections create power</span>
+          <span style={styles.brandWordmark}>S&nbsp;E&nbsp;T&nbsp;U</span>
+          <span style={styles.brandTagline}>Where AI connections create power</span>
+        </div>
+
+        <div className="login-card-col">
+          <div style={styles.card}>
+
+            {/* Gold top bar */}
+            <div style={styles.accentBar} />
+
+            <div style={styles.cardBody}>
+
+              {/* Heading */}
+              <div style={styles.headingGroup}>
+                <h1 style={styles.heading}>Login</h1>
+                <p style={styles.subheading}>Enter your mobile number to continue</p>
+              </div>
+
+              {/* Form */}
+              <form onSubmit={handleCheckPhone} style={styles.form}>
+                <div style={styles.fieldGroup}>
+                  <label style={styles.label}>MOBILE NUMBER</label>
+                  <div style={{ ...styles.inputRow, ...(focused ? styles.inputRowFocus : {}) }}>
+                    <div style={styles.codeBox}>
+                      <span style={styles.flag}>🇮🇳</span>
+                      <span style={styles.code}>+91</span>
+                    </div>
+                    <input
+                      type="tel"
+                      className="login-mobile-input"
+                      name="phone"
+                      placeholder="10-digit mobile number"
+                      value={phoneNumber}
+                      onChange={(e) => setPhoneNumber(e.target.value.replace(/\D/g, '').slice(0, 10))}
+                      maxLength={10}
+                      required
+                      onFocus={() => setFocused(true)}
+                      onBlur={() => setFocused(false)}
+                      style={styles.input}
+                      autoComplete="tel-national"
+                      inputMode="numeric"
+                    />
+                  </div>
+                </div>
+
+                {error && (
+                  <div style={styles.errorBox}>
+                    <span style={styles.errorIcon}>!</span>
+                    {error}
+                  </div>
+                )}
+
+                <button
+                  type="submit"
+                  className="login-continue-btn"
+                  disabled={isDisabled}
+                  style={{ ...styles.btn, ...(isDisabled ? styles.btnDisabled : {}) }}
+                >
+                  {loading ? (
+                    <span style={styles.btnLoading}>
+                      <span style={styles.spinner} />
+                      Verifying...
+                    </span>
+                  ) : (
+                    <>
+                      Continue
+                      <span style={styles.btnArrow}>→</span>
+                    </>
+                  )}
+                </button>
+              </form>
+
+              {/* Footer links */}
+              <div style={styles.footer}>
+                <div style={styles.footerLinks}>
+                  <Link to="/terms-and-conditions" className="login-footer-link" style={styles.footerLink}>Terms</Link>
+                  <span style={styles.footerSep} />
+                  <Link to="/privacy-policy" className="login-footer-link" style={styles.footerLink}>Privacy Policy</Link>
+                </div>
+                <p style={styles.versionText}>App Version {displayTrustVersion}</p>
+              </div>
+
+            </div>
+          </div>
+
+          {/* Powered by SETU — mobile/tablet only; desktop shows the branding panel instead */}
+          <div className="login-powered-mobile" style={styles.poweredBy}>
+            {/* Elegant fading divider */}
+            <div style={styles.poweredDivider} />
+
+            <span style={styles.poweredLabel}>Powered by</span>
+
+            {/* Logo + wordmark row */}
+            <div style={styles.poweredRow}>
+              <div style={styles.poweredLogoRing}>
+                <img
+                  src={SETU_POWERED_LOGO}
+                  alt="SETU"
+                  style={styles.poweredLogo}
+                  onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                />
+              </div>
+              <div style={styles.poweredTextGroup}>
+                <span style={styles.poweredBrand}>S&nbsp;E&nbsp;T&nbsp;U</span>
+                <span style={styles.poweredTagline}>Where AI connections create power</span>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -288,6 +293,80 @@ function Login() {
           -webkit-box-shadow: 0 0 0px 1000px #1f1f1f inset !important;
           box-shadow: 0 0 0px 1000px #1f1f1f inset !important;
           transition: background-color 9999s ease-in-out 0s;
+        }
+
+        .login-continue-btn:hover:not(:disabled) {
+          filter: brightness(1.08);
+        }
+        .login-footer-link:hover {
+          color: #f5d07a;
+        }
+        .login-continue-btn:focus-visible,
+        .login-footer-link:focus-visible {
+          outline: 2px solid #d4af37;
+          outline-offset: 2px;
+        }
+
+        .login-shell {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          width: 100%;
+          gap: 20px;
+        }
+        .login-branding-panel {
+          display: none;
+        }
+        .login-card-col {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          width: 100%;
+          gap: 20px;
+        }
+
+        @media (min-width: 768px) {
+          .login-shell {
+            max-width: 460px;
+          }
+        }
+
+        @media (min-width: 1024px) {
+          .login-shell {
+            flex-direction: row;
+            align-items: stretch;
+            justify-content: center;
+            max-width: 1160px;
+            min-height: calc(100vh - 32px);
+            gap: 0;
+            border-radius: 20px;
+            overflow: hidden;
+            border: 1px solid #5c4a1e;
+            box-shadow: 0 24px 70px rgba(0,0,0,0.45);
+          }
+          .login-branding-panel {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            flex: 1 1 52%;
+            background:
+              radial-gradient(circle at 30% 20%, rgba(212,175,55,0.16), transparent 55%),
+              linear-gradient(160deg, #221b08, #141414 65%);
+            border-right: 1px solid #5c4a1e;
+            padding: 60px 48px;
+            gap: 18px;
+          }
+          .login-card-col {
+            flex: 1 1 48%;
+            justify-content: center;
+            background: #1a1a1a;
+            padding: 60px 48px;
+            gap: 0;
+          }
+          .login-powered-mobile {
+            display: none !important;
+          }
         }
       `}</style>
     </div>
@@ -574,6 +653,41 @@ const styles = {
     fontStyle: 'italic',
     lineHeight: 1.4,
     maxWidth: '112px',
+    fontFamily: "'Inter', sans-serif",
+  },
+  brandLogoRing: {
+    width: '84px',
+    height: '84px',
+    borderRadius: '50%',
+    background: '#1a1a1a',
+    border: '2px solid #5c4a1e',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+  },
+  brandLogo: {
+    width: '64px',
+    height: '64px',
+    objectFit: 'contain',
+    borderRadius: '50%',
+    filter: 'brightness(2.2) contrast(1.1) saturate(1.3)',
+  },
+  brandWordmark: {
+    fontSize: '26px',
+    fontWeight: 700,
+    color: '#d4af37',
+    letterSpacing: '6px',
+    fontFamily: "'Palatino Linotype', Georgia, serif",
+    textShadow: '0 0 20px rgba(212,175,55,0.4)',
+  },
+  brandTagline: {
+    fontSize: '13px',
+    color: '#a8926a',
+    letterSpacing: '0.4px',
+    fontStyle: 'italic',
+    textAlign: 'center',
+    maxWidth: '260px',
     fontFamily: "'Inter', sans-serif",
   },
 };

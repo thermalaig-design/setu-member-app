@@ -893,4 +893,3 @@ export async function getSponsorDetail({ sponsorId, trustId = null }) {
 
   return detail;
 }
-

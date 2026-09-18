@@ -149,10 +149,10 @@ const MemberDetails = ({ member, onNavigateBack, previousScreenName }) => {
       </div>
 
       {/* Member Details Card */}
-      <div className="p-6">
-        <div className="rounded-2xl shadow-sm p-6" style={{ background: 'var(--advertisement-card-bg)', border: '1px solid var(--advertisement-card-border)', boxShadow: '0 12px 28px color-mix(in srgb, var(--advertisement-card-shadow) 24%, transparent)' }}>
-          <div className="flex items-center gap-4 mb-6" style={{ flexDirection: 'column'}}>
-            <div className="h-20 w-20 rounded-2xl flex items-center justify-center overflow-hidden shadow-sm border" style={{ background: 'color-mix(in srgb, var(--advertisement-card-bg) 76%, var(--app-accent-bg))', color: 'var(--advertisement-title)', borderColor: 'var(--advertisement-card-border)' }}>
+      <div className="member-details-content p-6">
+        <div className="member-details-card rounded-2xl shadow-sm p-6" style={{ background: 'var(--advertisement-card-bg)', border: '1px solid var(--advertisement-card-border)', boxShadow: '0 12px 28px color-mix(in srgb, var(--advertisement-card-shadow) 24%, transparent)' }}>
+          <div className="member-details-profile flex items-center gap-4 mb-6" style={{ flexDirection: 'column'}}>
+            <div className="member-details-avatar h-20 w-20 rounded-2xl flex items-center justify-center overflow-hidden shadow-sm border" style={{ background: 'color-mix(in srgb, var(--advertisement-card-bg) 76%, var(--app-accent-bg))', color: 'var(--advertisement-title)', borderColor: 'var(--advertisement-card-border)' }}>
               {profilePhoto ? (
                 <img
                   src={profilePhoto}
@@ -188,7 +188,7 @@ const MemberDetails = ({ member, onNavigateBack, previousScreenName }) => {
             </div>
           </div>
 
-          <div className="grid grid-cols-1 gap-4">
+          <div className="member-details-grid grid grid-cols-1 gap-4">
             {/* Determine if this is a healthcare member (from opd_schedule) or committee member */}
             {(() => {
               const isHealthcareMember = member.isHealthcareMember ||
@@ -594,6 +594,65 @@ const MemberDetails = ({ member, onNavigateBack, previousScreenName }) => {
         }
         .member-details-theme .text-gray-500 {
           color: var(--advertisement-subtitle) !important;
+        }
+
+        @media (min-width: 1024px) {
+          .member-details-content {
+            padding: 32px clamp(28px, 3vw, 52px) !important;
+          }
+
+          .member-details-card {
+            display: grid;
+            grid-template-columns: minmax(220px, 300px) minmax(0, 1fr);
+            gap: 32px;
+            align-items: start;
+            width: 100%;
+            max-width: none;
+            padding: 32px !important;
+            min-height: auto;
+          }
+
+          .member-details-profile {
+            position: sticky;
+            top: 128px;
+            align-items: center !important;
+            justify-content: flex-start;
+            margin-bottom: 0 !important;
+            padding: 18px;
+            border-radius: 18px;
+            background: color-mix(in srgb, var(--advertisement-card-bg) 78%, var(--page-bg));
+            border: 0 !important;
+          }
+
+          .member-details-avatar {
+            width: 301px !important;
+            height: 301px !important;
+            border-radius: 24px !important;
+          }
+
+          .member-details-profile h2 {
+            text-align: center;
+            font-size: 24px !important;
+            line-height: 1.2;
+            margin-top: 6px;
+          }
+
+          .member-details-grid {
+            grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+            gap: 16px !important;
+          }
+
+          .member-details-grid > div {
+            min-height: 88px;
+            padding: 16px !important;
+            align-items: center !important;
+            border: 0 !important;
+            background: transparent !important;
+          }
+
+          .member-details-grid > div:has(.flex-1) {
+            grid-column: span 1;
+          }
         }
       `}</style>
     </div>

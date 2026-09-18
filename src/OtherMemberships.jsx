@@ -1040,10 +1040,9 @@ const OtherMemberships = ({ onNavigate, variant = 'page' }) => {
   // ── render ──
   return (
     <div
-      className="other-memberships-page"
+      className="om-shell"
       style={{
         width: '100%',
-	        maxWidth: isHomeVariant ? 'none' : '430px',
         margin: '0 auto',
 	        minHeight: isHomeVariant ? 'auto' : '100dvh',
         overflow: 'visible',
@@ -1052,10 +1051,8 @@ const OtherMemberships = ({ onNavigate, variant = 'page' }) => {
       }}
     >
       {/* ── Header ── */}
-	      {!isHomeVariant && (
-	        <>
-	      <div
-	        className="other-memberships-header px-4 py-4 flex items-center justify-between sticky top-0 z-50 shadow-md"
+      <div
+        className="px-4 py-4 md:px-8 md:py-5 lg:px-12 flex items-center justify-between sticky top-0 z-50 shadow-md"
         style={{
           background: navbarTheme?.backgroundStyle || 'var(--navbar-bg, var(--app-navbar-bg))',
           backdropFilter: `blur(${navbarTheme?.blurPx || '12px'})`,
@@ -1072,7 +1069,7 @@ const OtherMemberships = ({ onNavigate, variant = 'page' }) => {
         >
           {isMenuOpen ? <X className="h-6 w-6" /> : <Menu className="h-6 w-6" />}
         </button>
-        <h1 className="text-base font-bold tracking-wide" style={{ color: navbarTheme?.textColor || 'var(--navbar-text)' }}>
+        <h1 className="text-base md:text-lg font-bold tracking-wide" style={{ color: navbarTheme?.textColor || 'var(--navbar-text)' }}>
           Other Memberships
         </h1>
         <button
@@ -1089,7 +1086,16 @@ const OtherMemberships = ({ onNavigate, variant = 'page' }) => {
 	      )}
 
       {/* ── Content ── */}
-      <div className="other-memberships-content" style={{ width: '100%', margin: '0 auto', boxSizing: 'border-box' }}>
+      <div className="om-content" style={{ width: '100%', margin: '0 auto', boxSizing: 'border-box' }}>
+
+        {/* Success banner */}
+        {submitSuccess && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', background: colors.successBg, border: `1.5px solid #BBF7D0`, borderRadius: '14px', padding: '12px 16px', marginBottom: '16px', animation: 'fadeUp 0.3s ease-out' }}>
+            <CheckCircle size={18} color={colors.success} />
+            <p style={{ fontSize: '13px', fontWeight: 600, color: '#15803d', margin: 0 }}>{submitSuccess}</p>
+          </div>
+        )}
+
         {/* Loading spinner */}
         {loading && trustLinks.length === 0 && (
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '60px 0' }}>
@@ -1111,31 +1117,109 @@ const OtherMemberships = ({ onNavigate, variant = 'page' }) => {
           <>
             {showCreateNewApp && (
               <button
-                type="button"
-                onClick={handleCreateNewApp}
-                style={{
-                  width: '100%',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: '10px',
-                  padding: '14px 20px',
-                  background: `linear-gradient(135deg, ${colors.primary}, ${colors.secondary})`,
-                  color: colors.onPrimary,
-                  border: 'none',
-                  borderRadius: '16px',
-                  fontSize: '15px',
-                  fontWeight: 800,
-                  cursor: 'pointer',
-                  marginBottom: '20px',
-                  boxShadow: `0 8px 18px ${applyOpacity(colors.primary, 0.26)}`,
-                  letterSpacing: 0,
-                  animation: 'fadeUp 0.3s ease-out'
-                }}
+                className="om-primary-btn"
+                onClick={() => { setShowForm(true); setSubmitError(''); setSubmitSuccess(''); }}
+                style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px', padding: '14px 20px', background: `linear-gradient(135deg, ${colors.primary}, ${colors.secondary})`, color: '#fff', border: 'none', borderRadius: '16px', fontSize: '15px', fontWeight: 700, cursor: 'pointer', marginBottom: '20px', boxShadow: `0 8px 18px ${applyOpacity(colors.primary, 0.26)}`, letterSpacing: '-0.2px', animation: 'fadeUp 0.3s ease-out' }}
               >
                 <Plus size={20} />
                 Create New App
               </button>
+            )}
+
+            {/* ── ADD MEMBERSHIP FORM ── */}
+            {showForm && (
+              <div className="om-form-card" style={{ background: 'var(--advertisement-card-bg)', borderRadius: '20px', border: '2px solid var(--advertisement-card-border)', boxShadow: '0 12px 32px color-mix(in srgb, var(--advertisement-card-shadow) 26%, transparent)', marginBottom: '24px', overflow: 'hidden', animation: 'fadeUp 0.35s ease-out' }}>
+                <div style={{ background: `linear-gradient(135deg, ${colors.primary}, ${colors.secondary})`, padding: '16px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <div style={{ width: 36, height: 36, borderRadius: '10px', background: 'rgba(255,255,255,0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      <Plus size={18} color="#fff" />
+                    </div>
+                    <div>
+                      <h2 style={{ color: '#fff', fontSize: '15px', fontWeight: 800, margin: 0 }}>Add New Membership</h2>
+                      <p style={{ color: 'rgba(255,255,255,0.85)', fontSize: '11px', margin: 0 }}>Fill in the trust membership details</p>
+                    </div>
+                  </div>
+                  <button onClick={() => { setShowForm(false); setSubmitError(''); setForm(EMPTY_FORM); }}
+                    style={{ width: 32, height: 32, borderRadius: '10px', border: 'none', background: 'rgba(255,255,255,0.15)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>
+                    <X size={16} />
+                  </button>
+                </div>
+
+                <form onSubmit={handleSubmit} style={{ padding: '20px' }}>
+
+                  {/* Trust / Organisation — plain text input */}
+                  <div style={{ marginBottom: '16px' }}>
+                    <Label><Building2 size={10} style={{ display: 'inline', marginRight: 5 }} />Trust / Organisation *</Label>
+                    <input
+                      type="text"
+                      placeholder="Enter trust or organisation name"
+                      value={form.organisation_name}
+                      onChange={e => handleFormChange('organisation_name', e.target.value)}
+                      style={inputStyle}
+                    />
+                  </div>
+
+                  {/* Membership Number */}
+                  <div style={{ marginBottom: '16px' }}>
+                    <Label><Hash size={10} style={{ display: 'inline', marginRight: 5 }} />Membership Number *</Label>
+                    <input
+                      type="text"
+                      placeholder="e.g. MBR-2024-001"
+                      value={form.membership_no}
+                      onChange={e => handleFormChange('membership_no', e.target.value)}
+                      required
+                      style={inputStyle}
+                    />
+                  </div>
+
+                  {/* Membership Type — free text, optional */}
+                  <div style={{ marginBottom: '16px' }}>
+                    <Label><Tag size={10} style={{ display: 'inline', marginRight: 5 }} />Membership Type (optional)</Label>
+                    <input
+                      type="text"
+                      placeholder="e.g. Life Member, Annual Member..."
+                      value={form.membership_type}
+                      onChange={e => handleFormChange('membership_type', e.target.value)}
+                      style={inputStyle}
+                    />
+                  </div>
+
+                  {/* Remark */}
+                  <div style={{ marginBottom: '20px' }}>
+                    <Label><FileText size={10} style={{ display: 'inline', marginRight: 5 }} />Remark (optional)</Label>
+                    <textarea
+                      placeholder="Any notes or remarks..."
+                      value={form.remark}
+                      onChange={e => handleFormChange('remark', e.target.value)}
+                      rows={3}
+                      style={{ ...inputStyle, resize: 'vertical', lineHeight: 1.5 }}
+                    />
+                  </div>
+
+                  {/* Submit error */}
+                  {submitError && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', background: colors.errorBg, border: `1px solid #FECACA`, borderRadius: '10px', padding: '10px 14px', marginBottom: '14px' }}>
+                      <AlertCircle size={16} color={colors.error} />
+                      <p style={{ fontSize: '13px', color: colors.error, margin: 0, fontWeight: 600 }}>{submitError}</p>
+                    </div>
+                  )}
+
+                  {/* Submit buttons */}
+                  <div style={{ display: 'flex', gap: '10px' }}>
+                    <button type="button"
+                      onClick={() => { setShowForm(false); setSubmitError(''); setForm(EMPTY_FORM); }}
+                      style={{ flex: 1, padding: '12px', background: 'color-mix(in srgb, var(--advertisement-card-bg) 82%, var(--app-accent-bg))', color: 'var(--advertisement-description)', border: '1px solid var(--advertisement-card-border)', borderRadius: '12px', fontSize: '14px', fontWeight: 700, cursor: 'pointer' }}>
+                      Cancel
+                    </button>
+                    <button type="submit" disabled={submitting}
+                      style={{ flex: 2, padding: '12px', background: submitting ? 'var(--body-text-color)' : `linear-gradient(135deg, ${colors.primary}, ${colors.secondary})`, color: '#fff', border: 'none', borderRadius: '12px', fontSize: '14px', fontWeight: 700, cursor: submitting ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', boxShadow: submitting ? 'none' : `0 8px 16px ${applyOpacity(colors.primary, 0.22)}` }}>
+                      {submitting
+                        ? <><Loader2 size={16} style={{ animation: 'spin 0.8s linear infinite' }} /> Saving…</>
+                        : <><Save size={16} /> Save Membership</>}
+                    </button>
+                  </div>
+                </form>
+              </div>
             )}
 
             {/* ── SECTION: Other Memberships (from other_memberships table) ── */}
@@ -1149,8 +1233,8 @@ const OtherMemberships = ({ onNavigate, variant = 'page' }) => {
                     {otherMems.length} Added Membership{otherMems.length !== 1 ? 's' : ''}
                   </span>
                 </div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                  {sortedOtherMems.map((m, idx) => (
+                <div className="om-card-grid">
+                  {otherMems.map((m, idx) => (
                     <MembershipCard key={m.id} m={m} index={idx} showGoldenMembershipBadge={false} />
                   ))}
                 </div>
@@ -1159,25 +1243,34 @@ const OtherMemberships = ({ onNavigate, variant = 'page' }) => {
 
             {/* ── SECTION: Trust Links (from reg_members-backed user payload) ── */}
             {trustLinks.length > 0 && (
-              <div
-                className="other-memberships-grid"
-                style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', columnGap: '9px', rowGap: '10px' }}
-              >
-                {sortedTrustLinks.map((link, index) => (
-                  <TrustLinkTile
-                    key={link.id || index}
-                    link={link}
-                    onClick={() => handleOpenTrustWebApp(link)}
-                    onOpenCard={() => openTrustIdCard(link)}
-                    isLoading={openingTrustId === normalizeText(link?.trust_id || link?.Trust?.id)}
-                  />
-                ))}
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '14px' }}>
+                  <div style={{ width: 28, height: 28, borderRadius: '8px', background: `linear-gradient(135deg, ${colors.primary}, ${colors.secondary})`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <Users size={14} color="#fff" />
+                  </div>
+                  <span style={{ fontSize: '13px', fontWeight: 700, color: colors.primary }}>
+                    {trustLinks.length} Trust{trustLinks.length !== 1 ? 's' : ''} Linked
+                  </span>
+                </div>
+                <div className="om-card-grid">
+                  {trustLinks.map((link, index) => (
+                    <MembershipCard
+                      key={link.id || index}
+                      m={link}
+                      index={index}
+                      showGoldenMembershipBadge
+                      clickable
+                      onClick={() => openTrustIdCard(link)}
+                    />
+                  ))}
+                </div>
               </div>
             )}
 
             {/* Empty state */}
             {otherMems.length === 0 && trustLinks.length === 0 && (
               <div
+                className="om-empty-state"
                 style={{
                   textAlign: 'center',
                   padding: '60px 24px',
@@ -1317,6 +1410,50 @@ const OtherMemberships = ({ onNavigate, variant = 'page' }) => {
         @keyframes legalNameMarquee {
           0%, 20%   { transform: translateX(0); }
           80%, 100% { transform: translateX(-50%); }
+        }
+
+        .om-shell { max-width: 430px; }
+        .om-content { padding: 20px 16px 40px; }
+        .om-card-grid { display: flex; flex-direction: column; gap: 12px; }
+
+        @media (min-width: 768px) {
+          .om-shell { max-width: 100%; }
+          .om-content { max-width: 1148px; margin-left: auto; margin-right: auto; padding: 28px 32px 48px; }
+          .om-card-grid { display: flex; flex-direction: row; flex-wrap: wrap;  gap: 16px; }
+          .om-card-grid > div { flex: 0 1 340px; }
+          .om-primary-btn { max-width: 480px; margin-left: auto; margin-right: auto; }
+          .om-form-card { max-width: 560px; margin-left: auto; margin-right: auto; }
+          .om-empty-state { max-width: 560px; margin-left: auto; margin-right: auto; }
+        }
+
+        @media (min-width: 1024px) {
+          .om-content {
+            max-width: none;
+            padding: 24px 28px 44px;
+          }
+
+          .om-primary-btn {
+            width: fit-content !important;
+            max-width: none;
+            display: inline-flex !important;
+            margin-left: auto !important;
+            margin-right: 0 !important;
+            padding-left: 22px !important;
+            padding-right: 22px !important;
+            float:right;
+          }
+
+          .om-card-grid {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 18px;
+          }
+
+          .om-card-grid > div {
+            width: 100%;
+            min-width: 0;
+            max-width: none;
+          }
         }
       `}</style>
     </div>

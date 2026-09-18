@@ -405,12 +405,30 @@ export function GalleryContent({ onNavigate, variant = 'page' }) {
   const actionBg = 'var(--app-button-bg, var(--brand-red))';
 
   return (
-    <div style={isPageVariant ? { minHeight: '100vh', background: 'var(--page-bg, var(--app-page-bg))', fontFamily: "var(--font-family, 'Inter', sans-serif)" } : undefined}>
-      {isPageVariant && (
-        <div style={{ background: navbarBackground, padding: '16px', paddingTop: 'max(env(safe-area-inset-top,0px),16px)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', position: 'sticky', top: 0, zIndex: 50, boxShadow: '0 2px 16px color-mix(in srgb, var(--brand-navy-dark) 18%, transparent)', backdropFilter: 'blur(var(--navbar-blur, 12px))', WebkitBackdropFilter: 'blur(var(--navbar-blur, 12px))', borderBottom: '1px solid var(--navbar-border)' }}>
-          <button onClick={() => setIsMenuOpen(!isMenuOpen)} style={nb.iconBtn}>
-            {isMenuOpen ? <X style={{ width: 24, height: 24, color: 'var(--app-button-text, var(--surface-color))' }} /> : <Menu style={{ width: 24, height: 24, color: 'var(--app-button-text, var(--surface-color))' }} />}
-          </button>
+    <div className="gallery-page" style={{ minHeight: '100vh', background: 'var(--page-bg, var(--app-page-bg))', fontFamily: "var(--font-family, 'Inter', sans-serif)" }}>
+      <div className="gallery-navbar" style={{ background: navbarBackground, padding: '16px', paddingTop: 'max(env(safe-area-inset-top,0px),16px)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', position: 'sticky', top: 0, zIndex: 50, boxShadow: '0 2px 16px color-mix(in srgb, var(--brand-navy-dark) 18%, transparent)', backdropFilter: 'blur(var(--navbar-blur, 12px))', WebkitBackdropFilter: 'blur(var(--navbar-blur, 12px))', borderBottom: '1px solid var(--navbar-border)' }}>
+        <button onClick={() => setIsMenuOpen(!isMenuOpen)} style={nb.iconBtn}>
+          {isMenuOpen ? <X style={{ width: 24, height: 24, color: 'var(--app-button-text, var(--surface-color))' }} /> : <Menu style={{ width: 24, height: 24, color: 'var(--app-button-text, var(--surface-color))' }} />}
+        </button>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          {selectedAlbumId && (
+            <button
+              onClick={() => {
+                setSelectedAlbumId(null);
+                setAlbumPageImages([]);
+                setAlbumTotalPages(0);
+                setCurrentPage(1);
+              }}
+              style={{ ...nb.iconBtn, width: 34, height: 34, background: 'color-mix(in srgb, var(--surface-color) 18%, transparent)', marginRight: 2 }}
+            >
+              <ArrowLeft style={{ width: 18, height: 18, color: 'var(--app-button-text, var(--surface-color))' }} />
+            </button>
+          )}
+          <span style={{ color: 'var(--app-button-text, var(--surface-color))', fontWeight: 800, fontSize: 17, letterSpacing: '-0.3px' }}>
+            {selectedAlbumId ? (selectedAlbum?.name || 'Album') : 'Gallery'}
+          </span>
+        </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             {selectedAlbumId && (
@@ -437,9 +455,9 @@ export function GalleryContent({ onNavigate, variant = 'page' }) {
         </div>
       )}
 
-      <div style={isPageVariant ? { padding: '16px 14px 40px', maxWidth: 520, margin: '0 auto' } : { maxWidth: 520, margin: '0 auto' }}>
+      <div className="gallery-content" style={{ padding: '16px 14px 40px', maxWidth: 520, margin: '0 auto' }}>
         {isLoading && !showLoadingFallback && !hasSettledInitialAlbums && (
-          <div style={gl.folderGrid}>
+          <div className="gallery-album-grid" style={gl.folderGrid}>
             {Array.from({ length: 6 }).map((_, i) => (
               <div key={i} style={{ ...gl.folderCard, background: 'color-mix(in srgb, var(--app-accent-bg) 85%, var(--surface-muted))', animation: 'pulse 1.4s ease-in-out infinite' }}>
                 <div style={{ height: 160, background: 'color-mix(in srgb, var(--app-accent-bg) 78%, var(--surface-muted))', borderRadius: '16px 16px 0 0' }} />
@@ -467,12 +485,12 @@ export function GalleryContent({ onNavigate, variant = 'page' }) {
               </div>
             ) : (
               <>
-                <div style={{ marginBottom: 16, marginTop: 4 }}>
+                <div className="gallery-heading" style={{ marginBottom: 16, marginTop: 4 }}>
                   <h2 style={{ fontSize: 20, fontWeight: 800, color: actionBg, margin: 0 }}>Albums</h2>
                   <p style={{ fontSize: 12, color: 'var(--body-text-color)', margin: '4px 0 0', fontWeight: 500 }}>{albums.length} album{albums.length !== 1 ? 's' : ''}</p>
                 </div>
 
-                <div style={gl.folderGrid}>
+                <div className="gallery-album-grid" style={gl.folderGrid}>
                   {albums.map((album) => {
                     const photos = (album.previewImages || []).slice(0, 2);
                     const count = Math.max(0, Number.isFinite(Number(album.imageCount)) ? Number(album.imageCount) : 0);
@@ -509,7 +527,7 @@ export function GalleryContent({ onNavigate, variant = 'page' }) {
 
         {!isLoading && !error && selectedAlbumId && (
           <>
-            <div style={{ marginBottom: 14, marginTop: 4, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <div className="gallery-heading" style={{ marginBottom: 14, marginTop: 4, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <div>
                 <p style={{ fontSize: 13, color: 'var(--body-text-color)', margin: 0, fontWeight: 500 }}>
                   {filteredImages.length} {filteredImages.length === 1 ? 'photo' : 'photos'}
@@ -519,7 +537,7 @@ export function GalleryContent({ onNavigate, variant = 'page' }) {
             </div>
 
             {isAlbumLoading ? (
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 10 }}>
+              <div className="gallery-photo-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 10 }}>
                 {Array.from({ length: 10 }).map((_, i) => (
                   <div key={i} style={{ ...gl.photoCard, background: 'color-mix(in srgb, var(--app-accent-bg) 84%, var(--surface-muted))', animation: 'pulse 1.4s ease-in-out infinite' }} />
                 ))}
@@ -531,7 +549,7 @@ export function GalleryContent({ onNavigate, variant = 'page' }) {
               </div>
             ) : (
               <>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 10 }}>
+                <div className="gallery-photo-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 10 }}>
                   {filteredImages.map((image, idx) => (
                     <div
                       key={image.id}
@@ -649,11 +667,27 @@ export function GalleryContent({ onNavigate, variant = 'page' }) {
         }
 
         .gallery-folder-card {
+          position: relative;
           transition: transform 0.28s cubic-bezier(.2,.8,.2,1), box-shadow 0.28s;
+        }
+        .gallery-folder-card::after {
+          content: '';
+          position: absolute;
+          inset: 0;
+          pointer-events: none;
+          opacity: 0;
+          background: linear-gradient(120deg, transparent 0%, color-mix(in srgb, var(--surface-color) 28%, transparent) 48%, transparent 76%);
+          transform: translateX(-38%);
+          transition: opacity 0.26s ease, transform 0.52s cubic-bezier(.2,.8,.2,1);
+          z-index: 6;
         }
         .gallery-folder-card:hover {
           transform: translateY(-5px) scale(1.01);
           box-shadow: 0 16px 40px color-mix(in srgb, var(--brand-navy-dark) 14%, transparent) !important;
+        }
+        .gallery-folder-card:hover::after {
+          opacity: 0.4;
+          transform: translateX(38%);
         }
         .gallery-folder-card:active {
           transform: scale(0.97);
@@ -667,8 +701,190 @@ export function GalleryContent({ onNavigate, variant = 'page' }) {
           transform: scale(1.03);
           box-shadow: 0 10px 28px color-mix(in srgb, var(--brand-navy-dark) 20%, transparent);
         }
+        .gallery-folder-card img,
+        .gallery-photo-card img {
+          transition: transform 0.42s cubic-bezier(.2,.8,.2,1), filter 0.28s ease;
+        }
+        .gallery-folder-card:hover img,
+        .gallery-photo-card:hover img {
+          transform: scale(1.055);
+          filter: saturate(1.06) contrast(1.02);
+        }
         .gallery-photo-card:active {
           transform: scale(0.97);
+        }
+
+        @media (min-width: 1024px) {
+          .gallery-page {
+            min-height: 100% !important;
+            animation: galleryDesktopPageIn 420ms cubic-bezier(0.22, 1, 0.36, 1) both;
+          }
+
+          .gallery-navbar {
+            min-height: 96px;
+            padding: 24px 28px !important;
+            animation: galleryDesktopNavbarIn 520ms cubic-bezier(0.22, 1, 0.36, 1) both;
+          }
+
+          .gallery-navbar button {
+            transition: transform 180ms ease, box-shadow 180ms ease, background 180ms ease !important;
+          }
+
+          .gallery-navbar button:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 10px 22px color-mix(in srgb, var(--navbar-text) 12%, transparent);
+          }
+
+          .gallery-content {
+            max-width: none !important;
+            width: 100%;
+            margin: 0 !important;
+            padding: 28px clamp(24px, 3vw, 48px) 48px !important;
+            animation: galleryDesktopContentIn 560ms cubic-bezier(0.22, 1, 0.36, 1) 90ms both;
+          }
+
+          .gallery-heading {
+            opacity: 0;
+            animation: galleryDesktopHeadingIn 520ms cubic-bezier(0.22, 1, 0.36, 1) 160ms both;
+          }
+
+          .gallery-content > div:first-child h2 {
+            font-size: 28px !important;
+          }
+
+          .gallery-album-grid {
+            grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)) !important;
+            gap: 20px !important;
+          }
+
+          .gallery-folder-card {
+            border-radius: 16px !important;
+            background: color-mix(in srgb, var(--surface-color) 82%, var(--page-bg, var(--app-page-bg))) !important;
+            border: 1px solid color-mix(in srgb, var(--navbar-accent) 22%, transparent) !important;
+            box-shadow: 0 12px 28px color-mix(in srgb, var(--brand-navy-dark) 16%, transparent) !important;
+            opacity: 0;
+            animation: galleryDesktopCardIn 560ms cubic-bezier(0.22, 1, 0.36, 1) both;
+            will-change: transform, opacity;
+          }
+
+          .gallery-folder-card:hover {
+            transform: translateY(-7px) scale(1.012);
+            border-color: color-mix(in srgb, var(--navbar-accent) 44%, transparent) !important;
+            box-shadow:
+              0 22px 48px color-mix(in srgb, var(--brand-navy-dark) 22%, transparent),
+              0 0 0 1px color-mix(in srgb, var(--navbar-accent) 18%, transparent) !important;
+          }
+
+          .gallery-folder-card:nth-child(1) { animation-delay: 260ms; }
+          .gallery-folder-card:nth-child(2) { animation-delay: 340ms; }
+          .gallery-folder-card:nth-child(3) { animation-delay: 420ms; }
+          .gallery-folder-card:nth-child(4) { animation-delay: 500ms; }
+          .gallery-folder-card:nth-child(5) { animation-delay: 580ms; }
+          .gallery-folder-card:nth-child(6) { animation-delay: 660ms; }
+          .gallery-folder-card:nth-child(7) { animation-delay: 740ms; }
+          .gallery-folder-card:nth-child(8) { animation-delay: 820ms; }
+          .gallery-folder-card:nth-child(9) { animation-delay: 900ms; }
+          .gallery-folder-card:nth-child(n + 10) { animation-delay: 980ms; }
+
+          .gallery-folder-card > div:first-child {
+            height: 190px !important;
+          }
+
+          .gallery-folder-card > div:first-child::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            pointer-events: none;
+            opacity: 0;
+            background: radial-gradient(circle at 50% 8%, color-mix(in srgb, var(--surface-color) 26%, transparent), transparent 42%);
+            transition: opacity 260ms ease;
+            z-index: 4;
+          }
+
+          .gallery-folder-card:hover > div:first-child::before {
+            opacity: 1;
+          }
+
+          .gallery-folder-card > div:first-child > div:last-child {
+            transition: transform 220ms cubic-bezier(0.22, 1, 0.36, 1), background 220ms ease;
+          }
+
+          .gallery-folder-card:hover > div:first-child > div:last-child {
+            transform: translateY(-2px);
+            background: color-mix(in srgb, var(--brand-navy-dark) 74%, transparent) !important;
+          }
+
+          .gallery-folder-card > div:last-child {
+            padding: 14px 16px !important;
+          }
+
+          .gallery-folder-card > div:last-child > div {
+            color: var(--heading-color, var(--body-text-color)) !important;
+            font-size: 15px !important;
+          }
+
+          .gallery-photo-grid {
+            grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)) !important;
+            gap: 14px !important;
+          }
+
+          .gallery-photo-card {
+            aspect-ratio: 1 / 1;
+            animation-name: galleryDesktopCardIn;
+            animation-duration: 520ms;
+            animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+          }
+
+          .gallery-photo-card:hover {
+            transform: translateY(-4px) scale(1.025);
+            box-shadow:
+              0 16px 34px color-mix(in srgb, var(--brand-navy-dark) 24%, transparent),
+              0 0 0 1px color-mix(in srgb, var(--navbar-accent) 16%, transparent);
+          }
+        }
+
+        @keyframes galleryDesktopPageIn {
+          from { opacity: 0; }
+          to { opacity: 1; }
+        }
+
+        @keyframes galleryDesktopNavbarIn {
+          from { opacity: 0; transform: translateY(-12px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+
+        @keyframes galleryDesktopContentIn {
+          from { opacity: 0; transform: translateY(10px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+
+        @keyframes galleryDesktopHeadingIn {
+          from { opacity: 0; transform: translateY(14px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+
+        @keyframes galleryDesktopCardIn {
+          from { opacity: 0; transform: translateY(18px) scale(0.98); }
+          to { opacity: 1; transform: translateY(0) scale(1); }
+        }
+
+        @media (min-width: 1024px) and (prefers-reduced-motion: reduce) {
+          .gallery-page,
+          .gallery-navbar,
+          .gallery-content,
+          .gallery-heading,
+          .gallery-folder-card,
+          .gallery-photo-card {
+            animation: none !important;
+            opacity: 1 !important;
+            transform: none !important;
+          }
+
+          .gallery-navbar button,
+          .gallery-folder-card,
+          .gallery-photo-card {
+            transition: none !important;
+          }
         }
       `}</style>
     </div>

@@ -484,41 +484,39 @@ export const DirectoryContent = ({ onNavigate, variant = 'page' }) => {
   };
 
   return (
-    <div className={isPageVariant ? 'min-h-screen' : undefined} style={isPageVariant ? { background: 'var(--page-bg, var(--app-page-bg))' } : undefined}>
-      {isPageVariant && (
-        <div
-          className="theme-navbar sticky top-0 z-20"
-          style={{
-            background: navbarTheme?.backgroundStyle || 'var(--navbar-bg, var(--app-navbar-bg))',
-            backdropFilter: `blur(${navbarTheme?.blurPx || '12px'})`,
-            WebkitBackdropFilter: `blur(${navbarTheme?.blurPx || '12px'})`,
-            borderBottom: '1px solid var(--navbar-border)',
-            boxShadow: '0 2px 16px color-mix(in srgb, var(--brand-navy) 16%, transparent)',
-          }}
-        >
-          <div className="h-[3px]" style={{ background: 'var(--navbar-accent)' }} />
-          <div className="px-4 pt-4 pb-4">
-            <div className="flex items-center justify-between">
-              <button
-                type="button"
-                onClick={() => setIsMenuOpen((prev) => !prev)}
-                className="p-2 rounded-xl transition-colors"
-                style={{ color: navbarTextColor, background: 'color-mix(in srgb, var(--navbar-bg) 72%, var(--surface-color))' }}
-                aria-label="Open menu"
-              >
-                {isMenuOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
-              </button>
-              <h1 className="text-lg font-extrabold tracking-wide" style={{ color: navbarTextColor }}>Directory</h1>
-              <button
-                type="button"
-                onClick={() => navigate(getAppHomePath())}
-                className="p-2 rounded-xl transition-colors"
-                style={{ color: navbarTextColor, background: 'transparent' }}
-                aria-label="Home"
-              >
-                <HomeIcon className="h-5 w-5" />
-              </button>
-            </div>
+    <div className="directory-page min-h-screen" style={{ background: 'var(--page-bg, var(--app-page-bg))' }}>
+      <div
+        className="directory-navbar theme-navbar sticky top-0 z-20"
+        style={{
+          background: navbarTheme?.backgroundStyle || 'var(--navbar-bg, var(--app-navbar-bg))',
+          backdropFilter: `blur(${navbarTheme?.blurPx || '12px'})`,
+          WebkitBackdropFilter: `blur(${navbarTheme?.blurPx || '12px'})`,
+          borderBottom: '1px solid var(--navbar-border)',
+          boxShadow: '0 2px 16px color-mix(in srgb, var(--brand-navy) 16%, transparent)',
+        }}
+      >
+        <div className="h-[3px]" style={{ background: 'var(--navbar-accent)' }} />
+        <div className="directory-navbar-inner px-4 pt-4 pb-4">
+          <div className="flex items-center justify-between">
+            <button
+              type="button"
+              onClick={() => setIsMenuOpen((prev) => !prev)}
+              className="directory-icon-button p-2 rounded-xl transition-colors"
+              style={{ color: navbarTextColor, background: 'color-mix(in srgb, var(--navbar-bg) 72%, var(--surface-color))' }}
+              aria-label="Open menu"
+            >
+              {isMenuOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+            </button>
+            <h1 className="directory-title text-lg font-extrabold tracking-wide" style={{ color: navbarTextColor }}>Directory</h1>
+            <button
+              type="button"
+              onClick={() => navigate('/')}
+              className="directory-icon-button p-2 rounded-xl transition-colors"
+              style={{ color: navbarTextColor, background: 'transparent' }}
+              aria-label="Home"
+            >
+              <HomeIcon className="h-5 w-5" />
+            </button>
           </div>
         </div>
       )}
@@ -535,8 +533,8 @@ export const DirectoryContent = ({ onNavigate, variant = 'page' }) => {
       )}
 
       {/* <div className="px-4 pt-4 grid grid-cols-1 gap-2 sm:grid-cols-[1fr_220px]"> */}
-      <div className="px-4 pt-4 flex items-center gap-2 w-full justify-between">
-        <div className="rounded-2xl p-3 flex items-center gap-2 w-full" style={{ background: applyOpacity(primaryColor, 0.08), border: '1px solid var(--advertisement-card-border)'  }}>
+      <div className="directory-search-row px-4 pt-4 flex items-center gap-2 w-full justify-between">
+        <div className="directory-search rounded-2xl p-3 flex items-center gap-2 w-full" style={{ background: applyOpacity(primaryColor, 0.08), border: '1px solid var(--advertisement-card-border)'  }}>
           <Search className="h-4 w-4" style={{ color: 'var(--advertisement-card-bg)' }} />
           <input
             type="text"
@@ -548,11 +546,11 @@ export const DirectoryContent = ({ onNavigate, variant = 'page' }) => {
           />
         </div>
 
-        <div ref={sortMenuRef} className="relative">
+        <div ref={sortMenuRef} className="directory-sort-wrap relative">
           <button
             type="button"
             onClick={() => setIsSortMenuOpen((prev) => !prev)}
-            className="h-full w-full rounded-2xl p-3 flex items-center justify-center gap-2 transition-colors"
+            className="directory-sort-button h-full w-full rounded-2xl p-3 flex items-center justify-center gap-2 transition-colors"
             style={{ background: `color-mix(in srgb, var(--brand-navy-dark) 100%, transparent)`, border: '1px solid var(--advertisement-card-border)' }}
             aria-haspopup="menu"
             aria-expanded={isSortMenuOpen}
@@ -564,7 +562,7 @@ export const DirectoryContent = ({ onNavigate, variant = 'page' }) => {
 
           {isSortMenuOpen && (
             <div
-              className="absolute right-0 top-full z-30 mt-2 w-56 overflow-hidden rounded-2xl border shadow-lg"
+              className="directory-sort-menu absolute right-0 top-full mt-2 w-56 overflow-hidden rounded-2xl border shadow-lg"
               style={{
                 background: 'var(--surface-color)',
                 borderColor: 'var(--advertisement-card-border)',
@@ -601,7 +599,7 @@ export const DirectoryContent = ({ onNavigate, variant = 'page' }) => {
       </div>
 
       
-      <div className="px-4 mt-4 flex gap-2 overflow-x-auto">
+      <div className="directory-filters px-4 mt-4 flex gap-2 overflow-x-auto">
         {visibleRoleFilters.map((item) => {
           const isActive = activeRole === item.id;
           return (
@@ -609,7 +607,7 @@ export const DirectoryContent = ({ onNavigate, variant = 'page' }) => {
               key={item.id}
               type="button"
               onClick={() => setActiveRole(item.id)}
-              className="px-3 py-2 rounded-xl text-xs font-bold whitespace-nowrap"
+              className="directory-filter px-3 py-2 rounded-xl text-xs font-bold whitespace-nowrap"
               style={isActive
                 ? {
                   background: `linear-gradient(135deg, ${theme.primary || 'var(--brand-red)'}, ${theme.secondary || 'var(--brand-navy)'})`,
@@ -629,17 +627,17 @@ export const DirectoryContent = ({ onNavigate, variant = 'page' }) => {
         })}
       </div>
 
-      <div className="px-4 py-4 space-y-2.5">
+      <div className="directory-results px-4 py-4 space-y-2.5">
         {loading ? (
-          <div className="rounded-2xl p-8 text-center" style={{ background: 'var(--advertisement-card-bg)', border: '1px solid var(--advertisement-card-border)' }}>
+          <div className="directory-state-card rounded-2xl p-8 text-center" style={{ background: 'var(--advertisement-card-bg)', border: '1px solid var(--advertisement-card-border)' }}>
             <p className="text-sm font-semibold" style={{ color: 'var(--advertisement-description)' }}>Loading members...</p>
           </div>
         ) : error ? (
-          <div className="rounded-2xl p-6 text-center" style={{ background: 'var(--advertisement-card-bg)', border: '1px solid color-mix(in srgb, var(--brand-red) 20%, transparent)' }}>
+          <div className="directory-state-card rounded-2xl p-6 text-center" style={{ background: 'var(--advertisement-card-bg)', border: '1px solid color-mix(in srgb, var(--brand-red) 20%, transparent)' }}>
             <p className="text-sm font-semibold" style={{ color: 'var(--brand-red-dark)' }}>{error}</p>
           </div>
         ) : filteredMembers.length === 0 ? (
-          <div className="rounded-2xl p-8 text-center" style={{ background: 'var(--advertisement-card-bg)', border: '1px solid var(--advertisement-card-border)' }}>
+          <div className="directory-state-card rounded-2xl p-8 text-center" style={{ background: 'var(--advertisement-card-bg)', border: '1px solid var(--advertisement-card-border)' }}>
             <Users className="h-8 w-8 mx-auto mb-2" style={{ color: 'var(--advertisement-subtitle)' }} />
             <p className="text-sm font-semibold" style={{ color: 'var(--advertisement-description)' }}>No members found</p>
           </div>
@@ -651,7 +649,7 @@ export const DirectoryContent = ({ onNavigate, variant = 'page' }) => {
                 key={item?.id || item?.reg_id || item?.['S. No.']}
                 onClick={() => openMemberDetails(item)}
                 disabled={item?.Privacy === true}
-                className="w-full text-left rounded-2xl overflow-hidden disabled:cursor-default"
+                className="directory-card w-full text-left rounded-2xl overflow-hidden disabled:cursor-default"
                 style={{
                   background: 'var(--advertisement-card-bg)',
                   border: '1px solid var(--advertisement-card-border)',
@@ -659,12 +657,12 @@ export const DirectoryContent = ({ onNavigate, variant = 'page' }) => {
                 }}
               >
                 {/* Top accent bar */}
-                <div style={{ height: '3px', background: `linear-gradient(90deg, ${theme.primary || 'var(--brand-red)'}, ${theme.secondary || 'var(--brand-navy)'})` }} />
+                <div className="directory-card-accent" style={{ height: '3px', background: `linear-gradient(90deg, ${theme.primary || 'var(--brand-red)'}, ${theme.secondary || 'var(--brand-navy)'})` }} />
 
-                <div className="flex items-center gap-3 px-3 py-3">
+                <div className="directory-card-body flex items-center gap-3 px-3 py-3">
                   {/* Avatar */}
                   <div
-                    className="h-12 w-12 rounded-full overflow-hidden shrink-0 flex items-center justify-center"
+                    className="directory-avatar h-12 w-12 rounded-full overflow-hidden shrink-0 flex items-center justify-center"
                     style={{
                       background: `linear-gradient(135deg, ${applyOpacity(theme.primary, 0.15)}, ${applyOpacity(theme.secondary, 0.2)})`,
                       border: `2px solid ${applyOpacity(theme.primary, 0.3)}`
@@ -692,12 +690,26 @@ export const DirectoryContent = ({ onNavigate, variant = 'page' }) => {
                   </div>
 
                   {/* Info */}
-                  <div className="flex-1 min-w-0">
-                    <h3 className="text-sm font-extrabold truncate" style={{ color: 'var(--advertisement-title)' }}>
-                      {item?.Name || 'N/A'}
-                    </h3>
+                  <div className="directory-card-meta flex-1 min-w-0">
+                    <div className="directory-card-title-row flex items-start justify-between gap-2">
+                      <h3 className="text-sm font-extrabold truncate min-w-0" style={{ color: 'var(--advertisement-title)' }}>
+                        {item?.Name || 'N/A'}
+                      </h3>
+                      {item?.Privacy === true ? (
+                        <span
+                          className="directory-private-badge shrink-0 rounded-full px-2 py-1 text-[10px] font-semibold"
+                          style={{
+                            background: applyOpacity(primaryColor, 0.28),
+                            color: secondaryColor,
+                            border: `1px solid ${applyOpacity(secondaryColor, 0.32)}`,
+                          }}
+                        >
+                          Private
+                        </span>
+                      ) : null}
+                    </div>
 
-                    <div className="flex items-center gap-[0.25rem] mt-1 flex-wrap">
+                    <div className="directory-card-tags flex items-center gap-[0.25rem] mt-1 flex-wrap">
 
 
                       {item?.['Membership number'] ? (
@@ -722,38 +734,23 @@ export const DirectoryContent = ({ onNavigate, variant = 'page' }) => {
                     </div>
 
                     {item?.Email ? (
-                      <span className="inline-flex items-center gap-1 text-[10px] mt-0.5 truncate" style={{ color: 'var(--advertisement-subtitle)' }}>
+                      <span className="directory-email-row inline-flex items-center gap-1 text-[10px] mt-0.5 truncate" style={{ color: 'var(--advertisement-subtitle)' }}>
                         <Mail className="h-3 w-3" />
-                        {item.Email !== null && item.Email !== undefined && item.Email !== 'null' ? item.Email.toLowerCase() : <i>No email provided</i>}
+                        <span className="directory-email-text">{item.Email !== null && item.Email !== undefined && item.Email !== 'null' ? item.Email.toLowerCase() : <i>No email provided</i>}</span>
                       </span>
-                    ) :<span className="inline-flex w-full items-center gap-1 text-[10px] mt-0.5 truncate" style={{ color: 'var(--advertisement-subtitle)' }}>
-                        <Mail className="h-3 w-" />
-                        <i>No email provided</i>
+                    ) :<span className="directory-email-row inline-flex w-full items-center gap-1 text-[10px] mt-0.5 truncate" style={{ color: 'var(--advertisement-subtitle)' }}>
+                        <Mail className="h-3 w-3" />
+                        <span className="directory-email-text"><i>No email provided</i></span>
                       </span>}
                   </div>
-
-
-                  {item?.Privacy === true ? (
-                    <span
-                      className="shrink-0 rounded-full px-2 py-1 text-[10px] font-semibold relative top-[-20px] "
-                      style={{
-                        background: applyOpacity(primaryColor, 0.28),
-                        color: secondaryColor,
-                        border: `1px solid ${applyOpacity(secondaryColor, 0.32)}`,
-                      }}
-                    >
-                      Private
-                    </span>
-                  ) : null}
-
                   {/* Arrow */}
-                  {item?.Privacy !== true && <span className="text-lg font-bold shrink-0" style={{ color: applyOpacity(theme.primary, 0.5) }}>›</span>}
+                  {item?.Privacy !== true && <span className="directory-arrow text-lg font-bold shrink-0" style={{ color: applyOpacity(theme.primary, 0.5) }}>›</span>}
 
                 </div>
               </button>
             ))}
 
-            <div className="mt-2 pt-2 flex items-center justify-between gap-2">
+            <div className="directory-pagination mt-2 pt-2 flex items-center justify-between gap-2">
                   <button
                 type="button"
                 onClick={async () => {
@@ -793,6 +790,344 @@ export const DirectoryContent = ({ onNavigate, variant = 'page' }) => {
           </>
         )}
       </div>
+
+      <style>{`
+        @media (min-width: 1024px) {
+          .directory-navbar {
+            animation: directoryHeaderIn 520ms ease-out both;
+          }
+
+          .directory-navbar-inner,
+          .directory-search-row,
+          .directory-filters {
+            opacity: 0;
+            transform: translateY(14px);
+            animation: directoryFadeUp 520ms ease-out both;
+          }
+
+          .directory-navbar-inner {
+            animation-delay: 80ms;
+          }
+
+          .directory-search-row {
+            position: relative;
+            z-index: 40;
+            padding: 20px clamp(20px, 2.4vw, 40px) 0 !important;
+            animation-delay: 140ms;
+          }
+
+          .directory-sort-wrap {
+            z-index: 50;
+          }
+
+          .directory-search {
+            min-height: 54px;
+            border-radius: 18px !important;
+            transition: border-color 220ms ease, box-shadow 220ms ease, background 220ms ease;
+          }
+
+          .directory-search:focus-within {
+            box-shadow: 0 16px 36px color-mix(in srgb, var(--brand-navy) 11%, transparent);
+            border-color: color-mix(in srgb, var(--brand-red) 28%, var(--advertisement-card-border)) !important;
+          }
+
+          .directory-sort-button {
+            min-width: 54px;
+            min-height: 54px;
+            transition: transform 220ms ease, box-shadow 220ms ease, background 220ms ease;
+          }
+
+          .directory-sort-button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 14px 30px color-mix(in srgb, var(--brand-navy) 14%, transparent);
+          }
+
+          .directory-sort-menu {
+            z-index: 80;
+            width: 268px !important;
+            background: color-mix(in srgb, var(--surface-color) 96%, white) !important;
+            border: 1px solid color-mix(in srgb, var(--brand-navy) 12%, var(--advertisement-card-border)) !important;
+            box-shadow: 0 22px 54px rgba(15, 23, 42, 0.2), 0 0 0 1px rgba(255, 255, 255, 0.42) !important;
+          }
+
+          .directory-sort-menu button {
+            min-height: 50px;
+            background-clip: padding-box;
+          }
+
+          .directory-sort-menu button + button {
+            border-top: 1px solid color-mix(in srgb, var(--brand-navy) 9%, transparent);
+          }
+
+          .directory-filters {
+            position: relative;
+            z-index: 10;
+            padding: 0 clamp(20px, 2.4vw, 40px) !important;
+            margin-top: 20px !important;
+            animation-delay: 200ms;
+          }
+
+          .directory-filter {
+            min-height: 40px;
+          }
+
+          .directory-results {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 20px;
+            padding: 22px clamp(20px, 2.4vw, 40px) 52px !important;
+          }
+
+          .directory-results > :not([hidden]) ~ :not([hidden]) {
+            margin-top: 0 !important;
+          }
+
+          .directory-card {
+            position: relative;
+            min-height: 252px;
+            border-radius: 16px !important;
+            opacity: 0;
+            transform: translateY(24px) scale(0.985);
+            animation: directoryCardIn 560ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+            transition: transform 240ms ease, box-shadow 240ms ease, border-color 240ms ease, filter 240ms ease;
+          }
+
+          .directory-card:nth-of-type(1) { animation-delay: 40ms; }
+          .directory-card:nth-of-type(2) { animation-delay: 90ms; }
+          .directory-card:nth-of-type(3) { animation-delay: 140ms; }
+          .directory-card:nth-of-type(4) { animation-delay: 190ms; }
+          .directory-card:nth-of-type(5) { animation-delay: 240ms; }
+          .directory-card:nth-of-type(6) { animation-delay: 290ms; }
+          .directory-card:nth-of-type(n + 7) { animation-delay: 330ms; }
+
+          .directory-card::after {
+            content: "";
+            position: absolute;
+            inset: 0;
+            pointer-events: none;
+            border-radius: inherit;
+            box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.28), inset 0 -28px 54px rgba(255, 255, 255, 0.07);
+            opacity: 0.58;
+            transition: opacity 240ms ease;
+          }
+
+          .directory-card:hover:not(:disabled) {
+            transform: translateY(-6px);
+            border-color: color-mix(in srgb, var(--brand-red) 30%, var(--advertisement-card-border)) !important;
+            box-shadow: 0 20px 42px color-mix(in srgb, var(--brand-navy) 16%, transparent), 0 10px 26px color-mix(in srgb, var(--brand-red) 18%, transparent) !important;
+            filter: saturate(1.03);
+          }
+
+          .directory-card:hover:not(:disabled)::after {
+            opacity: 0.88;
+          }
+
+          .directory-card-accent {
+            position: absolute;
+            top: 0;
+            left: 0;
+            z-index: 3;
+            width: 100%;
+            height: 4px !important;
+            border-radius: 0;
+            transition: height 220ms ease, filter 220ms ease;
+          }
+
+          .directory-card:hover:not(:disabled) .directory-card-accent {
+            height: 6px !important;
+            filter: saturate(1.2);
+          }
+
+          .directory-card-body {
+            position: relative;
+            z-index: 1;
+            display: flex !important;
+            flex-direction: column;
+            align-items: stretch;
+            gap: 12px;
+            min-height: 252px;
+            padding: 20px 16px 16px !important;
+          }
+
+          .directory-avatar {
+            width: 100% !important;
+            height: 132px !important;
+            border-radius: 16px !important;
+            transition: transform 240ms ease, border-color 240ms ease, box-shadow 240ms ease;
+          }
+
+          .directory-avatar svg {
+            width: 24px;
+            height: 24px;
+          }
+
+          .directory-card:hover:not(:disabled) .directory-avatar {
+            transform: translateY(-2px);
+            border-color: color-mix(in srgb, var(--surface-color) 58%, transparent) !important;
+            box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.2);
+          }
+
+          .directory-card-meta {
+            display: flex;
+            flex-direction: column;
+            min-width: 0;
+            gap: 6px;
+          }
+
+          .directory-card-title-row {
+            align-items: flex-start;
+          }
+
+          .directory-card-meta h3 {
+            white-space: normal !important;
+            overflow: visible !important;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            line-height: 1.2;
+          }
+
+          .directory-card-tags {
+            align-items: center;
+            min-height: 24px;
+          }
+
+          .directory-card-tags span {
+            max-width: 100%;
+          }
+
+          .directory-card-tags span:not(:first-child) {
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+          }
+
+          .directory-email-row {
+            display: inline-flex !important;
+            align-items: center;
+            flex-wrap: nowrap;
+            gap: 5px;
+            max-width: 100%;
+            min-width: 0;
+          }
+
+          .directory-email-row svg {
+            flex: 0 0 auto;
+          }
+
+          .directory-email-text {
+            display: block;
+            min-width: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+          }
+
+          .directory-private-badge {
+            position: static !important;
+            z-index: 2;
+            margin-top: 0;
+          }
+
+          .directory-arrow {
+            position: absolute;
+            right: 16px;
+            bottom: 16px;
+            display: inline-flex;
+            width: 38px;
+            height: 38px;
+            align-items: center;
+            justify-content: center;
+            border-radius: 999px;
+            background: color-mix(in srgb, var(--surface-color) 18%, transparent);
+            box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.18);
+            transition: transform 220ms ease, background 220ms ease, color 220ms ease;
+          }
+
+          .directory-card:hover:not(:disabled) .directory-arrow {
+            transform: translateX(3px);
+            background: color-mix(in srgb, var(--surface-color) 30%, transparent);
+          }
+
+          .directory-state-card,
+          .directory-pagination {
+            grid-column: 1 / -1;
+          }
+
+          .directory-pagination {
+            opacity: 0;
+            transform: translateY(12px);
+            animation: directoryFadeUp 480ms ease-out 240ms both;
+          }
+        }
+
+        @media (min-width: 1280px) {
+          .directory-results {
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+          }
+        }
+
+        @media (min-width: 1600px) {
+          .directory-results {
+            grid-template-columns: repeat(5, minmax(0, 1fr));
+          }
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+          .directory-navbar,
+          .directory-navbar-inner,
+          .directory-search-row,
+          .directory-filters,
+          .directory-card,
+          .directory-pagination {
+            animation: none !important;
+            opacity: 1 !important;
+            transform: none !important;
+          }
+
+          .directory-card,
+          .directory-avatar,
+          .directory-arrow,
+          .directory-search,
+          .directory-sort-button,
+          .directory-card-accent {
+            transition: none !important;
+          }
+        }
+
+        @keyframes directoryHeaderIn {
+          from {
+            opacity: 0;
+            transform: translateY(-10px);
+          }
+          to {
+            opacity: 1;
+            transform: translateY(0);
+          }
+        }
+
+        @keyframes directoryFadeUp {
+          from {
+            opacity: 0;
+            transform: translateY(14px);
+          }
+          to {
+            opacity: 1;
+            transform: translateY(0);
+          }
+        }
+
+        @keyframes directoryCardIn {
+          from {
+            opacity: 0;
+            transform: translateY(24px) scale(0.985);
+          }
+          to {
+            opacity: 1;
+            transform: translateY(0) scale(1);
+          }
+        }
+      `}</style>
     </div>
   );
 };

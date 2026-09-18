@@ -201,9 +201,9 @@ const CommitteeMembers = ({ committeeData, onNavigateBack, previousScreenName })
   };
 
   return (
-    <div className="min-h-screen" style={{ background: 'var(--page-bg, var(--app-page-bg))' }}>
+    <div className="committee-page min-h-screen" style={{ background: 'var(--page-bg, var(--app-page-bg))' }}>
       <div
-        className="theme-navbar sticky top-0 z-20"
+        className="committee-navbar theme-navbar sticky top-0 z-20"
         style={{
           background: navbarTheme?.backgroundStyle || 'var(--navbar-bg, var(--app-navbar-bg))',
           backdropFilter: `blur(${navbarTheme?.blurPx || '12px'})`,
@@ -213,19 +213,19 @@ const CommitteeMembers = ({ committeeData, onNavigateBack, previousScreenName })
         }}
       >
         <div className="h-[3px]" style={{ background: 'var(--navbar-accent)' }} />
-        <div className="px-4 pt-4 pb-4">
+        <div className="committee-navbar-inner px-4 pt-4 pb-4">
           <div className="flex items-center justify-between gap-3">
             <button
               type="button"
               onClick={onNavigateBack}
-              className="p-2 rounded-xl transition-colors"
+              className="committee-back p-2 rounded-xl transition-colors"
               style={{ color: navbarTextColor, background: 'color-mix(in srgb, var(--navbar-bg) 72%, var(--surface-color))' }}
               aria-label={`Back to ${getScreenName()}`}
             >
               <ChevronLeft className="h-5 w-5" />
             </button>
 
-            <div className="min-w-0 flex-1 text-center">
+            <div className="committee-title min-w-0 flex-1 text-center">
               <h1 className="text-lg font-extrabold tracking-wide truncate" style={{ color: navbarTextColor }}>
               {committeeName}  
               </h1>
@@ -237,11 +237,11 @@ const CommitteeMembers = ({ committeeData, onNavigateBack, previousScreenName })
         </div>
       </div>
 
-      <div className="px-4 pt-4 space-y-3">
+      <div className="committee-controls px-4 pt-4 space-y-3">
         <div className="flex flex-col gap-3">
           
 
-          <div className="rounded-2xl p-3 flex items-center gap-2"
+          <div className="committee-search rounded-2xl p-3 flex items-center gap-2"
             style={{
               background: applyOpacity(primaryColor, 0.08),
               border: `1px solid ${applyOpacity(cardBg, 0.16)}`,
@@ -266,7 +266,7 @@ const CommitteeMembers = ({ committeeData, onNavigateBack, previousScreenName })
 
           <div className="flex items-center justify-between gap-3">
             <span
-              className="inline-flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-bold"
+              className="committee-count inline-flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-bold"
               style={{
                 background: applyOpacity(secondaryColor, 0.12),
                 color: descriptionColor,
@@ -280,9 +280,9 @@ const CommitteeMembers = ({ committeeData, onNavigateBack, previousScreenName })
         </div>
       </div>
 
-      <div className="px-4 py-1 space-y-3">
+      <div className="committee-list-content px-4 py-1 space-y-3">
         {committeeMembers.length > 0 ? (
-          <div className="space-y-3">
+          <div className="committee-member-grid space-y-3">
             {paginatedMembers.map((member, index) => {
               const memberName = normalizeText(member.member_name_english || member.Name || 'N/A');
               const memberCommitteeName = normalizeText(member.committee_name_english || committeeData.committee_name_english || committeeName || 'N/A');
@@ -297,7 +297,7 @@ const CommitteeMembers = ({ committeeData, onNavigateBack, previousScreenName })
                   key={member['S. No.'] || member.id || `member-${index}`}
                   onClick={() => openMemberDetails(member)}
                   disabled={privacyLocked}
-                  className="w-full appearance-none border-0 p-0 text-left overflow-hidden rounded-2xl disabled:opacity-100 disabled:cursor-default"
+                  className="committee-member-card w-full appearance-none border-0 p-0 text-left overflow-hidden rounded-2xl disabled:opacity-100 disabled:cursor-default"
                   style={{
                     background: cardBg,
                     border: `1px solid ${cardBorder}`,
@@ -306,13 +306,13 @@ const CommitteeMembers = ({ committeeData, onNavigateBack, previousScreenName })
                   }}
                 >
                   <div
-                    className="h-[3px]"
+                    className="committee-card-accent h-[3px]"
                     style={{ background: `linear-gradient(90deg, ${primaryColor}, ${secondaryColor})` }}
                   />
 
-                  <div className="flex items-start gap-3 px-3 py-3">
+                  <div className="committee-card-body flex items-start gap-3 px-3 py-3">
                     <div
-                      className="h-[55px] w-[55px] rounded-2xl overflow-hidden shrink-0 flex items-center justify-center"
+                      className="committee-avatar h-[55px] w-[55px] rounded-2xl overflow-hidden shrink-0 flex items-center justify-center"
                       style={{
                         background: `linear-gradient(135deg, ${applyOpacity(primaryColor, 0.14)}, ${applyOpacity(secondaryColor, 0.18)})`,
                         border: `1px solid ${applyOpacity(secondaryColor, 0.22)}`
@@ -321,7 +321,7 @@ const CommitteeMembers = ({ committeeData, onNavigateBack, previousScreenName })
                       <User className="h-5 w-5" style={{ color: subtitleColor }} />
                     </div>
 
-                    <div className="flex-1 min-w-0 flex flex-col gap-2">
+                    <div className="committee-card-meta flex-1 min-w-0 flex flex-col gap-2">
                       <div className="flex items-start justify-between gap-2">
                         <div className="min-w-0 flex-1">
                           <h3 className="text-sm font-extrabold truncate min-w-0" style={{ color: titleColor }}>
@@ -377,13 +377,13 @@ const CommitteeMembers = ({ committeeData, onNavigateBack, previousScreenName })
                           </span>
                         ) : null} */}
                         {emailAddress && emailAddress !== null && emailAddress !== 'N/A' && emailAddress !== undefined  && emailAddress !== 'null' && emailAddress !== 'NULL' ? (
-                          <span className="inline-flex items-center gap-1 truncate" style={{ color: subtitleColor }}>
+                          <span className="committee-email-row inline-flex items-center gap-1 truncate" style={{ color: subtitleColor }}>
                             <Mail className="h-3 w-3" style={{ color: secondaryColor }} />
-                            {emailAddress}
+                            <span className="committee-email-text">{emailAddress}</span>
                           </span>
-                        ) : <span className="inline-flex items-center w-full gap-1 truncate" style={{ color: subtitleColor }}>
+                        ) : <span className="committee-email-row inline-flex items-center w-full gap-1 truncate" style={{ color: subtitleColor }}>
                             <Mail className="h-3 w-3" style={{ color: secondaryColor }} />
-                            <i>No Email Provided</i>
+                            <i className="committee-email-text">No Email Provided</i>
                           </span>}
                       </div>
                     </div>
@@ -395,7 +395,7 @@ const CommitteeMembers = ({ committeeData, onNavigateBack, previousScreenName })
         ) : null}
 
         {paginatedMembers.length > 1 ? (
-          <div className="mt-2 pt-2 flex items-center justify-between gap-2">
+          <div className="committee-pagination mt-2 pt-2 flex items-center justify-between gap-2">
             <button
               type="button"
               onClick={() => setCurrentPage((prev) => Math.max(1, prev - 1))}
@@ -429,7 +429,7 @@ const CommitteeMembers = ({ committeeData, onNavigateBack, previousScreenName })
             </button>
           </div>
         ) : (
-          <div className="text-center py-20" style={{ background: cardBg, border: `1px solid ${cardBorder}`, borderRadius: '1rem' }}>
+          <div className="committee-empty text-center py-20" style={{ background: cardBg, border: `1px solid ${cardBorder}`, borderRadius: '1rem' }}>
             <div
               className="h-20 w-20 rounded-full flex items-center justify-center mx-auto mb-4 border border-dashed"
               style={{ background: applyOpacity(secondaryColor, 0.08), borderColor: applyOpacity(secondaryColor, 0.24) }}
@@ -441,6 +441,317 @@ const CommitteeMembers = ({ committeeData, onNavigateBack, previousScreenName })
           </div>
         )}
       </div>
+      <style>{`
+        @media (min-width: 1024px) {
+          .committee-page {
+            animation: committeePageIn 420ms cubic-bezier(0.22, 1, 0.36, 1) both;
+          }
+
+          .committee-navbar {
+            animation: committeeNavbarIn 520ms cubic-bezier(0.22, 1, 0.36, 1) both;
+          }
+
+          .committee-navbar-inner {
+            padding: 22px 28px !important;
+          }
+
+          .committee-back {
+            transition: transform 180ms ease, box-shadow 180ms ease, background 180ms ease !important;
+          }
+
+          .committee-back:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 10px 22px color-mix(in srgb, var(--navbar-text) 12%, transparent);
+          }
+
+          .committee-title {
+            opacity: 0;
+            animation: committeeTitleIn 520ms cubic-bezier(0.22, 1, 0.36, 1) 110ms both;
+          }
+
+          .committee-controls {
+            padding: 20px clamp(20px, 2.4vw, 40px) 8px !important;
+            animation: committeeControlsIn 540ms cubic-bezier(0.22, 1, 0.36, 1) 130ms both;
+          }
+
+          .committee-search {
+            transition: transform 220ms ease, box-shadow 220ms ease, border-color 220ms ease;
+          }
+
+          .committee-search:focus-within {
+            transform: translateY(-2px);
+            box-shadow: 0 14px 30px color-mix(in srgb, var(--brand-navy-dark) 12%, transparent);
+            border-color: color-mix(in srgb, var(--advertisement-title) 32%, transparent) !important;
+          }
+
+          .committee-count {
+            animation: committeeCountIn 460ms cubic-bezier(0.22, 1, 0.36, 1) 220ms both;
+          }
+
+          .committee-list-content {
+            padding: 8px clamp(20px, 2.4vw, 40px) 48px !important;
+            animation: committeeContentIn 560ms cubic-bezier(0.22, 1, 0.36, 1) 150ms both;
+          }
+
+          .committee-member-grid {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 16px;
+            align-items: stretch;
+          }
+
+          .committee-member-card {
+            position: relative;
+            overflow: hidden;
+            min-height: 210px;
+            opacity: 0;
+            transform: translateY(18px) scale(0.985);
+            animation: committeeCardIn 560ms cubic-bezier(0.22, 1, 0.36, 1) both;
+            transition:
+              transform 240ms cubic-bezier(0.22, 1, 0.36, 1),
+              box-shadow 240ms ease,
+              border-color 240ms ease,
+              filter 240ms ease !important;
+            will-change: transform, opacity;
+          }
+
+          .committee-member-card:nth-child(1) { animation-delay: 190ms; }
+          .committee-member-card:nth-child(2) { animation-delay: 260ms; }
+          .committee-member-card:nth-child(3) { animation-delay: 330ms; }
+          .committee-member-card:nth-child(4) { animation-delay: 400ms; }
+          .committee-member-card:nth-child(5) { animation-delay: 470ms; }
+          .committee-member-card:nth-child(6) { animation-delay: 540ms; }
+          .committee-member-card:nth-child(7) { animation-delay: 610ms; }
+          .committee-member-card:nth-child(8) { animation-delay: 680ms; }
+          .committee-member-card:nth-child(9) { animation-delay: 750ms; }
+          .committee-member-card:nth-child(n + 10) { animation-delay: 820ms; }
+
+          .committee-member-card::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            pointer-events: none;
+            opacity: 0;
+            background:
+              radial-gradient(circle at 22% 0%, color-mix(in srgb, var(--surface-color) 26%, transparent), transparent 40%),
+              linear-gradient(180deg, color-mix(in srgb, var(--advertisement-title) 10%, transparent), transparent 54%);
+            transition: opacity 240ms ease;
+          }
+
+          .committee-member-card::after {
+            content: '';
+            position: absolute;
+            inset: 0;
+            pointer-events: none;
+            opacity: 0;
+            border-radius: inherit;
+            box-shadow:
+              inset 0 0 0 1px color-mix(in srgb, var(--surface-color) 20%, transparent),
+              inset 0 -28px 48px color-mix(in srgb, var(--brand-navy-dark) 8%, transparent);
+            transition: opacity 240ms ease;
+          }
+
+          .committee-member-card:not(:disabled):hover {
+            transform: translateY(-6px);
+            filter: saturate(1.06) brightness(1.02);
+            border-color: color-mix(in srgb, var(--advertisement-title) 48%, var(--advertisement-card-border)) !important;
+            box-shadow:
+              0 22px 44px color-mix(in srgb, var(--brand-navy-dark) 20%, transparent),
+              0 7px 16px color-mix(in srgb, var(--advertisement-title) 14%, transparent),
+              0 0 0 1px color-mix(in srgb, var(--advertisement-title) 18%, transparent) !important;
+          }
+
+          .committee-member-card:not(:disabled):hover::before,
+          .committee-member-card:not(:disabled):hover::after {
+            opacity: 1;
+          }
+
+          .committee-card-accent {
+            position: absolute;
+            top: 0;
+            left: 0;
+            z-index: 3;
+            width: 100%;
+            height: 4px !important;
+            border-radius: 0 !important;
+            transition: height 220ms cubic-bezier(0.22, 1, 0.36, 1), filter 220ms ease;
+          }
+
+          .committee-member-card:not(:disabled):hover .committee-card-accent {
+            height: 5px;
+            filter: saturate(1.18);
+          }
+
+          .committee-card-body {
+            min-height: 204px;
+            flex-direction: column;
+            align-items: stretch !important;
+            justify-content: flex-start;
+            gap: 12px !important;
+            padding: 18px 14px 14px !important;
+            position: relative;
+            z-index: 1;
+          }
+
+          .committee-avatar {
+            width: 100% !important;
+            height: 132px !important;
+            aspect-ratio: auto;
+            border-radius: 16px !important;
+          }
+
+          .committee-avatar svg {
+            width: 24px !important;
+            height: 24px !important;
+          }
+
+          .committee-card-meta {
+            width: 100%;
+          }
+
+          .committee-card-meta h3 {
+            font-size: 14px !important;
+            line-height: 1.25;
+            white-space: normal !important;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+          }
+
+          .committee-card-meta > div:first-child {
+            min-height: 38px;
+          }
+
+          .committee-card-meta > div:first-child > div:first-child {
+            min-width: 0;
+          }
+
+          .committee-card-meta > div:nth-child(2) {
+            min-height: 26px;
+          }
+
+          .committee-card-meta > div:last-child {
+            min-height: 32px;
+          }
+
+          .committee-card-meta > div:last-child {
+            min-width: 0;
+          }
+
+          .committee-email-row {
+            display: inline-flex !important;
+            align-items: center !important;
+            flex-wrap: nowrap !important;
+            max-width: 100%;
+            min-width: 0;
+            white-space: nowrap !important;
+          }
+
+          .committee-email-row svg {
+            flex: 0 0 auto;
+          }
+
+          .committee-email-text {
+            min-width: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+          }
+
+          .committee-avatar,
+          .committee-card-meta {
+            transition: transform 240ms cubic-bezier(0.22, 1, 0.36, 1), box-shadow 240ms ease;
+          }
+
+          .committee-member-card:not(:disabled):hover .committee-avatar {
+            transform: translateY(-3px);
+            box-shadow:
+              0 12px 22px color-mix(in srgb, var(--brand-navy-dark) 14%, transparent),
+              0 0 0 2px color-mix(in srgb, var(--surface-color) 58%, transparent);
+          }
+
+          .committee-member-card:not(:disabled):hover .committee-card-meta {
+            transform: translateY(-2px);
+          }
+
+          .committee-pagination,
+          .committee-empty {
+            animation: committeeCardIn 520ms cubic-bezier(0.22, 1, 0.36, 1) 240ms both;
+          }
+        }
+
+        @media (min-width: 1280px) {
+          .committee-member-grid {
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+          }
+        }
+
+        @media (min-width: 1600px) {
+          .committee-member-grid {
+            grid-template-columns: repeat(5, minmax(0, 1fr));
+          }
+        }
+
+        @keyframes committeePageIn {
+          from { opacity: 0; }
+          to { opacity: 1; }
+        }
+
+        @keyframes committeeNavbarIn {
+          from { opacity: 0; transform: translateY(-12px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+
+        @keyframes committeeTitleIn {
+          from { opacity: 0; transform: translateY(-8px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+
+        @keyframes committeeControlsIn {
+          from { opacity: 0; transform: translateY(12px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+
+        @keyframes committeeCountIn {
+          from { opacity: 0; transform: translateX(-8px); }
+          to { opacity: 1; transform: translateX(0); }
+        }
+
+        @keyframes committeeContentIn {
+          from { opacity: 0; transform: translateY(10px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+
+        @keyframes committeeCardIn {
+          from { opacity: 0; transform: translateY(18px) scale(0.985); }
+          to { opacity: 1; transform: translateY(0) scale(1); }
+        }
+
+        @media (min-width: 1024px) and (prefers-reduced-motion: reduce) {
+          .committee-page,
+          .committee-navbar,
+          .committee-title,
+          .committee-controls,
+          .committee-count,
+          .committee-list-content,
+          .committee-member-card,
+          .committee-pagination,
+          .committee-empty {
+            animation: none !important;
+            opacity: 1 !important;
+            transform: none !important;
+          }
+
+          .committee-back,
+          .committee-search,
+          .committee-member-card,
+          .committee-card-accent,
+          .committee-avatar,
+          .committee-card-meta {
+            transition: none !important;
+          }
+        }
+      `}</style>
     </div>
   );
 };

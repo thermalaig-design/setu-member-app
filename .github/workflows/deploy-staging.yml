@@ -1,16 +1,16 @@
-name: App Staging Deploy
+name: App Live Deploy
 
 on:
   push:
     branches:
-      - develop
+      - live
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Deploy App Staging to VPS
+      - name: Deploy App Live to VPS
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.VPS_HOST }}

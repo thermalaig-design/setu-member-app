@@ -1,8 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { flushSync } from 'react-dom';
-import { Users, ChevronRight, LogOut, Share2, PhoneCall, FileText, CirclePlus, Clock3, Lock, ShoppingBag } from 'lucide-react';
-import { FaFacebookF, FaInstagram, FaLinkedinIn, FaWhatsapp, FaYoutube } from 'react-icons/fa';
+import { Users, ChevronRight, ChevronLeft, LogOut, Share2, PhoneCall, FileText, CirclePlus, Clock3, Lock, Facebook, Instagram, Linkedin, MessageCircle } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 import { Share } from '@capacitor/share';
 import { getProfile, updateMemberPrivacy } from '../../services/api';
@@ -172,7 +171,19 @@ const APP_ORG_NAME = 'Development Organization';
 const APP_ORG_URL = 'https://teiltd.in';
 const APP_DOWNLOAD_URL = 'https://teiltd.in/app-download';
 
-const Sidebar = ({ isOpen, onClose, onNavigate, currentPage, onLogout }) => {
+/**
+ * variant="overlay" (default) — the original behavior: only mounted while `isOpen`,
+ * fixed/absolute drawer + backdrop at every breakpoint. Used by pages that haven't
+ * migrated to the shared persistent instance yet.
+ *
+ * variant="persistent" — used by the single shared instance in App.jsx. Stays mounted
+ * at all times; below `lg:` it behaves exactly like the overlay drawer (driven by
+ * `isOpen`), and at `lg:` and up it renders as a static, collapsible column instead
+ * (driven by `isCollapsed`), ignoring `isOpen` for layout purposes.
+ */
+const Sidebar = ({ isOpen, onClose, onNavigate, currentPage, onLogout, variant = 'overlay', isCollapsed = false, onToggleCollapse }) => {
+  const isPersistent = variant === 'persistent';
+  const shouldLoadData = isOpen || isPersistent;
   const theme = useAppTheme();
   const primary = theme.primary || 'var(--brand-red)';
   const secondary = theme.secondary || 'var(--brand-navy)';
@@ -228,9 +239,9 @@ const Sidebar = ({ isOpen, onClose, onNavigate, currentPage, onLogout }) => {
   const [privacySaving, setPrivacySaving] = useState(false);
   const appOrgLink = APP_ORG_URL;
 
-  // Load feature flags when sidebar opens
+  // Load feature flags when sidebar opens (or immediately, for the persistent instance)
   useEffect(() => {
-    if (!isOpen) return;
+    if (!shouldLoadData) return;
     const trustId = localStorage.getItem('selected_trust_id') || null;
     fetchFeatureFlags(trustId, { force: false }).then((result) => {
       if (result.success) {
@@ -238,7 +249,7 @@ const Sidebar = ({ isOpen, onClose, onNavigate, currentPage, onLogout }) => {
         setFlagsData(result.flagsData || {});
       }
     });
-  }, [isOpen, selectedTrustId]);
+  }, [shouldLoadData, selectedTrustId]);
 
   const ff = (key) => isFeatureVisible(featureFlags, key);
 
@@ -337,9 +348,9 @@ const Sidebar = ({ isOpen, onClose, onNavigate, currentPage, onLogout }) => {
     }
   ].filter((item) => String(item.href || '').trim());
 
-  // Load profile data when sidebar opens
+  // Load profile data when sidebar opens (or immediately, for the persistent instance)
   useEffect(() => {
-    if (!isOpen) return;
+    if (!shouldLoadData) return;
     const load = async () => {
       try {
         const user = localStorage.getItem('user');
@@ -408,10 +419,10 @@ const Sidebar = ({ isOpen, onClose, onNavigate, currentPage, onLogout }) => {
       }
     };
     load();
-  }, [isOpen]);
+  }, [shouldLoadData]);
 
   useEffect(() => {
-    if (!isOpen) return;
+    if (!shouldLoadData) return;
 
     const syncSelectedTrust = (event) => {
       const nextTrustId = String(event?.detail?.trustId || localStorage.getItem('selected_trust_id') || '').trim();
@@ -425,7 +436,7 @@ const Sidebar = ({ isOpen, onClose, onNavigate, currentPage, onLogout }) => {
       window.removeEventListener('trust-changed', syncSelectedTrust);
       window.removeEventListener('storage', syncSelectedTrust);
     };
-  }, [isOpen]);
+  }, [shouldLoadData]);
 
   useEffect(() => {
     if (typeof profile?.privacy === 'boolean') {
@@ -450,7 +461,7 @@ const Sidebar = ({ isOpen, onClose, onNavigate, currentPage, onLogout }) => {
   }, []);
 
   useEffect(() => {
-    if (!isOpen) return;
+    if (!shouldLoadData) return;
 
     let isCancelled = false;
 
@@ -477,11 +488,11 @@ const Sidebar = ({ isOpen, onClose, onNavigate, currentPage, onLogout }) => {
     return () => {
       isCancelled = true;
     };
-  }, [isOpen, selectedTrustId]);
+  }, [shouldLoadData, selectedTrustId]);
 
   // Load member trusts when sidebar opens (reg_members based payload from login)
   useEffect(() => {
-    if (!isOpen) return;
+    if (!shouldLoadData) return;
     const load = async () => {
       try {
         setLoadingTrustLinks(true);
@@ -513,46 +524,46 @@ const Sidebar = ({ isOpen, onClose, onNavigate, currentPage, onLogout }) => {
       }
     };
     load();
-  }, [isOpen]);
+  }, [shouldLoadData]);
 
   // No body scroll lock needed — overlay + fixed panel already block background interaction.
   // prevents background scroll on mobile, and covers background on desktop.
 
-  // Swipe left to close
+  // Swipe left to close (mobile drawer only, either variant)
   useEffect(() => {
     if (!isOpen) return;
-    
+
     let isVerticalScroll = false;
     let startY = 0;
-    
+
     const handleTouchStart = (e) => {
       touchStartX.current = e.touches[0].clientX;
       touchEndX.current = e.touches[0].clientX;
       startY = e.touches[0].clientY;
       isVerticalScroll = false;
     };
-    
+
     const handleTouchMove = (e) => {
       const currentX = e.touches[0].clientX;
       const currentY = e.touches[0].clientY;
       const deltaX = Math.abs(currentX - touchStartX.current);
       const deltaY = Math.abs(currentY - startY);
-      
+
       // Detect if this is vertical scrolling (not swipe to close)
       if (deltaY > deltaX) {
         isVerticalScroll = true;
       }
-      
+
       touchEndX.current = currentX;
     };
-    
+
     const handleTouchEnd = () => {
       // Only trigger close if it's a clear horizontal swipe (not vertical scroll)
       if (!isVerticalScroll && touchStartX.current - touchEndX.current > 80) {
         onClose();
       }
     };
-    
+
     const sidebar = sidebarRef.current;
     if (sidebar) {
       sidebar.addEventListener('touchstart', handleTouchStart, { passive: true });
@@ -568,16 +579,12 @@ const Sidebar = ({ isOpen, onClose, onNavigate, currentPage, onLogout }) => {
     };
   }, [isOpen, onClose]);
 
-  if (!isOpen) return null;
+  // Overlay variant only ever renders while open, matching its original behavior.
+  // Persistent variant stays mounted; visibility below `lg:` is handled via CSS below.
+  if (!isPersistent && !isOpen) return null;
 
   const displayName = resolveNameValue(profile?.name, userData?.Name, userData?.name) || 'User';
   const selectedTrustMembership = resolveSelectedTrustMembership(userData || {}, selectedTrustId);
-  // const selectedTrustDisplayName = resolveNameValue(
-  //   selectedTrustName,
-  //   selectedTrustMembership?.trust_name,
-  //   selectedTrustMembership?.Trust?.name,
-  //   selectedTrustMembership?.trust?.name
-  // ) || 'Selected Trust';
   const selectedTrustRole = resolveMemberRoleValue(
     selectedTrustMembership?.role,
     selectedTrustMembership?.member_role,
@@ -663,10 +670,24 @@ const Sidebar = ({ isOpen, onClose, onNavigate, currentPage, onLogout }) => {
   const menuItems = Object.entries(flagsData)
     .filter(([key, meta]) => {
       const resolvedRoute = normalizeSidebarRoute(meta?.route, key);
-      return Boolean(key)
-        && meta?.is_enabled
-        && normalizeDisplayInApp(meta?.display_in_app) === 'sidebar'
-        && Boolean(resolvedRoute);
+      const normalizedKey = String(key || '').trim().toLowerCase().replace(/_/g, '-');
+      const isContactUs = resolvedRoute === 'contact-us'
+        || normalizedKey === 'contactus'
+        || normalizedKey === 'contact-us'
+        || normalizedKey === 'feature-contact-us';
+      const isMyFamily = resolvedRoute === 'my-family'
+        || normalizedKey === 'myfamily'
+        || normalizedKey === 'my-family'
+        || normalizedKey === 'feature-my-family';
+      const isNominationDetails = resolvedRoute === 'nomination-details'
+        || normalizedKey === 'nominationdetails'
+        || normalizedKey === 'nomination-details'
+        || normalizedKey === 'feature-nomination-details';
+      const isAddCommunity = resolvedRoute === 'add-community'
+        || normalizedKey === 'addcommunity'
+        || normalizedKey === 'add-community'
+        || normalizedKey === 'feature-add-community';
+      return Boolean(key) && meta?.is_enabled && (isContactUs || isMyFamily || isNominationDetails || isAddCommunity);
     })
     .map(([key, meta]) => ({
       id: normalizeSidebarRoute(meta?.route, key),
@@ -683,30 +704,38 @@ const Sidebar = ({ isOpen, onClose, onNavigate, currentPage, onLogout }) => {
   const addCommunityMenuItem = menuItems.find((item) => item.id === 'add-community');
   const primaryMenuItems = menuItems.filter((item) => item.id !== 'add-community');
 
+  const collapsedDesktop = isPersistent && isCollapsed;
+
   return (
     <>
-      {/* Overlay — absolute within parent container */}
-      <div
-        className="absolute max-md:fixed inset-0 backdrop-blur-sm z-40"
-        data-sidebar-overlay="true"
-        onClick={(e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          onClose();
-        }}
-        onPointerDown={(e) => {
-          e.stopPropagation();
-        }}
-        style={{
-          touchAction: 'auto',
-          background: sidebarOverlayBg
-        }}
-      />
+      {/* Overlay — mobile-only backdrop below `lg:` for the persistent variant; unchanged at every breakpoint for the overlay variant */}
+      {isOpen && (
+        <div
+          className={`${isPersistent ? 'fixed lg:hidden' : 'absolute max-md:fixed'} inset-0 backdrop-blur-sm z-40`}
+          data-sidebar-overlay="true"
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            onClose();
+          }}
+          onPointerDown={(e) => {
+            e.stopPropagation();
+          }}
+          style={{
+            touchAction: 'auto',
+            background: sidebarOverlayBg
+          }}
+        />
+      )}
 
-      {/* Sidebar panel — absolute, left-anchored, full height */}
+      {/* Sidebar panel — mobile: slide-in overlay drawer. Desktop (persistent variant): static, collapsible column. */}
       <div
         ref={sidebarRef}
-        className="theme-sidebar absolute max-md:fixed left-0 top-0 bottom-0 w-72 shadow-2xl z-50 flex flex-col"
+        className={`theme-sidebar shadow-2xl z-50 flex flex-col w-72 ${
+          isPersistent
+            ? `fixed lg:sticky inset-y-0 lg:inset-y-auto lg:top-0 left-0 flex-shrink-0 transition-transform lg:transition-[width] duration-200 ${isOpen ? 'translate-x-0' : '-translate-x-full'} lg:translate-x-0 ${isCollapsed ? 'lg:w-[76px]' : 'lg:w-[264px]'}`
+            : 'absolute max-md:fixed left-0 top-0 bottom-0 lg:hidden'
+        }`}
         data-sidebar="true"
         style={{
           maxWidth: '85vw',
@@ -726,16 +755,19 @@ const Sidebar = ({ isOpen, onClose, onNavigate, currentPage, onLogout }) => {
         }}
       >
         {/* Brand accent at top */}
-        <div style={{ height: '4px', background: 'var(--sidebar-accent)' }} />
+        <div className='block lg:hidden' style={{ height: '4px', background: 'var(--sidebar-accent)' }} />
+
+      
+
         {/* ── Profile Card Header ── */}
         {ff('feature_profile') && (
         <div
-          className="px-5 pt-14 pb-5 flex-shrink-0 cursor-pointer"
-	          style={{ borderBottom: `1px solid ${sidebarDividerColor}` }}
+          className={`px-5 pt-14 pb-5 flex-shrink-0 cursor-pointer ${collapsedDesktop ? 'lg:px-2 lg:flex lg:justify-center' : ''}`}
+          style={{ borderBottom: `1px solid ${sidebarDividerColor}` }}
           onClick={() => { onNavigate('profile'); onClose(); }}
         >
           {/* Avatar + name row */}
-          <div className="flex items-center gap-3 mb-3">
+          <div className={`flex items-center gap-3 mb-3 ${collapsedDesktop ? 'lg:mb-0 lg:gap-0' : ''}`}>
             {/* Avatar */}
             <div className="relative bottom-2 flex-shrink-0">
               {profile?.profilePhotoUrl ? (
@@ -763,7 +795,7 @@ const Sidebar = ({ isOpen, onClose, onNavigate, currentPage, onLogout }) => {
             </div>
 
             {/* Name + subtitle */}
-            <div className="flex-1 min-w-0">
+            <div className={`flex-1 min-w-0 ${collapsedDesktop ? 'lg:hidden' : ''}`}>
               <p className="font-bold text-sm truncate" style={{ color: sidebarTextColor }}>{displayName}</p>
               <p>
             <span
@@ -775,7 +807,6 @@ const Sidebar = ({ isOpen, onClose, onNavigate, currentPage, onLogout }) => {
               }}
               title="Selected trust role"
             >
-              {/* <span className="opacity-75">Role</span> */}
               <span className="normal-case tracking-normal">
                 {selectedTrustRole}
               </span>
@@ -789,7 +820,6 @@ const Sidebar = ({ isOpen, onClose, onNavigate, currentPage, onLogout }) => {
               }}
               title="Selected trust membership number"
             >
-              {/* <span className="opacity-75">M No</span> */}
               <span className="normal-case tracking-normal">
                 {selectedTrustMembershipNumber || 'Not available'}
               </span>
@@ -799,13 +829,13 @@ const Sidebar = ({ isOpen, onClose, onNavigate, currentPage, onLogout }) => {
             </div>
 
             <ChevronRight
-              className="h-4 w-4 flex-shrink-0"
-	              style={{ color: sidebarChevronColor }}
+              className={`h-4 w-4 flex-shrink-0 ${collapsedDesktop ? 'lg:hidden' : ''}`}
+              style={{ color: sidebarChevronColor }}
             />
           </div>
 
           {/* Completion bar */}
-          <div>
+          <div className={collapsedDesktop ? 'lg:hidden' : ''}>
             <div className="flex items-center justify-between mb-1.5">
               <span
                 className="text-[11px] font-medium"
@@ -819,7 +849,7 @@ const Sidebar = ({ isOpen, onClose, onNavigate, currentPage, onLogout }) => {
             </div>
             <div
               className="h-1.5 w-full rounded-full overflow-hidden"
-	              style={{ background: sidebarProgressTrackColor }}
+              style={{ background: sidebarProgressTrackColor }}
             >
               <div
                 className="h-full rounded-full transition-all duration-500"
@@ -834,23 +864,22 @@ const Sidebar = ({ isOpen, onClose, onNavigate, currentPage, onLogout }) => {
         )}
 
         {/* ── Scrollable area: nav + extras ── */}
-        
-
-        <div 
-          className="flex-1 overflow-y-auto overflow-x-hidden"
-          style={{ 
-            touchAction: 'pan-y', 
-            WebkitOverflowScrolling: 'touch', 
+        <div
+          className="sidebar-scroll flex-1 overflow-y-auto overflow-x-hidden"
+          style={{
+            touchAction: 'pan-y',
+            WebkitOverflowScrolling: 'touch',
             minHeight: 0,
             scrollBehavior: 'smooth',
             flex: '1 1 auto',
             overscrollBehavior: 'contain',
-            paddingBottom: 'calc(7rem + env(safe-area-inset-bottom, 0px))'
+            paddingBottom: '1rem'
           }}
         >
           {/* Nav items + More Options */}
           <div className="py-3 px-3">
             <div className="space-y-1">
+             
               {primaryMenuItems.map((item) => {
                 const cp = String(currentPage || '').trim().toLowerCase().replace(/_/g, '-');
                 const aliasMap = {
@@ -875,7 +904,8 @@ const Sidebar = ({ isOpen, onClose, onNavigate, currentPage, onLogout }) => {
                   <button
                     key={item.id}
                     onClick={() => { onNavigate(item.id); onClose(); }}
-                    className="w-full flex items-center gap-3 px-4 rounded-xl transition-all text-left active:scale-95 select-none"
+                    title={item.label}
+                    className={`w-full flex items-center gap-3 px-4 rounded-xl transition-all text-left active:scale-95 select-none ${collapsedDesktop ? 'lg:justify-center lg:px-0' : ''}`}
                   style={{
                       minHeight: '52px',
                       WebkitTapHighlightColor: sidebarTapHighlightColor,
@@ -891,7 +921,7 @@ const Sidebar = ({ isOpen, onClose, onNavigate, currentPage, onLogout }) => {
 	                      }}
 	                    />
                     <span
-                      className="font-semibold flex-1"
+                      className={`font-semibold flex-1 ${collapsedDesktop ? 'lg:hidden' : ''}`}
                       style={{
                         color: isActive
                           ? sidebarActiveTextColor
@@ -900,7 +930,7 @@ const Sidebar = ({ isOpen, onClose, onNavigate, currentPage, onLogout }) => {
                     >
                       {item.label}
                     </span>
-                    {isActive && <div className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: sidebarActiveTextColor }} />}
+                    {isActive && <div className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${collapsedDesktop ? 'lg:hidden' : ''}`} style={{ background: sidebarActiveTextColor }} />}
                   </button>
                 );
               })}
@@ -909,7 +939,8 @@ const Sidebar = ({ isOpen, onClose, onNavigate, currentPage, onLogout }) => {
               {ff('feature_othermembership') && normalizeDisplayInApp(flagsData?.feature_othermembership?.display_in_app) === 'sidebar' && (
               <button
                 onClick={handleOtherMembershipNavigation}
-              className="w-full flex items-center gap-3 px-4 rounded-xl transition-all text-left active:scale-95 select-none"
+                title="Other Membership Details"
+              className={`w-full flex items-center gap-3 px-4 rounded-xl transition-all text-left active:scale-95 select-none ${collapsedDesktop ? 'lg:justify-center lg:px-0' : ''}`}
               style={{
                 minHeight: '52px',
                 background: 'transparent',
@@ -922,7 +953,7 @@ const Sidebar = ({ isOpen, onClose, onNavigate, currentPage, onLogout }) => {
 	                  color: sidebarTextColor
 	                }}
 	              />
-              <div className="flex-1 text-left">
+              <div className={`flex-1 text-left ${collapsedDesktop ? 'lg:hidden' : ''}`}>
                 <span className="font-semibold" style={{ color: sidebarTextColor }}>
                   {toTitleCase(flagsData?.feature_othermembership?.display_name || 'Other Membership Details')}
                 </span>
@@ -944,15 +975,16 @@ const Sidebar = ({ isOpen, onClose, onNavigate, currentPage, onLogout }) => {
                 )}
               </div>
               <ChevronRight
-                className="h-4 w-4 flex-shrink-0"
+                className={`h-4 w-4 flex-shrink-0 ${collapsedDesktop ? 'lg:hidden' : ''}`}
 	                style={{ color: sidebarChevronColor }}
               />
             </button>
               )}
 
+
               {/* Privacy toggle — hides this member's contact/address details from Directory & Executive Body */}
               <div
-                className="w-full flex items-center gap-3 px-4 rounded-xl select-none"
+                className={`w-full flex items-center gap-3 px-4 rounded-xl select-none ${collapsedDesktop ? 'lg:hidden' : ''}`}
                 style={{ minHeight: '52px' }}
               >
                 <Lock
@@ -963,9 +995,6 @@ const Sidebar = ({ isOpen, onClose, onNavigate, currentPage, onLogout }) => {
                   <span className="font-semibold block" style={{ color: sidebarTextColor }}>
                     Privacy Mode
                   </span>
-                  {/* <span className="text-[10px]" style={{ color: sidebarMutedTextColor }}>
-                    Hide my details in Directory
-                  </span> */}
                 </div>
                 <button
                   type="button"
@@ -993,7 +1022,8 @@ const Sidebar = ({ isOpen, onClose, onNavigate, currentPage, onLogout }) => {
               {addCommunityMenuItem && (
                 <button
                   onClick={() => { onNavigate(addCommunityMenuItem.id); onClose(); }}
-                  className="w-full flex items-center gap-3 px-4 rounded-xl transition-all text-left active:scale-95 select-none"
+                  title={addCommunityMenuItem.label}
+                  className={`w-full flex items-center gap-3 px-4 rounded-xl transition-all text-left active:scale-95 select-none ${collapsedDesktop ? 'lg:justify-center lg:px-0' : ''}`}
                   style={{
                     minHeight: '52px',
                     WebkitTapHighlightColor: sidebarTapHighlightColor,
@@ -1005,7 +1035,7 @@ const Sidebar = ({ isOpen, onClose, onNavigate, currentPage, onLogout }) => {
                     style={{ color: sidebarTextColor }}
                   />
                   <span
-                    className="font-semibold flex-1"
+                    className={`font-semibold flex-1 ${collapsedDesktop ? 'lg:hidden' : ''}`}
                     style={{ color: sidebarTextColor }}
                   >
                     {addCommunityMenuItem.label}
@@ -1016,7 +1046,7 @@ const Sidebar = ({ isOpen, onClose, onNavigate, currentPage, onLogout }) => {
               {/* Share Button - controlled by feature_share_app */}
               {ff('feature_share_app') && <button
               onClick={handleShareApp}
-              className="w-full flex items-center gap-3 px-4 rounded-xl transition-all text-left active:scale-95 select-none relative"
+              className={`w-full flex items-center gap-3 px-4 rounded-xl transition-all text-left active:scale-95 select-none relative ${collapsedDesktop ? 'lg:hidden' : ''}`}
               style={{
                 minHeight: '52px',
                 background: 'transparent',
@@ -1035,7 +1065,7 @@ const Sidebar = ({ isOpen, onClose, onNavigate, currentPage, onLogout }) => {
               >
                 Share App
               </span>
-              
+
             </button>}
             </div>
           </div>
@@ -1043,7 +1073,7 @@ const Sidebar = ({ isOpen, onClose, onNavigate, currentPage, onLogout }) => {
 
       {/* ── Fixed Logout Button at Bottom ── */}
         <div
-          className="absolute left-0 right-0 bottom-0 px-3 pt-2 z-50"
+          className={`flex-shrink-0 px-3 pt-2 z-50 ${collapsedDesktop ? 'lg:px-2' : ''}`}
           style={{
             background: 'var(--sidebar-bg)',
 	          borderTop: `1px solid ${sidebarDividerColor}`,
@@ -1053,28 +1083,8 @@ const Sidebar = ({ isOpen, onClose, onNavigate, currentPage, onLogout }) => {
           }}
         >
         {socialLinks.length > 0 && (
-          <div
-            className="mb-3 px-3 py-1"
-            // style={{
-            //   background: sidebarSocialSectionBg,
-            //   borderColor: sidebarSocialSectionBg
-            // }}
-          >
-            {/* <div className="mb-2 flex items-center justify-between gap-3">
-              <span
-                className="text-[9px] font-semibold tracking-[0.16em] uppercase"
-                style={{ color: sidebarMutedTextColor }}
-              >
-                Follow us
-              </span>
-              <span
-                className="text-[9px] font-medium"
-                style={{ color: sidebarMutedTextColor, opacity: 0.8 }}
-              >
-                Social links
-              </span>
-            </div> */}
-            <div className="grid grid-cols-5 gap-[2px]">
+          <div className={`mb-3 px-3 py-1 ${collapsedDesktop ? 'lg:hidden' : ''}`}>
+            <div className="grid grid-cols-4 gap-[2px]">
               {socialLinks.map((item) => {
                 const Icon = item.icon;
                 return (
@@ -1100,7 +1110,7 @@ const Sidebar = ({ isOpen, onClose, onNavigate, currentPage, onLogout }) => {
         )}
 
         <div
-          className="mb-2 flex items-center justify-between gap-3 px-1"
+          className={`mb-2 flex items-center justify-between gap-3 px-1 ${collapsedDesktop ? 'lg:hidden' : ''}`}
           style={{
             color: sidebarMutedTextColor,
             opacity: 0.82,
@@ -1149,7 +1159,8 @@ const Sidebar = ({ isOpen, onClose, onNavigate, currentPage, onLogout }) => {
             }
             if (onClose) onClose();
           }}
-          className="w-full flex items-center gap-3 px-4 rounded-xl transition-all text-left active:scale-95 select-none"
+          title="Logout"
+          className={`w-full flex items-center gap-3 px-4 rounded-xl transition-all text-left active:scale-95 select-none ${collapsedDesktop ? 'lg:justify-center lg:px-0' : ''}`}
           style={{
             minHeight: '52px',
             background: 'transparent',
@@ -1163,13 +1174,13 @@ const Sidebar = ({ isOpen, onClose, onNavigate, currentPage, onLogout }) => {
 	            }}
 	          />
           <span
-            className="font-semibold flex-1"
+            className={`font-semibold flex-1 ${collapsedDesktop ? 'lg:hidden' : ''}`}
 	            style={{ color: sidebarTextColor }}
           >
             Logout
           </span>
           <ChevronRight
-            className="h-4 w-4 flex-shrink-0"
+            className={`h-4 w-4 flex-shrink-0 ${collapsedDesktop ? 'lg:hidden' : ''}`}
 	            style={{ color: sidebarChevronColor }}
           />
         </button>
@@ -1180,4 +1191,3 @@ const Sidebar = ({ isOpen, onClose, onNavigate, currentPage, onLogout }) => {
 };
 
 export default Sidebar;
-

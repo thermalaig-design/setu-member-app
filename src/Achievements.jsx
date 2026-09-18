@@ -199,7 +199,7 @@ const AchievementSummaryCard = ({ item, featured = false, showTimelineDot = fals
 
   return (
     <article
-      className={`relative rounded-2xl border shadow-sm ${showTimelineDot ? 'pl-4' : ''}`}
+      className={`achievement-card relative rounded-2xl border shadow-sm ${showTimelineDot ? 'pl-4' : ''}`}
       style={{ borderColor: 'var(--advertisement-card-border)', background: 'var(--advertisement-card-bg)' }}
     >
       {showTimelineDot && (
@@ -209,7 +209,7 @@ const AchievementSummaryCard = ({ item, featured = false, showTimelineDot = fals
         />
       )}
 
-      <div className={featured ? 'p-4 sm:p-5' : 'p-3.5 sm:p-4'}>
+      <div className={`achievement-card-body ${featured ? 'p-4 sm:p-5' : 'p-3.5 sm:p-4'}`}>
         <button
           type="button"
           onClick={() => onOpenDetail?.(item)}
@@ -253,7 +253,7 @@ const AchievementSummaryCard = ({ item, featured = false, showTimelineDot = fals
         </button>
 
         {coverImage && (
-          <div className="mt-4">
+          <div className="achievement-card-media mt-4">
             <button
               type="button"
               onClick={() => onOpenDetail?.(item)}
@@ -633,7 +633,7 @@ export const AchievementsContent = ({ onNavigate, variant = 'page' }) => {
         <Sidebar isOpen={isMenuOpen} onClose={() => setIsMenuOpen(false)} onNavigate={onNavigate} currentPage="achievements" />
       )}
 
-      <div className="px-4 py-5">
+      <div className="achievements-content px-4 py-5">
         {loading ? (
           <div className="py-16 text-center text-sm" style={{ color: 'var(--advertisement-subtitle)' }}>Loading achievements...</div>
         ) : error ? (
@@ -673,7 +673,7 @@ export const AchievementsContent = ({ onNavigate, variant = 'page' }) => {
             {timeline.length > 0 ? (
               <section>
                 <p className="text-[10px] uppercase tracking-[0.16em] mb-2" style={{ color: 'var(--advertisement-subtitle)' }}>Achievement Trail</p>
-                <div className="relative pl-5">
+                <div className="achievements-timeline relative pl-5">
                   <div className="absolute left-[7px] top-1 bottom-1 w-[2px]" style={{ background: 'var(--advertisement-card-border)' }} />
                   <div className="space-y-6">
                     {timeline.map((item) => (
@@ -700,6 +700,117 @@ export const AchievementsContent = ({ onNavigate, variant = 'page' }) => {
           </>
         )}
       </div>
+      <style>{`
+        @media (min-width: 1024px) {
+          .achievements-content {
+            padding-left: 2rem;
+            padding-right: 2rem;
+          }
+
+          .achievement-card {
+            overflow: visible;
+            min-height: 190px;
+            padding-left: 0 !important;
+          }
+
+          .achievement-card-body {
+            display: grid;
+            grid-template-columns: minmax(300px, 34%) minmax(0, 1fr);
+            grid-template-areas:
+              "media header"
+              "media description"
+              "media badges"
+              "media footer";
+            grid-template-rows: auto minmax(0, 1fr) auto auto;
+            align-items: start;
+            min-height: 190px;
+            max-height: fit-content;
+            padding: 0 !important;
+            overflow: hidden;
+            border-radius: 1rem;
+          }
+
+          .achievement-card-body > button:first-child {
+            display: contents;
+          }
+
+          .achievement-card-body > button:first-child > div:first-child {
+            grid-area: header;
+            margin: 1.25rem 1.35rem 0.45rem;
+          }
+
+          .achievement-card-body > button:first-child > p {
+            grid-area: description;
+            margin-top: 0 !important;
+            margin-left: 1.35rem;
+            margin-right: 1.35rem;
+          }
+
+          .achievement-card-body > button:first-child > div:nth-child(3) {
+            grid-area: badges;
+            margin: 0.75rem 1.35rem 0 !important;
+          }
+
+          .achievement-card-media {
+            grid-area: media;
+            margin-top: 0 !important;
+            align-self: stretch;
+            min-height: 190px;
+            max-height: fit-content;
+            overflow: hidden;
+          }
+
+          .achievement-card-media > button,
+          .achievement-card-media > button > div {
+            height: 100% !important;
+            border: 0 !important;
+            border-radius: 0 !important;
+            background: var(--surface-color);
+          }
+
+          .achievement-card-media img {
+            height: 100% !important;
+            width: 100% !important;
+            object-fit: cover !important;
+            object-position: center !important;
+            border-radius: 0 !important;
+          }
+
+          .achievement-card-body > button:last-child {
+            grid-area: footer;
+            align-self: end;
+            width: auto !important;
+            min-width: 0;
+            margin-top: auto;
+            margin-left: 1.35rem;
+            margin-right: 1.35rem;
+            margin-bottom: 1.25rem;
+          }
+
+          .achievement-card-body > button:last-child > div {
+            min-width: 0;
+          }
+
+          .achievements-timeline {
+            padding-left: 1.75rem !important;
+            left: -15px !important;
+          }
+
+          .achievements-timeline > .absolute {
+            display: block;
+            left: 0.875rem;
+          }
+
+          .achievement-card > .absolute {
+            left: -1.375rem !important;
+            top: 1.25rem;
+          }
+
+          .achievements-timeline .space-y-6 > :not([hidden]) ~ :not([hidden]) {
+            margin-top: 1rem;
+          }
+        }
+      `}</style>
     </div>
   );
 };

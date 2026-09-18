@@ -875,7 +875,7 @@ export const NoticesContent = ({ onNavigate, variant = 'page' }) => {
       )}
 
       {!loading && !error && (
-        <div className="px-6 py-4 space-y-4">
+        <div className="notices-list px-6 py-4 space-y-4">
           {sortedNotices.map((notice) => {
             const dateLabel = formatDateRange(notice.start_date, notice.end_date);
             const rawAttachments = Array.isArray(notice.attachments) ? notice.attachments : [];
@@ -908,7 +908,7 @@ export const NoticesContent = ({ onNavigate, variant = 'page' }) => {
                   openNoticeDetail(notice.id);
                 }
               }}
-              className="w-full text-left rounded-2xl p-4 sm:p-5 border transition-all hover:shadow-md active:scale-[0.995] border-l-4 shadow-sm cursor-pointer focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-transparent"
+              className="notice-card w-full text-left rounded-2xl p-4 sm:p-5 border transition-all hover:shadow-md active:scale-[0.995] border-l-4 shadow-sm cursor-pointer focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-transparent"
               style={{
                 borderLeftColor: theme.primary,
                 borderColor: 'var(--advertisement-card-border)',
@@ -945,7 +945,7 @@ export const NoticesContent = ({ onNavigate, variant = 'page' }) => {
 
               {firstAttachment && (
                 <div
-                  className="mb-3 rounded-xl border px-3 py-3"
+                  className="notice-card-media mb-3 rounded-xl border px-3 py-3"
                   style={{ borderColor: 'color-mix(in srgb, var(--brand-navy) 12%, transparent)' }}
                 >
                   {firstAttachment.type === 'image' ? (
@@ -1103,6 +1103,97 @@ export const NoticesContent = ({ onNavigate, variant = 'page' }) => {
           onDownload={downloadAttachment}
         />
       )}
+      <style>{`
+        @media (min-width: 1024px) {
+          .notices-list {
+            padding-left: 2rem;
+            padding-right: 2rem;
+          }
+
+          .notice-card {
+            display: grid;
+            grid-template-columns: minmax(300px, 34%) minmax(0, 1fr);
+            grid-template-rows: auto auto minmax(0, 1fr) auto;
+            grid-template-areas:
+              "media meta"
+              "media title"
+              "media description"
+              "media footer";
+            min-height: 190px;
+            overflow: hidden;
+            padding: 0 !important;
+          }
+
+          .notice-card > .flex:first-child {
+            grid-area: meta;
+            margin: 1.25rem 1.35rem 0.45rem;
+          }
+
+          .notice-card > .flex:first-child .text-\\[10px\\] {
+            font-size: 0.82rem !important;
+            line-height: 1.2rem;
+          }
+
+          .notice-card > .flex:first-child svg {
+            width: 14px;
+            height: 14px;
+          }
+
+          .notice-card > h3 {
+            grid-area: title;
+            margin: 0.8rem 1.35rem 1rem;
+            font-size: 1.35rem;
+            line-height: 1.25;
+          }
+
+          .notice-card > div:has(> p.line-clamp-3) {
+            grid-area: description;
+            margin: 0 1.35rem 0.75rem;
+          }
+
+          .notice-card > div:has(> p.line-clamp-3) > p {
+            display: block;
+            overflow: visible;
+            -webkit-box-orient: initial;
+            -webkit-line-clamp: unset;
+            line-clamp: unset;
+          }
+
+          .notice-card-media {
+            grid-area: media;
+            margin-bottom: 0 !important;
+            align-self: stretch;
+            padding: 0 !important;
+            border: 0 !important;
+            border-radius: 0 !important;
+          }
+
+          .notice-card-media .aspect-\\[4\\/3\\] {
+            height: 100%;
+            aspect-ratio: auto !important;
+            border-radius: 0 !important;
+          }
+
+          .notice-card-media img,
+          .notice-card-media > div {
+            height: 100%;
+            max-height: 100%;
+          }
+
+          .notice-card-media img {
+            object-fit: cover !important;
+          }
+
+          .notice-card > .pt-3 {
+            grid-area: footer;
+            align-self: end;
+            margin-top: auto;
+            margin-left: 1.35rem;
+            margin-right: 1.35rem;
+            margin-bottom: 1.25rem;
+          }
+        }
+      `}</style>
     </div>
   );
 };

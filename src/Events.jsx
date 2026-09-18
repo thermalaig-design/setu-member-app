@@ -708,7 +708,7 @@ export const EventsContent = ({ onNavigate, variant = 'page' }) => {
         <Sidebar isOpen={isMenuOpen} onClose={() => setIsMenuOpen(false)} onNavigate={onNavigate} currentPage="events" />
       )}
 
-      <div className="px-4 pb-4 pt-3">
+      <div className="events-tabs px-4 pb-4 pt-3">
         <div
           className="relative flex items-center p-1 rounded-2xl gap-1"
           style={{
@@ -808,7 +808,7 @@ export const EventsContent = ({ onNavigate, variant = 'page' }) => {
       )}
 
       {!loading && !error && (
-        <div className="px-6 py-4 space-y-4">
+        <div className="events-list px-6 py-4 space-y-4">
           {events.map((event) => {
             const dateLabel = formatEventDate(event.startEventDate, event.endEventDate);
             const timeLabel = formatTimeRange(event.startTime, event.endTime);
@@ -847,7 +847,7 @@ export const EventsContent = ({ onNavigate, variant = 'page' }) => {
                     openEventDetail(event.id);
                   }
                 }}
-                className="w-full text-left rounded-2xl overflow-hidden transition-all active:scale-[0.995] shadow-sm cursor-pointer"
+                className="event-card w-full text-left rounded-2xl overflow-hidden transition-all active:scale-[0.995] shadow-sm cursor-pointer"
                 style={{
                   background: 'var(--advertisement-card-bg)',
                   border: '1px solid var(--advertisement-card-border)',
@@ -856,7 +856,7 @@ export const EventsContent = ({ onNavigate, variant = 'page' }) => {
               >
                 {/* ── Image / Attachment Hero ── */}
                 {firstAttachment && firstAttachment.type === 'image' ? (
-                  <div className="relative w-full overflow-hidden aspect-[16/9]" style={{ background: 'color-mix(in srgb, var(--brand-navy) 10%, var(--surface-color))' }}>
+                  <div className="event-card-media relative w-full overflow-hidden aspect-[16/9]" style={{ background: 'color-mix(in srgb, var(--brand-navy) 10%, var(--surface-color))' }}>
                     <img
                       src={firstAttachment.url}
                       alt={firstAttachment.label}
@@ -888,7 +888,7 @@ export const EventsContent = ({ onNavigate, variant = 'page' }) => {
 
                 {/* ── Card Content ── */}
                 <div
-                  className="p-4"
+                  className="event-card-content p-4"
                   style={{
                     borderTop: firstAttachment?.type === 'image'
                       ? `2px solid ${isPast ? applyOpacity(theme.secondary, 0.4) : theme.primary}`
@@ -1080,6 +1080,103 @@ export const EventsContent = ({ onNavigate, variant = 'page' }) => {
           onDownload={downloadAttachment}
         />
       )}
+
+      <style>{`
+        @media (min-width: 1024px) {
+          .events-list {
+            padding-left: 2rem;
+            padding-right: 2rem;
+          }
+
+          .events-tabs {
+            padding-left: 2rem !important;
+            padding-right: 2rem !important;
+          }
+
+          .events-tabs button {
+            font-size: 0.95rem !important;
+            line-height: 1.35rem;
+            gap: 0.5rem;
+            height: 3rem;
+            padding-top: 0.85rem;
+            padding-bottom: 0.85rem;
+            transform: none !important;
+          }
+
+          .events-tabs button > svg {
+            width: 17px !important;
+            height: 17px !important;
+          }
+
+          .events-tabs button > span.text-\\[9px\\] {
+            min-width: 24px;
+            font-size: 0.72rem !important;
+            line-height: 1rem;
+            padding: 0.2rem 0.45rem;
+          }
+
+          .event-card {
+            display: flex;
+            min-height: 190px;
+          }
+
+          .event-card-media {
+            width: min(34%, 420px);
+            min-width: 300px;
+            flex: 0 0 min(34%, 420px);
+            aspect-ratio: auto !important;
+          }
+
+          .event-card-media img {
+            height: 100%;
+          }
+
+          .event-card-content {
+            flex: 1;
+            min-width: 0;
+            display: flex;
+            flex-direction: column;
+            padding: 1.25rem 1.35rem !important;
+            border-top: none !important;
+            border-left: 2px solid var(--advertisement-card-border);
+          }
+
+          .event-card-content > .flex:first-child .text-\\[10px\\] {
+            font-size: 0.82rem !important;
+            line-height: 1.2rem;
+          }
+
+          .event-card-content > .flex:first-child svg {
+            width: 14px !important;
+            height: 14px !important;
+          }
+
+          .event-card-content h3 {
+            font-size: 1.35rem;
+            line-height: 1.25;
+            margin-bottom: 0.45rem;
+          }
+
+          .event-card-content > p {
+            font-size: 0.95rem;
+            line-height: 1.55;
+          }
+
+          .event-card-content > .flex.flex-wrap {
+            font-size: 0.9rem;
+            line-height: 1.4;
+          }
+
+          .event-card-content > .flex.flex-wrap svg {
+            width: 14px !important;
+            height: 14px !important;
+          }
+
+          .event-card-content > div:last-child {
+            margin-top: auto;
+          }
+        }
+      `}</style>
     </div>
   );
 };

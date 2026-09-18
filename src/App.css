@@ -1,21 +1,16 @@
 /* Sidebar scrollbar adjustments to avoid overlap with clickable area on mobile */
 .sidebar-scroll {
 	-webkit-overflow-scrolling: touch;
-	scrollbar-width: thin; /* Firefox */
-	scrollbar-color: rgba(0,0,0,0.25) transparent;
+	scrollbar-width: none;
+	-ms-overflow-style: none;
 	touch-action: pan-y;
 }
 
 /* WebKit scrollbars */
 .sidebar-scroll::-webkit-scrollbar {
-	width: 8px;
-}
-.sidebar-scroll::-webkit-scrollbar-thumb {
-	background: rgba(0,0,0,0.25);
-	border-radius: 9999px;
-}
-.sidebar-scroll::-webkit-scrollbar-track {
-	background: transparent;
+	display: none;
+	width: 0;
+	height: 0;
 }
 
 /* Global themed shell so all child routes inherit Home-like theme tokens */
@@ -91,7 +86,34 @@
   100% { transform: translateX(-50%); }
 }
 
-/* Marquee inner span gets hardware-acceleration hint */
-.om-marquee-inner {
-  will-change: transform;
+@media (min-width: 1024px) {
+	.app-root-shell.has-desktop-sidebar {
+		justify-content: flex-start !important;
+		align-items: stretch;
+		height: 100dvh;
+		overflow: hidden;
+	}
+
+	.app-desktop-sidebar {
+		height: 100dvh;
+		position: sticky;
+		top: 0;
+		z-index: 60;
+	}
+
+	.app-main-column {
+		height: 100dvh;
+		overflow: hidden;
+	}
+
+	.app-root-shell.has-desktop-sidebar .app-route-shell {
+		height: 100dvh;
+		max-width: none !important;
+		overflow-y: auto;
+	}
+
+	.app-root-shell.has-desktop-sidebar button:has(svg.lucide-menu) {
+		display: none !important;
+	}
 }
+

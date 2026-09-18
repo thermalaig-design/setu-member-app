@@ -33,6 +33,11 @@ const normalizeText = (value) => {
   return text;
 };
 
+const isActiveImage = (image) => {
+  const status = normalizeText(image?.status).toLowerCase();
+  return !status || status === 'active';
+};
+
 const titleCase = (value) => {
   const text = normalizeText(value);
   if (!text) return '';
@@ -59,7 +64,7 @@ const getFirstProductImage = (category) => {
     const images = Array.isArray(product?.images) ? product.images : [];
     for (const image of images) {
       const imageUrl = normalizeText(image?.image_url);
-      if (imageUrl) return imageUrl;
+      if (isActiveImage(image) && imageUrl) return imageUrl;
     }
   }
   return '';
