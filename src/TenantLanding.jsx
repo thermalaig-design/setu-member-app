@@ -8,6 +8,7 @@ import { getUserHospitalMemberships, clearTenantUserSession } from './utils/stor
 import { getAppHomePath } from './utils/tenantNavigation';
 import { getInstallPrompt, clearInstallPrompt, subscribeInstallPrompt } from './utils/installPrompt';
 import Home from './Home';
+
 import TenantProfileModal from './components/TenantProfileModal';
 
 const LAST_SELECTED_TRUST_ID_KEY = 'last_selected_trust_id';
