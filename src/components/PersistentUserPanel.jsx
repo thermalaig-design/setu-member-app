@@ -7,6 +7,25 @@ import { getAppHomePath } from '../utils/tenantNavigation';
 import BottomNav from './BottomNav';
 
 const USER_PANEL_URL = 'https://user-test.teiltd.in/auth/login';
+const USER_PANEL_ORIGIN = new URL(USER_PANEL_URL).origin;
+
+// The user-panel iframe is nested inside this app's own WebView (Capacitor
+// on Android). Android's WebView often never invokes shouldOverrideUrlLoading
+// for navigations started inside a sub-frame/iframe, so Capacitor's built-in
+// "launch external links as an intent" handling — which relies on that
+// callback — never fires there. A window.open()/redirect to play.google.com
+// from inside the iframe therefore tries to load Play Store's page as a
+// framed document, which Google's frame-busting headers refuse outright.
+// The user-panel app posts a message instead of navigating directly; this
+// listener (registered once, at module load, since the iframe can be
+// mounted before any component-level effect would run) does the actual
+// window.open() from the top-level frame, where shouldOverrideUrlLoading
+// reliably fires and Capacitor opens it externally.
+window.addEventListener('message', (event) => {
+  if (event.origin !== USER_PANEL_ORIGIN) return;
+  if (event.data?.type !== 'OPEN_EXTERNAL_LINK' || !event.data.url) return;
+  window.open(event.data.url, '_blank', 'noopener,noreferrer');
+});
 
 export const UserPanelContent = () => (
   <section
