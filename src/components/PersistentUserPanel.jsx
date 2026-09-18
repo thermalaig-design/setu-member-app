@@ -40,6 +40,7 @@ export const UserPanelContent = () => (
     <iframe
       title="App Gallery"
       src={USER_PANEL_URL}
+      allow="clipboard-write; web-share"
       className="w-full border-0"
       style={{ height: 'min(620px, calc(100vh - 210px))', minHeight: 460 }}
     />
@@ -121,6 +122,7 @@ const PersistentUserPanel = ({ isActive, onNavigate }) => {
       <iframe
         title="User Panel"
         src={USER_PANEL_URL}
+        allow="clipboard-write; web-share"
         className="flex-1 w-full border-0"
       />
 
