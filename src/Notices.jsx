@@ -502,7 +502,8 @@ const getInitialNoticeboardState = () => {
   };
 };
 
-const Notices = ({ onNavigate }) => {
+export const NoticesContent = ({ onNavigate, variant = 'page' }) => {
+  const isPageVariant = variant === 'page';
   const navigate = useNavigate();
   const theme = useAppTheme();
   const NOTICE_SCROLL_KEY = 'noticeboard_scroll_y';
@@ -800,25 +801,27 @@ const Notices = ({ onNavigate }) => {
   };
 
   return (
-    <div className={`min-h-screen pb-10 relative${isMenuOpen ? ' overflow-hidden max-h-screen' : ''}`} style={{ background: 'var(--page-bg, var(--app-page-bg))' }}>
-      <div className="theme-navbar border-b px-6 py-5 flex items-center justify-between sticky top-0 z-50 shadow-sm pointer-events-auto" style={{ paddingTop: 'max(env(safe-area-inset-top, 0px), 20px)' }}>
-        <button
-          onClick={() => setIsMenuOpen(!isMenuOpen)}
-          className="p-2 rounded-xl transition-colors pointer-events-auto"
-        >
-          {isMenuOpen ? <X className="h-6 w-6" style={{ color: 'var(--navbar-text)' }} /> : <Menu className="h-6 w-6" style={{ color: 'var(--navbar-text)' }} />}
-        </button>
-        <h1 className="text-lg font-bold" style={{ color: 'var(--navbar-text)' }}>Notice Board</h1>
-        <button
-          onClick={() => onNavigate('home')}
-          className="p-2 rounded-xl transition-colors flex items-center justify-center"
-          style={{ color: 'var(--navbar-text)' }}
-        >
-          <HomeIcon className="h-5 w-5" />
-        </button>
-      </div>
+    <div className={isPageVariant ? `min-h-screen pb-10 relative${isMenuOpen ? ' overflow-hidden max-h-screen' : ''}` : undefined} style={isPageVariant ? { background: 'var(--page-bg, var(--app-page-bg))' } : undefined}>
+      {isPageVariant && (
+        <div className="theme-navbar border-b px-6 py-5 flex items-center justify-between sticky top-0 z-50 shadow-sm pointer-events-auto" style={{ paddingTop: 'max(env(safe-area-inset-top, 0px), 20px)' }}>
+          <button
+            onClick={() => setIsMenuOpen(!isMenuOpen)}
+            className="p-2 rounded-xl transition-colors pointer-events-auto"
+          >
+            {isMenuOpen ? <X className="h-6 w-6" style={{ color: 'var(--navbar-text)' }} /> : <Menu className="h-6 w-6" style={{ color: 'var(--navbar-text)' }} />}
+          </button>
+          <h1 className="text-lg font-bold" style={{ color: 'var(--navbar-text)' }}>Notice Board</h1>
+          <button
+            onClick={() => onNavigate('home')}
+            className="p-2 rounded-xl transition-colors flex items-center justify-center"
+            style={{ color: 'var(--navbar-text)' }}
+          >
+            <HomeIcon className="h-5 w-5" />
+          </button>
+        </div>
+      )}
 
-      {isMenuOpen && (
+      {isPageVariant && isMenuOpen && (
         <div
           className="fixed inset-0 bg-black bg-opacity-0 z-25 lg:hidden"
           onClick={() => setIsMenuOpen(false)}
@@ -826,12 +829,14 @@ const Notices = ({ onNavigate }) => {
         />
       )}
 
-      <Sidebar
-        isOpen={isMenuOpen}
-        onClose={() => setIsMenuOpen(false)}
-        onNavigate={onNavigate}
-        currentPage="notices"
-      />
+      {isPageVariant && (
+        <Sidebar
+          isOpen={isMenuOpen}
+          onClose={() => setIsMenuOpen(false)}
+          onNavigate={onNavigate}
+          currentPage="notices"
+        />
+      )}
 
       {!loading && !error && sortedNotices.length > 0 && (
         <div className="px-6 pb-2">
@@ -1192,6 +1197,8 @@ const Notices = ({ onNavigate }) => {
     </div>
   );
 };
+
+const Notices = ({ onNavigate }) => <NoticesContent onNavigate={onNavigate} variant="page" />;
 
 export default Notices;
 

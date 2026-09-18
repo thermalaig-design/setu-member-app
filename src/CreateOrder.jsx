@@ -18,6 +18,7 @@ import { supabase } from './services/supabaseClient';
 import { applyOpacity } from './utils/colorUtils';
 import { clearCartItems, getCartItemPricing, getCartSummary, readCartItems, refreshCartCache, subscribeCart } from './utils/productCart';
 import { getNavbarThemeStyles } from './utils/themeUtils';
+import { getAppHomePath } from './utils/tenantNavigation';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -178,8 +179,6 @@ const buildInitialForm = () => {
 const formatCurrency = (value) => `Rs. ${Number(value || 0).toLocaleString('en-IN')}`;
 
 const normalizeRpcValue = (value) => {
-  if (value === null || value === undefined) return '';
-  if (typeof value === 'number' && Number.isFinite(value)) return value;
   return normalizeText(value);
 };
 
@@ -720,7 +719,7 @@ function CreateOrder() {
                 color: navbarTextColor,
                 background: 'color-mix(in srgb, var(--navbar-bg) 72%, var(--surface-color))',
               }}
-              onClick={() => navigate('/')}
+              onClick={() => navigate(getAppHomePath())}
               aria-label="Go home"
             >
               <HomeIcon className="h-5 w-5" />

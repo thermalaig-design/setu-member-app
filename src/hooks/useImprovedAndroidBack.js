@@ -1,6 +1,7 @@
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useNavigation } from '../context/ImprovedNavigationProvider';
 import { useCallback } from 'react';
+import { getAppHomePath } from '../utils/tenantNavigation';
 
 /**
  * ✅ IMPROVED Android Back Navigation Hook
@@ -40,7 +41,7 @@ export const useImprovedAndroidBack = () => {
     if (navigationStack.length > 1) {
       navigate(-1);
     } else {
-      navigate('/');
+      navigate(getAppHomePath());
     }
   }, [navigate, navigationStack, beforeBackCallbacks]);
 

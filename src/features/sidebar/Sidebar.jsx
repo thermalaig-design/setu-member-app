@@ -37,6 +37,8 @@ const normalizeSidebarRoute = (route = '', featureKey = '') => {
   if (featureValue === 'addcommunity' || featureValue === 'add-community' || featureValue === 'feature-add-community' || featureValue === 'feature_add_community') return 'add-community';
   if (routeValue === 'order-history' || routeValue === 'orderhistory') return 'order-history';
   if (featureValue === 'orderhistory' || featureValue === 'order-history' || featureValue === 'feature-order-history' || featureValue === 'feature_order_history') return 'order-history';
+  if (routeValue === 'products' || routeValue === 'product' || routeValue === 'categories-products') return 'products';
+  if (featureValue === 'product' || featureValue === 'products' || featureValue === 'feature-product' || featureValue === 'feature-products') return 'products';
   return routeValue;
 };
 
@@ -47,8 +49,11 @@ const resolveSidebarIcon = (featureKey, route) => {
   if (normalizedRoute === 'nomination-details') return FileText;
   if (normalizedRoute === 'add-community') return CirclePlus;
   if (normalizedRoute === 'order-history') return Clock3;
+  if (normalizedRoute === 'products') return ShoppingBag;
   return PhoneCall;
 };
+
+const normalizeDisplayInApp = (value) => String(value || 'home').trim().toLowerCase();
 
 const toTitleCase = (value = '') =>
   String(value || '')
@@ -310,29 +315,36 @@ const Sidebar = ({ isOpen, onClose, onNavigate, currentPage, onLogout, variant =
       key: 'instagram',
       label: 'Instagram',
       href: shareAppLinks?.instagram_link,
-      icon: Instagram,
+      icon: FaInstagram,
       color: '#E4405F'
     },
     {
       key: 'facebook',
       label: 'Facebook',
       href: shareAppLinks?.facebook_link,
-      icon: Facebook,
+      icon: FaFacebookF,
       color: '#1877F2'
     },
     {
       key: 'whatsapp',
       label: 'WhatsApp',
       href: shareAppLinks?.whatsapp_link,
-      icon: MessageCircle,
+      icon: FaWhatsapp,
       color: '#25D366'
     },
     {
       key: 'linkedin',
       label: 'LinkedIn',
       href: shareAppLinks?.linkedin_link,
-      icon: Linkedin,
+      icon: FaLinkedinIn,
       color: '#0A66C2'
+    },
+    {
+      key: 'youtube',
+      label: 'YouTube',
+      href: shareAppLinks?.youtube_url,
+      icon: FaYoutube,
+      color: '#FF0000'
     }
   ].filter((item) => String(item.href || '').trim());
 
@@ -679,9 +691,7 @@ const Sidebar = ({ isOpen, onClose, onNavigate, currentPage, onLogout, variant =
     })
     .map(([key, meta]) => ({
       id: normalizeSidebarRoute(meta?.route, key),
-      label: normalizeSidebarRoute(meta?.route, key) === 'contact-us'
-        ? toTitleCase(meta?.display_name || meta?.name || key)
-        : (meta?.display_name || meta?.name || key),
+      label: toTitleCase(meta?.display_name || meta?.name || key),
       icon: resolveSidebarIcon(key, meta?.route),
       quickOrder: meta?.quick_order ?? null,
     }))
@@ -926,6 +936,7 @@ const Sidebar = ({ isOpen, onClose, onNavigate, currentPage, onLogout, variant =
               })}
 
               {/* Other Membership Details — Navigate to full page */}
+              {ff('feature_othermembership') && normalizeDisplayInApp(flagsData?.feature_othermembership?.display_in_app) === 'sidebar' && (
               <button
                 onClick={handleOtherMembershipNavigation}
                 title="Other Membership Details"
@@ -944,7 +955,7 @@ const Sidebar = ({ isOpen, onClose, onNavigate, currentPage, onLogout, variant =
 	              />
               <div className={`flex-1 text-left ${collapsedDesktop ? 'lg:hidden' : ''}`}>
                 <span className="font-semibold" style={{ color: sidebarTextColor }}>
-                  Other Membership Details
+                  {toTitleCase(flagsData?.feature_othermembership?.display_name || 'Other Membership Details')}
                 </span>
                 {loadingTrustLinks && (
                   <span
@@ -968,6 +979,7 @@ const Sidebar = ({ isOpen, onClose, onNavigate, currentPage, onLogout, variant =
 	                style={{ color: sidebarChevronColor }}
               />
             </button>
+              )}
 
 
               {/* Privacy toggle — hides this member's contact/address details from Directory & Executive Body */}
@@ -1089,7 +1101,7 @@ const Sidebar = ({ isOpen, onClose, onNavigate, currentPage, onLogout, variant =
                     aria-label={item.label}
                     title={item.label}
                   >
-                    <Icon className="h-5 w-5" style={{ color: item.color }} />
+                    <Icon aria-hidden="true" size={20} style={{ color: item.color }} />
                   </button>
                 );
               })}

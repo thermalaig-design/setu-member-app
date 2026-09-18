@@ -9,6 +9,7 @@ const TRUST_SCOPED_CACHE_PREFIXES = [
   'directory_cache_timestamp_',
   'achievements_cache_v1:',
   'sub_feature_flags_cache_v1:',
+  'feature_flags_cache_v4:',
   'feature_flags_cache_v3:',
   'theme_cache_v3_',
   'theme_cache_persist_v3_',

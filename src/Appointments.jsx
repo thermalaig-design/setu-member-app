@@ -117,7 +117,37 @@ const SPECIALTIES = [
 
 
 
-const Appointments = ({ onNavigate, appointmentForm, setAppointmentForm }) => {
+const DEFAULT_APPOINTMENT_FORM = {
+  patientName: '',
+  phone: '',
+  doctor: '',
+  date: '',
+  time: '',
+  reason: '',
+  bookingFor: 'self',
+  patientRelationship: '',
+  age: '',
+  gender: '',
+  patientEmail: '',
+  relationship: '',
+  relationshipText: '',
+  isFirstVisit: ''
+};
+
+// appointmentForm is normally lifted to App.jsx so the in-progress booking survives
+// navigating away from /appointment and back. When embedded as Home content
+// (variant="home"), there is no App-level state to receive — fall back to local state
+// so the embedded widget still works as a self-contained, independent instance.
+export const AppointmentsContent = ({
+  onNavigate,
+  appointmentForm: appointmentFormProp,
+  setAppointmentForm: setAppointmentFormProp,
+  variant = 'page',
+}) => {
+  const isPageVariant = variant === 'page';
+  const [localAppointmentForm, setLocalAppointmentForm] = useState(DEFAULT_APPOINTMENT_FORM);
+  const appointmentForm = appointmentFormProp ?? localAppointmentForm;
+  const setAppointmentForm = setAppointmentFormProp ?? setLocalAppointmentForm;
   const theme = useAppTheme();
   const mainContainerRef = useRef(null);
   const [view, setView] = useState('specialties'); // 'specialties' | 'doctors' | 'doctorDetail' | 'slots' | 'form' | 'billing' | 'history'
@@ -1020,54 +1050,57 @@ const Appointments = ({ onNavigate, appointmentForm, setAppointmentForm }) => {
   return (
     <div
       ref={mainContainerRef}
-      className={`bg-white min-h-screen pb-10 relative${isMenuOpen ? ' overflow-hidden max-h-screen' : ''}`}
+      className={isPageVariant ? `bg-white min-h-screen pb-10 relative${isMenuOpen ? ' overflow-hidden max-h-screen' : ''}` : undefined}
     >
-      {/* Navbar */}
-      <div className="theme-navbar border-b px-4 sm:px-6 py-5 flex items-center justify-between sticky top-0 z-50 transition-all duration-300 pointer-events-auto" style={{ paddingTop: 'max(env(safe-area-inset-top, 0px), 20px)' }}>
-        <button
-          onClick={() => setIsMenuOpen(!isMenuOpen)}
-          className="p-2 rounded-xl hover:bg-gray-100 transition-colors pointer-events-auto"
-        >
-          {isMenuOpen ? <X className="h-6 w-6" style={{ color: 'var(--navbar-text)' }} /> : <Menu className="h-6 w-6" style={{ color: 'var(--navbar-text)' }} />}
-        </button>
-        <h1 className="text-lg font-bold transition-colors" style={{ color: 'var(--navbar-text)' }}>
-          {view === 'specialties' ? 'OPD Schedule' : view === 'doctors' ? (selectedSpecialty?.label || 'Doctors') : view === 'doctorDetail' ? 'Doctor Profile' : view === 'slots' ? 'Select Slot' : view === 'history' ? 'OPD Schedule History' : view === 'billing' ? 'OPD Schedule Summary' : 'OPD Schedule'}
-        </h1>
-        <div className="flex items-center gap-2">
+      {isPageVariant && (
+        <div className="theme-navbar border-b px-4 sm:px-6 py-5 flex items-center justify-between sticky top-0 z-50 transition-all duration-300 pointer-events-auto" style={{ paddingTop: 'max(env(safe-area-inset-top, 0px), 20px)' }}>
           <button
-            onClick={() => {
-              if (view === 'billing') { setView('form'); setPendingAppointmentData(null); }
-              else if (view === 'form') { setSlotPreFilled(false); setView('slots'); }
-              else if (view === 'slots') setView('doctors');
-              else if (view === 'doctorDetail') setView('doctors');
-              else if (view === 'doctors') setView('specialties');
-              else if (view === 'history') setView('specialties');
-              else onNavigate('home');
-            }}
-            className="p-2 rounded-xl transition-colors flex items-center justify-center hover:bg-gray-100" style={{ color: 'var(--navbar-text)' }}
-            title="Back"
+            onClick={() => setIsMenuOpen(!isMenuOpen)}
+            className="p-2 rounded-xl hover:bg-gray-100 transition-colors pointer-events-auto"
           >
-            <ArrowLeft className="h-5 w-5" />
+            {isMenuOpen ? <X className="h-6 w-6" style={{ color: 'var(--navbar-text)' }} /> : <Menu className="h-6 w-6" style={{ color: 'var(--navbar-text)' }} />}
           </button>
-          <button
-            onClick={() => onNavigate('home')}
-            className="p-2 rounded-xl transition-colors flex items-center justify-center hover:bg-gray-100" style={{ color: 'var(--navbar-text)' }}
-          >
-            <HomeIcon className="h-5 w-5" />
-          </button>
+          <h1 className="text-lg font-bold transition-colors" style={{ color: 'var(--navbar-text)' }}>
+            {view === 'specialties' ? 'OPD Schedule' : view === 'doctors' ? (selectedSpecialty?.label || 'Doctors') : view === 'doctorDetail' ? 'Doctor Profile' : view === 'slots' ? 'Select Slot' : view === 'history' ? 'OPD Schedule History' : view === 'billing' ? 'OPD Schedule Summary' : 'OPD Schedule'}
+          </h1>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => {
+                if (view === 'billing') { setView('form'); setPendingAppointmentData(null); }
+                else if (view === 'form') { setSlotPreFilled(false); setView('slots'); }
+                else if (view === 'slots') setView('doctors');
+                else if (view === 'doctorDetail') setView('doctors');
+                else if (view === 'doctors') setView('specialties');
+                else if (view === 'history') setView('specialties');
+                else onNavigate('home');
+              }}
+              className="p-2 rounded-xl transition-colors flex items-center justify-center hover:bg-gray-100" style={{ color: 'var(--navbar-text)' }}
+              title="Back"
+            >
+              <ArrowLeft className="h-5 w-5" />
+            </button>
+            <button
+              onClick={() => onNavigate('home')}
+              className="p-2 rounded-xl transition-colors flex items-center justify-center hover:bg-gray-100" style={{ color: 'var(--navbar-text)' }}
+            >
+              <HomeIcon className="h-5 w-5" />
+            </button>
+          </div>
         </div>
-      </div>
+      )}
 
-      <Sidebar
-        isOpen={isMenuOpen}
-        onClose={() => setIsMenuOpen(false)}
-        onNavigate={onNavigate}
-        currentPage="appointments"
-      />
+      {isPageVariant && (
+        <Sidebar
+          isOpen={isMenuOpen}
+          onClose={() => setIsMenuOpen(false)}
+          onNavigate={onNavigate}
+          currentPage="appointments"
+        />
+      )}
 
       {/* â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ SPECIALTIES SELECTION PAGE â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
       {view === 'specialties' && (
-        <div className="bg-white min-h-screen pb-10">
+        <div className={isPageVariant ? 'bg-white min-h-screen pb-10' : 'bg-white pb-4'}>
 
           {/* Top indigo header */}
           <div className="px-5 pt-4 pb-8" style={{ background: `linear-gradient(135deg, ${theme.secondary}, ${theme.primary})` }}>
@@ -1203,7 +1236,7 @@ const Appointments = ({ onNavigate, appointmentForm, setAppointmentForm }) => {
 
       {/* â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ DOCTORS BY SPECIALTY PAGE â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
       {view === 'doctors' && (
-        <div className="bg-gray-50 min-h-screen pb-16">
+        <div className={isPageVariant ? 'bg-gray-50 min-h-screen pb-16' : 'bg-gray-50 pb-4'}>
           {/* Cards area */}
           <div className="px-4 space-y-4 pt-4">
             {specialtyLoading ? (
@@ -1350,7 +1383,7 @@ const Appointments = ({ onNavigate, appointmentForm, setAppointmentForm }) => {
         const doc = detailDoctor;
         const imgUrl = getDoctorImageUrl(doc);
         return (
-          <div className="bg-gray-50 min-h-screen pb-6">
+          <div className={isPageVariant ? 'bg-gray-50 min-h-screen pb-6' : 'bg-gray-50 pb-4'}>
             {/* Hero Card */}
             <div className="bg-white mx-4 mt-4 rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
               <div className="flex gap-4 p-4">
@@ -1629,7 +1662,7 @@ const Appointments = ({ onNavigate, appointmentForm, setAppointmentForm }) => {
           doc.private_opd_days || doc.private_opd_start || pSched.length > 0);
 
         return (
-          <div className="bg-gray-50 min-h-screen pb-10">
+          <div className={isPageVariant ? 'bg-gray-50 min-h-screen pb-10' : 'bg-gray-50 pb-4'}>
             {/* Doctor mini-card */}
             <div className="bg-white mx-4 mt-4 rounded-2xl shadow-sm border border-gray-100 p-4 flex items-center gap-3">
               <div className="flex-shrink-0">
@@ -1962,7 +1995,7 @@ const Appointments = ({ onNavigate, appointmentForm, setAppointmentForm }) => {
 
           {/* â”€â”€â”€ BILLING PAGE: sticky bottom bar â”€â”€â”€ */}
           {view === 'billing' && pendingAppointmentData && (
-            <div className="fixed bottom-0 left-0 right-0 z-40 bg-white border-t border-gray-200 px-4 py-4 shadow-xl max-w-full md:max-w-[430px] md:mx-auto">
+            <div className={isPageVariant ? 'fixed bottom-0 left-0 right-0 z-40 bg-white border-t border-gray-200 px-4 py-4 shadow-xl max-w-full md:max-w-[430px] md:mx-auto' : 'bg-white border-t border-gray-200 px-4 py-4 mt-2 rounded-b-2xl'}>
               <div className="flex items-center justify-between mb-3">
                 <div>
                   <p className="text-xs text-gray-500">Total Payable</p>
@@ -2716,7 +2749,7 @@ const Appointments = ({ onNavigate, appointmentForm, setAppointmentForm }) => {
       {/* â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ APPOINTMENT HISTORY â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
       {
         view === 'history' && (
-          <div className="bg-gray-50 min-h-screen pb-10">
+          <div className={isPageVariant ? 'bg-gray-50 min-h-screen pb-10' : 'bg-gray-50 pb-4'}>
             <div className="px-4 pt-4">
               <div className="flex items-center justify-between mb-4">
                 <p className="text-sm text-gray-500 font-medium">
@@ -2940,5 +2973,14 @@ const Appointments = ({ onNavigate, appointmentForm, setAppointmentForm }) => {
     </div >
   );
 };
+
+const Appointments = ({ onNavigate, appointmentForm, setAppointmentForm }) => (
+  <AppointmentsContent
+    onNavigate={onNavigate}
+    appointmentForm={appointmentForm}
+    setAppointmentForm={setAppointmentForm}
+    variant="page"
+  />
+);
 
 export default Appointments;

@@ -3,10 +3,12 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { useBackNavigation } from './hooks';
 import { verifyOTP } from './services/authService';
 import { fetchDirectoryData } from './services/directoryService';
-import { fetchMemberTrustMemberships, fetchTrustById } from './services/trustService';
+import { fetchActiveTrustsByMobile, fetchMemberTrustMemberships, fetchTrustById } from './services/trustService';
 import { logUserSessionEvent } from './services/sessionAuditService';
 import { persistUserSession } from './utils/storageUtils';
 import { setLoginTermsPromptPending } from './utils/legalContent';
+import { useTenant } from './context/TenantContext';
+import { getAppHomePath } from './utils/tenantNavigation';
 
 const TRUST_ID = import.meta.env.VITE_DEFAULT_TRUST_ID || '';
 const LOGIN_TRUST_CACHE_KEY = 'cached_base_trust_info';
@@ -71,6 +73,7 @@ function OTPVerification() {
   const location = useLocation();
   useBackNavigation(() => navigate('/login'));
   const authDefaultTrust = resolveAuthDefaultTrust();
+  const { installedTrustId, tenantTrust } = useTenant();
 
   const [otp, setOtp] = useState('');
   const [loading, setLoading] = useState(false);
@@ -92,7 +95,7 @@ function OTPVerification() {
   useEffect(() => {
     const isLoggedIn = localStorage.getItem('isLoggedIn') === 'true';
     if (isLoggedIn) {
-      navigate('/', { replace: true });
+      navigate(getAppHomePath(), { replace: true });
       return;
     }
     if (!canRenderOtpPage) navigate('/login', { replace: true });
@@ -142,7 +145,51 @@ function OTPVerification() {
 
     let enrichedUser = { ...selectedUser, member_ids: allAccountMemberIds };
     try {
-      const refreshedMemberships = await fetchMemberTrustMemberships({
+      const selectedMemberName = normalizeText(selectedUser?.Name || selectedUser?.name);
+      const activeTrustResult = await fetchActiveTrustsByMobile({
+        mobile: phoneNumber || selectedUser?.mobile || selectedUser?.Mobile,
+        name: accountCandidates.length > 1 ? selectedMemberName : null
+      });
+
+      const activeTrustMemberships = Array.isArray(activeTrustResult?.memberships)
+        ? activeTrustResult.memberships
+        : [];
+
+      if (activeTrustResult?.member_found === false) {
+        console.warn('[OTP] Active trust API did not find selected member:', {
+          mobile: activeTrustResult?.mobile || phoneNumber,
+          name: accountCandidates.length > 1 ? selectedMemberName : null
+        });
+      }
+
+      if (activeTrustMemberships.length > 0) {
+        const firstMembership = activeTrustMemberships[0];
+        const resolvedMemberId = activeTrustResult?.member_id || selectedUser?.members_id || selectedUser?.member_id || null;
+        enrichedUser = {
+          ...enrichedUser,
+          id: resolvedMemberId || enrichedUser.id,
+          members_id: resolvedMemberId || enrichedUser.members_id || null,
+          member_id: resolvedMemberId || enrichedUser.member_id || null,
+          member_ids: resolvedMemberId ? [String(resolvedMemberId)] : allAccountMemberIds,
+          Name: activeTrustResult?.member_name || enrichedUser.Name || enrichedUser.name || '',
+          name: activeTrustResult?.member_name || enrichedUser.name || enrichedUser.Name || '',
+          Mobile: activeTrustResult?.mobile || enrichedUser.Mobile || enrichedUser.mobile || phoneNumber,
+          mobile: activeTrustResult?.mobile || enrichedUser.mobile || enrichedUser.Mobile || phoneNumber,
+          hospital_memberships: activeTrustMemberships,
+          membership_number: firstMembership?.membership_number || enrichedUser.membership_number || enrichedUser['Membership number'] || '',
+          'Membership number': firstMembership?.membership_number || enrichedUser['Membership number'] || enrichedUser.membership_number || '',
+          membershipNumber: firstMembership?.membership_number || enrichedUser.membershipNumber || enrichedUser.membership_number || '',
+          type: firstMembership?.role || enrichedUser.type || '',
+          trusts_loaded_from_active_api: true
+        };
+      }
+    } catch (activeTrustError) {
+      console.warn('[OTP] Failed to refresh active trusts by mobile:', activeTrustError?.message || activeTrustError);
+    }
+
+    try {
+      const hasApiMemberships = Array.isArray(enrichedUser?.hospital_memberships) && enrichedUser.hospital_memberships.length > 0;
+      const refreshedMemberships = hasApiMemberships ? [] : await fetchMemberTrustMemberships({
         membersId: selectedUser?.members_id || selectedUser?.id || null,
         membershipNumber: accountMembershipNo
       });
@@ -175,6 +222,24 @@ function OTPVerification() {
       console.warn('[OTP] Failed to refresh selected account memberships:', membershipError?.message || membershipError);
     }
 
+    const finalMemberships = Array.isArray(enrichedUser?.hospital_memberships) ? enrichedUser.hospital_memberships : [];
+    const preferredMembership = finalMemberships.find((membership) => membership?.is_active !== false) || finalMemberships[0] || null;
+    if (preferredMembership?.trust_id) {
+      enrichedUser.trust = {
+        id: preferredMembership.trust_id,
+        name: preferredMembership.trust_name || null,
+        icon_url: preferredMembership.trust_icon_url || null,
+        remark: preferredMembership.trust_remark || null
+      };
+      enrichedUser.primary_trust = {
+        id: preferredMembership.trust_id,
+        name: preferredMembership.trust_name || null,
+        icon_url: preferredMembership.trust_icon_url || null,
+        remark: preferredMembership.trust_remark || null,
+        is_active: preferredMembership?.is_active !== false
+      };
+    }
+
     const persisted = persistUserSession(enrichedUser);
     if (!persisted.success) {
       setError(persisted.message || 'Unable to save session on this device. Please try again.');
@@ -194,13 +259,35 @@ function OTPVerification() {
     const selectedMemberships = Array.isArray(enrichedUser?.hospital_memberships) ? enrichedUser.hospital_memberships : [];
     const baseTrustId = normalizeText(TRUST_ID || authDefaultTrust.id);
     const baseMembership = selectedMemberships.find((membership) => normalizeText(membership?.trust_id) === baseTrustId) || null;
-    const selectedTrustId = baseTrustId;
-    const selectedTrustName = normalizeText(
-      baseMembership?.trust_name ||
-      trustInfo?.name ||
-      authDefaultTrust?.name ||
-      localStorage.getItem('selected_trust_name')
-    );
+    const fallbackMembership = selectedMemberships.find((membership) => membership?.is_active !== false) || selectedMemberships[0] || null;
+
+    // Installed/tenant identity (white-label /app/<slug> app): if the logged-in
+    // member actually belongs to the installed Trust, that Trust becomes the
+    // selected Trust for this session. If not, we fall back to the existing
+    // membership-based selection below rather than silently granting access
+    // to a Trust the member does not belong to.
+    const tenantTrustId = normalizeText(installedTrustId);
+    const tenantMembership = tenantTrustId
+      ? selectedMemberships.find((membership) => normalizeText(membership?.trust_id) === tenantTrustId) || null
+      : null;
+
+    if (tenantTrustId && !tenantMembership) {
+      console.warn('[OTP] Logged-in member is not part of the installed tenant Trust; using existing membership selection instead.', {
+        tenantTrustId
+      });
+    }
+
+    const selectedTrustId = tenantMembership
+      ? tenantTrustId
+      : (normalizeText(baseMembership?.trust_id) || normalizeText(fallbackMembership?.trust_id) || baseTrustId);
+    const selectedTrustName = tenantMembership
+      ? normalizeText(tenantMembership?.trust_name || tenantTrust?.name || authDefaultTrust?.name)
+      : normalizeText(
+        baseMembership?.trust_name ||
+        trustInfo?.name ||
+        authDefaultTrust?.name ||
+        localStorage.getItem('selected_trust_name')
+      );
 
     localStorage.setItem('selected_trust_id', String(selectedTrustId));
     localStorage.setItem(LAST_SELECTED_TRUST_ID_KEY, String(selectedTrustId));
@@ -215,7 +302,7 @@ function OTPVerification() {
     try { sessionStorage.removeItem(OTP_FLOW_KEY); } catch { /* ignore */ }
     setLoginTermsPromptPending();
 
-    navigate('/', { replace: true });
+    navigate(getAppHomePath(), { replace: true });
     return true;
   };
 

@@ -65,7 +65,8 @@ const normalizeAttachments = (attachments) => {
   return [];
 };
 
-const Donation = ({ onNavigate }) => {
+export const DonationContent = ({ onNavigate, variant = 'page' }) => {
+  const isPageVariant = variant === 'page';
   const theme = useAppTheme();
   const navigate = useNavigate();
   const [prefill, setPrefill] = useState(() => getDonationFormPrefill());
@@ -142,48 +143,49 @@ const Donation = ({ onNavigate }) => {
 
   return (
     <div
-      className="min-h-screen pb-8"
-      style={{
+      className={isPageVariant ? 'min-h-screen pb-8' : undefined}
+      style={isPageVariant ? {
         background: 'var(--page-bg, var(--app-page-bg))',
         color: 'var(--advertisement-description)',
-      }}
+      } : undefined}
     >
-      <div
-        className="theme-navbar border-b px-6 py-5 flex items-center justify-between sticky top-0 z-40 shadow-sm"
-        style={{ paddingTop: 'max(env(safe-area-inset-top, 0px), 20px)' }}
-      >
-        <button
-          onClick={() => setIsMenuOpen(!isMenuOpen)}
-          className="w-10 h-10 rounded-2xl flex items-center justify-center active:scale-95 transition-all"
-          style={{
-            background: 'color-mix(in srgb, var(--navbar-bg) 72%, var(--surface-color))',
-          }}
+      {isPageVariant && (
+        <div
+          className="theme-navbar border-b px-6 py-5 flex items-center justify-between sticky top-0 z-40 shadow-sm"
+          style={{ paddingTop: 'max(env(safe-area-inset-top, 0px), 20px)' }}
         >
-          {isMenuOpen ? <X className="h-[22px] w-[22px]" style={{ color: 'var(--navbar-text)' }} /> : <Menu className="h-[22px] w-[22px]" style={{ color: 'var(--navbar-text)' }} />}
-        </button>
-        <div className="min-w-0 text-center flex-1 px-3">
-          {/* <p className="text-[11px] font-bold uppercase tracking-[0.24em]" style={{ color: 'color-mix(in srgb, var(--navbar-text) 82%, var(--surface-color))' }}>
-            Donation
-          </p> */}
-          <h1 className="text-lg font-extrabold truncate" style={{ color: 'var(--navbar-text)' }}>
-            Donation
-          </h1>
+          <button
+            onClick={() => setIsMenuOpen(!isMenuOpen)}
+            className="w-10 h-10 rounded-2xl flex items-center justify-center active:scale-95 transition-all"
+            style={{
+              background: 'color-mix(in srgb, var(--navbar-bg) 72%, var(--surface-color))',
+            }}
+          >
+            {isMenuOpen ? <X className="h-[22px] w-[22px]" style={{ color: 'var(--navbar-text)' }} /> : <Menu className="h-[22px] w-[22px]" style={{ color: 'var(--navbar-text)' }} />}
+          </button>
+          <div className="min-w-0 text-center flex-1 px-3">
+            <h1 className="text-lg font-extrabold truncate" style={{ color: 'var(--navbar-text)' }}>
+              Donation
+            </h1>
+          </div>
+          <button
+            onClick={() => onNavigate?.('home')}
+            className="w-10 h-10 rounded-2xl flex items-center justify-center active:scale-95 transition-all"
+            style={{
+              background: 'color-mix(in srgb, var(--navbar-bg) 72%, var(--surface-color))',
+            }}
+          >
+            <HomeIcon className="h-[22px] w-[22px]" style={{ color: 'var(--navbar-text)' }} />
+          </button>
         </div>
-        <button
-          onClick={() => onNavigate?.('home')}
-          className="w-10 h-10 rounded-2xl flex items-center justify-center active:scale-95 transition-all"
-          style={{
-            background: 'color-mix(in srgb, var(--navbar-bg) 72%, var(--surface-color))',
-          }}
-        >
-          <HomeIcon className="h-[22px] w-[22px]" style={{ color: 'var(--navbar-text)' }} />
-        </button>
-      </div>
+      )}
 
-      {isMenuOpen && <div className="fixed inset-0 z-25" style={{ background: applyOpacity('var(--brand-navy-dark)', 0.12) }} onClick={() => setIsMenuOpen(false)} />}
-      <Sidebar isOpen={isMenuOpen} onClose={() => setIsMenuOpen(false)} onNavigate={onNavigate} currentPage="donation" />
+      {isPageVariant && isMenuOpen && <div className="fixed inset-0 z-25" style={{ background: applyOpacity('var(--brand-navy-dark)', 0.12) }} onClick={() => setIsMenuOpen(false)} />}
+      {isPageVariant && (
+        <Sidebar isOpen={isMenuOpen} onClose={() => setIsMenuOpen(false)} onNavigate={onNavigate} currentPage="donation" />
+      )}
 
-      <div className="px-5 pt-5 space-y-5">
+      <div className={isPageVariant ? 'px-5 pt-5 space-y-5' : 'space-y-5'}>
         <section
           className="rounded-[22px] p-4"
           style={{
@@ -326,5 +328,7 @@ const Donation = ({ onNavigate }) => {
     </div>
   );
 };
+
+const Donation = ({ onNavigate }) => <DonationContent onNavigate={onNavigate} variant="page" />;
 
 export default Donation;

@@ -2,6 +2,19 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { getShareAppTargetLink } from '../src/utils/shareApp.js';
 
+test('prefers the trust web app link when available', () => {
+  const targetLink = getShareAppTargetLink(
+    {
+      web_app_url: 'https://example.com/app/trust',
+      play_store_link: 'https://play.google.com/store',
+      app_store_link: 'https://apps.apple.com/app'
+    },
+    'android'
+  );
+
+  assert.equal(targetLink, 'https://example.com/app/trust');
+});
+
 test('prefers the iOS link when the platform is iOS', () => {
   const targetLink = getShareAppTargetLink(
     { play_store_link: 'https://play.google.com/store', app_store_link: 'https://apps.apple.com/app' },

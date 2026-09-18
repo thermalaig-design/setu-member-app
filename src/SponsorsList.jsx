@@ -9,7 +9,8 @@ import {
 } from './services/sponsorStore';
 import { useAppTheme } from './context/ThemeContext';
 
-const SponsorsList = ({ onNavigate, onBack }) => {
+export const SponsorsContent = ({ onNavigate, onBack, variant = 'page' }) => {
+  const isPageVariant = variant === 'page';
   const theme = useAppTheme();
   const selectedTrustId = localStorage.getItem('selected_trust_id') || '';
   const hasTrust = Boolean(selectedTrustId);
@@ -75,7 +76,7 @@ const SponsorsList = ({ onNavigate, onBack }) => {
             {trustName}{list.length > 0 ? ` · ${list.length} sponsors` : ''}
           </p>
         </div>
-      </div>
+      )}
 
       <div className="sponsors-list-content px-4 py-4">
         {list.length === 0 ? (
@@ -401,7 +402,8 @@ const SponsorsList = ({ onNavigate, onBack }) => {
   );
 };
 
+const SponsorsList = ({ onNavigate, onBack }) => (
+  <SponsorsContent onNavigate={onNavigate} onBack={onBack} variant="page" />
+);
+
 export default SponsorsList;
-
-
-

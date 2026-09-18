@@ -109,6 +109,84 @@ export const sanitizeCustomCss = (css) => {
 
 export const DEFAULT_HOME_LAYOUT = ['gallery', 'quickActions', 'sponsors'];
 export const AVAILABLE_HOME_SECTIONS = ['trustList', 'marquee', 'gallery', 'quickActions', 'sponsors'];
+export const DEFAULT_HOME_LAYOUT_MODES = { gallery: 'box', sponsors: 'box' };
+export const AVAILABLE_HOME_LAYOUT_MODES = ['box', 'content'];
+export const HOME_LAYOUT_MODE_KEYS = ['gallery', 'sponsors', 'add-community', 'user-panel'];
+
+// feature_flags.name in the DB is not standardized across trusts — some rows use the
+// "feature_" prefix (feature_sponsors, feature_noticeboard), others use a plain display
+// name (Facilities, Donation, Executive Body). This maps every observed variant to the
+// canonical section/route key used in theme.homeLayoutModes and Home.jsx's content registry.
+export const HOME_LAYOUT_MODE_KEY_ALIASES = {
+  feature_gallery: 'gallery',
+  feature_sponsors: 'sponsors',
+  feature_noticeboard: 'notices',
+  noticeboard: 'notices',
+  feature_facilities: 'facilities',
+  facility: 'facilities',
+  feature_events: 'events',
+  event: 'events',
+  feature_achievements: 'achievements',
+  achievement: 'achievements',
+  feature_donation: 'donation',
+  donations: 'donation',
+  feature_reports: 'reports',
+  report: 'reports',
+  feature_directory: 'directory',
+  feature_executive_body: 'executive-body',
+  executive_body: 'executive-body',
+  'executive body': 'executive-body',
+  executivebody: 'executive-body',
+  feature_opd: 'appointment',
+  opd: 'appointment',
+  appointments: 'appointment',
+  feature_product: 'products',
+  product: 'products',
+  'categories-products': 'products',
+  categoriesproducts: 'products',
+  feature_order_history: 'order-history',
+  order_history: 'order-history',
+  'order history': 'order-history',
+  orderhistory: 'order-history',
+  feature_referral: 'reference',
+  referral: 'reference',
+  references: 'reference',
+  feature_add_community: 'add-community',
+  add_community: 'add-community',
+  addcommunity: 'add-community',
+  'add-community': 'add-community',
+  'launch app': 'add-community',
+  'launch your app': 'add-community',
+  feature_bottom_nav: 'user-panel',
+  bottom_nav: 'user-panel',
+  bottomnav: 'user-panel',
+  'bottom-nav': 'user-panel',
+  'user-panel': 'user-panel',
+  user_panel: 'user-panel',
+  userpanel: 'user-panel',
+  feature_othermembership: 'other-memberships',
+  other_membership: 'other-memberships',
+  othermembership: 'other-memberships',
+  'other-membership': 'other-memberships',
+  'other memberships': 'other-memberships',
+  'other-memberships': 'other-memberships',
+  'app gallery': 'other-memberships',
+};
+
+// Folds alias keys (e.g. "feature_sponsors") onto their canonical key ("sponsors") in a raw
+// home_layout_modes object, BEFORE normalizeHomeLayoutModes applies its box-default for
+// gallery/sponsors. An explicit canonical key in the source always wins over an alias.
+export const foldHomeLayoutModeAliases = (rawModes) => {
+  if (!isPlainObject(rawModes)) return {};
+  const folded = { ...rawModes };
+  Object.keys(rawModes).forEach((key) => {
+    const canonicalKey = HOME_LAYOUT_MODE_KEY_ALIASES[String(key || '').trim().toLowerCase()];
+    if (canonicalKey && !(canonicalKey in folded)) {
+      folded[canonicalKey] = rawModes[key];
+    }
+  });
+  return folded;
+};
 export const DEFAULT_THEME_ANIMATIONS = { cards: 'fadeUp', navbar: 'fadeSlideDown', gallery: 'zoomIn' };
 export const AVAILABLE_THEME_ANIMATIONS = ['none', 'fadeUp', 'fadeSlideDown', 'zoomIn', 'fadeIn'];
 export const LEGACY_THEME_ANIMATION_ALIASES = {
@@ -128,6 +206,31 @@ export const normalizeHomeLayout = (value, fallback = DEFAULT_HOME_LAYOUT) => {
   });
 
   return unique.length > 0 ? unique : [...fallback];
+};
+
+// Generic by design: normalizes every key present in `value` (not just gallery/sponsors),
+// so any feature key added to app_templates.home_layout_modes in the future flows through
+// safely without a code change here. gallery/sponsors are always guaranteed present so
+// existing consumers can keep reading theme.homeLayoutModes.gallery / .sponsors directly.
+export const normalizeHomeLayoutModes = (value, fallback = DEFAULT_HOME_LAYOUT_MODES) => {
+  const safeFallback = isPlainObject(fallback) ? fallback : DEFAULT_HOME_LAYOUT_MODES;
+  const source = isPlainObject(value) ? value : {};
+  const keys = new Set([
+    ...HOME_LAYOUT_MODE_KEYS,
+    ...Object.keys(safeFallback),
+    ...Object.keys(source)
+  ]);
+  const normalized = {};
+
+  keys.forEach((key) => {
+    if (!key) return;
+    const rawMode = String(source[key] ?? '').trim();
+    normalized[key] = AVAILABLE_HOME_LAYOUT_MODES.includes(rawMode)
+      ? rawMode
+      : (safeFallback[key] || 'box');
+  });
+
+  return normalized;
 };
 
 export const normalizeThemeAnimations = (value, fallback = DEFAULT_THEME_ANIMATIONS) => {
@@ -290,6 +393,7 @@ export const DEFAULT_THEME = {
   sidebarBg: '#FFFFFF',
   marqueeBg: 'linear-gradient(90deg,#EF4444,#1E3A8A)',
   homeLayout: DEFAULT_HOME_LAYOUT,
+  homeLayoutModes: DEFAULT_HOME_LAYOUT_MODES,
   animations: DEFAULT_THEME_ANIMATIONS,
   customCss: '',
   templateKey: 'mahila',
@@ -306,6 +410,12 @@ export const mergeResolvedThemes = (baseTheme, selectedTheme) => {
   merged.homeLayout = normalizeHomeLayout(
     selectedTheme.homeLayout,
     normalizeHomeLayout(safeBase.homeLayout, DEFAULT_THEME.homeLayout)
+  );
+  // Intentionally does NOT fall back to safeBase.homeLayoutModes: box/content mode
+  // belongs to the selected trust's own template only, never inherited from base.
+  merged.homeLayoutModes = normalizeHomeLayoutModes(
+    selectedTheme.homeLayoutModes,
+    DEFAULT_THEME.homeLayoutModes
   );
   merged.animations = normalizeThemeAnimations(
     isPlainObject(selectedTheme.animations)
@@ -458,6 +568,10 @@ export const buildThemeFromTemplate = ({
     templateRow.home_layout,
     DEFAULT_THEME.homeLayout
   );
+  const resolvedHomeLayoutModes = normalizeHomeLayoutModes(
+    foldHomeLayoutModeAliases(parseJsonObject(templateRow.home_layout_modes, {})),
+    DEFAULT_THEME.homeLayoutModes
+  );
   const resolvedAnimations = normalizeThemeAnimations(
     isPlainObject(templateRow.animations)
       ? templateRow.animations
@@ -479,6 +593,7 @@ export const buildThemeFromTemplate = ({
     sidebarBg: buildSurfaceBackground(sidebar, DEFAULT_THEME.sidebarBg),
     marqueeBg: buildGradient(marquee),
     homeLayout: normalizeHomeLayout(resolvedHomeLayout, DEFAULT_THEME.homeLayout),
+    homeLayoutModes: resolvedHomeLayoutModes,
     animations: resolvedAnimations,
     customCss: sanitizeCustomCss(templateRow.custom_css || ''),
     templateKey: templateRow.template_key || 'mahila',

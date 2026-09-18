@@ -49,7 +49,7 @@ export const fetchMemberTrusts = async (membersId) => {
   // Fetch trust details for all trust IDs
   const { data: trusts, error: trustError } = await supabase
     .from('Trust')
-    .select('id,name,icon_url,remark,created_at,version')
+    .select('id,name,legal_name,icon_url,remark,created_at,version')
     .in('id', trustIds);
 
   if (trustError) {
@@ -66,6 +66,7 @@ export const fetchMemberTrusts = async (membersId) => {
     return {
       id: m.trust_id || null,
       name: t.name || null,
+      legal_name: t.legal_name || null,
       icon_url: t.icon_url || null,
       remark: t.remark || null,
       is_active: m.is_active,
@@ -88,6 +89,7 @@ const mapMembershipRowsWithTrusts = (regMemberships = [], trustById = {}) =>
       id: m?.id || `membership-${index}`,
       trust_id: trustId,
       trust_name: trust?.name || null,
+      trust_legal_name: trust?.legal_name || null,
       trust_icon_url: trust?.icon_url || null,
       trust_remark: trust?.remark || null,
       is_active: m?.is_active,
@@ -98,6 +100,60 @@ const mapMembershipRowsWithTrusts = (regMemberships = [], trustById = {}) =>
       source: 'reg_members'
     };
   });
+
+const mapActiveTrustResponseToMemberships = (payload = {}) => {
+  const trusts = Array.isArray(payload?.trusts) ? payload.trusts : [];
+  return trusts
+    .filter((trust) => trust?.trust_id)
+    .map((trust, index) => ({
+      id: trust?.trust_id || `active-trust-${index}`,
+      trust_id: trust?.trust_id || null,
+      trust_name: trust?.trust_name || null,
+      trust_legal_name: trust?.trust_legal_name || trust?.legal_name || null,
+      trust_icon_url: trust?.icon_url || null,
+      trust_remark: trust?.remark || null,
+      is_active: trust?.is_active !== false,
+      membership_number: trust?.membership_number || null,
+      role: trust?.role || null,
+      members_id: payload?.member_id || null,
+      member_id: payload?.member_id || null,
+      qr_code: trust?.qr_code || null,
+      trust_status: trust?.trust_status ?? null,
+      source: 'active_trusts_by_mobile'
+    }))
+    .sort((a, b) => {
+      const activeDiff = Number(Boolean(b?.is_active)) - Number(Boolean(a?.is_active));
+      if (activeDiff !== 0) return activeDiff;
+      return String(a?.trust_name || '').localeCompare(String(b?.trust_name || ''));
+    });
+};
+
+export const fetchActiveTrustsByMobile = async ({ mobile = '', name = null } = {}) => {
+  const normalizedMobile = String(mobile || '').replace(/\D/g, '').slice(-10);
+  const normalizedName = normalizeText(name);
+  if (!normalizedMobile) return null;
+
+  const { data, error } = await supabase.rpc('get_member_active_trusts_by_mobile', {
+      p_mobile: normalizedMobile,
+      p_name: normalizedName || null
+  });
+
+  if (error) {
+    throw new Error(error?.message || 'Unable to fetch active trusts for this mobile number.');
+  }
+
+  const payload = Array.isArray(data) ? data[0] : data;
+  if (payload?.success === false) {
+    throw new Error(payload?.message || 'Unable to fetch active trusts for this mobile number.');
+  }
+
+  const memberships = mapActiveTrustResponseToMemberships(payload);
+  return {
+    ...payload,
+    mobile: payload?.mobile || normalizedMobile,
+    memberships
+  };
+};
 
 export const fetchMemberTrustMemberships = async ({ membersId = null, membershipNumber = '' } = {}) => {
   const normalizedMembersId = normalizeText(membersId);
@@ -273,22 +329,125 @@ export const fetchTrustById = async (id) => {
   return data || null;
 };
 
-export const fetchShareAppLinksByTrustId = async (trustId) => {
-  const normalizedTrustId = String(trustId || '').trim();
-  if (!normalizedTrustId) return null;
+export const fetchTrustByAppSlug = async (appSlug) => {
+  const normalizedSlug = normalizeText(appSlug).toLowerCase();
+  if (!normalizedSlug) return null;
 
   const { data, error } = await supabase
-    .from('shareApp_links')
-    .select('trust_id, play_store_link, app_store_link, instagram_link, facebook_link, whatsapp_link, linkedin_link, version')
-    .eq('trust_id', normalizedTrustId)
+    .from('Trust')
+    .select('id,name,legal_name,remark,icon_url,app_slug,app_visibility,pwa_icon_192_url,pwa_icon_512_url,pwa_theme_color,pwa_background_color,pwa_enabled,version')
+    .eq('app_slug', normalizedSlug)
+    .eq('pwa_enabled', true)
     .maybeSingle();
 
   if (error) {
-    console.warn('Error fetching share app links:', error);
+    console.warn('Error fetching trust by app slug:', error);
     return null;
   }
 
   return data || null;
+};
+
+// Resolves (and, if needed, server-side creates) this member's reg_members
+// row for the tenant Trust behind /app/<appSlug>. Backed by the deployed
+// generate-webApp-link Edge Function's `resolve_app_access` action, which
+// reads Trust.app_visibility itself to decide is_active on insert (public ->
+// true, private -> false) and never touches is_active on an existing row —
+// the client only ever reads the decision, it never sends is_active/
+// app_visibility values of its own.
+export const resolveTenantAppAccess = async ({ appSlug, membersId }) => {
+  const normalizedSlug = normalizeText(appSlug).toLowerCase();
+  const normalizedMembersId = normalizeText(membersId);
+  if (!normalizedSlug || !normalizedMembersId) return null;
+
+  const { data, error } = await supabase.functions.invoke('generate-webApp-link', {
+    body: { action: 'resolve_app_access', app_slug: normalizedSlug, members_id: normalizedMembersId }
+  });
+
+  if (error) {
+    console.warn('Error resolving tenant app access:', error);
+    throw error;
+  }
+
+  if (!data?.success) {
+    console.warn('Tenant app access resolution failed:', data?.message);
+    return null;
+  }
+
+  return data;
+};
+
+// Keeps reg_members' denormalized Name in sync after a profile-popup save —
+// resolve_app_access only copies Name onto a *newly created* row and never
+// updates it again on its own. Only ever writes Name; is_active is never
+// touched from the client.
+export const syncTenantMembershipName = async ({ regMemberId, name }) => {
+  const normalizedId = normalizeText(regMemberId);
+  const normalizedName = normalizeText(name);
+  if (!normalizedId || !normalizedName) return;
+
+  const { error } = await supabase
+    .from('reg_members')
+    .update({ Name: normalizedName })
+    .eq('id', normalizedId);
+
+  if (error) {
+    console.warn('Error syncing tenant membership name:', error);
+  }
+};
+
+export const fetchShareAppLinksByTrustId = async (trustId) => {
+  const normalizedTrustId = String(trustId || '').trim();
+  if (!normalizedTrustId) return null;
+
+  const { data, error } = await supabase.rpc(
+    'manage_user_panel_by_trust_details',
+    {
+      p_action: 'view',
+      p_trust_id: normalizedTrustId
+    }
+  );
+
+  if (error) {
+    console.warn('Error fetching user panel links:', error);
+    return null;
+  }
+
+  const row = Array.isArray(data) ? data[0] : data;
+  if (!row) return null;
+
+  return {
+    trust_id: row.id || normalizedTrustId,
+    name: row.name || null,
+    subscription_type: row.subscription_type || null,
+    icon_url: row.icon_url || null,
+    web_app_url: row.web_app_url || null,
+    play_store_link: row.web_app_url || null,
+    app_store_link: row.web_app_url || null,
+    instagram_link: row.instagram_link || null,
+    facebook_link: row.facebook_link || null,
+    whatsapp_link: row.whatsapp_link || null,
+    linkedin_link: row.linkedin_link || null,
+    youtube_url: row.youtube_url || null,
+  };
+};
+
+export const fetchTrustHelpUrl = async (trustId) => {
+  const normalizedTrustId = normalizeText(trustId);
+  if (!normalizedTrustId) return null;
+
+  const { data, error } = await supabase
+    .from('Trust')
+    .select('help_url')
+    .eq('id', normalizedTrustId)
+    .maybeSingle();
+
+  if (error) {
+    console.warn('Error fetching trust help_url:', error);
+    return null;
+  }
+
+  return normalizeText(data?.help_url) || null;
 };
 
 export const fetchTemplatesForTrust = async (trustId) => {

@@ -3,7 +3,8 @@ import { FileText, Plus, Calendar, Download, X, Home as HomeIcon, ChevronLeft, U
 import Sidebar from './features/sidebar/Sidebar';
 import { getUserReports, uploadUserReport } from './services/api';
 
-const Reports = ({ onNavigate }) => {
+export const ReportsContent = ({ onNavigate, variant = 'page' }) => {
+  const isPageVariant = variant === 'page';
   const [reports, setReports] = useState([]);
   const [loading, setLoading] = useState(false);
   const [showUploadForm, setShowUploadForm] = useState(false);
@@ -210,31 +211,34 @@ const Reports = ({ onNavigate }) => {
   return (
     <div
       ref={mainContainerRef}
-      className={`bg-white min-h-screen pb-10 relative${isMenuOpen ? ' overflow-hidden max-h-screen' : ''}`}
+      className={isPageVariant ? `bg-white min-h-screen pb-10 relative${isMenuOpen ? ' overflow-hidden max-h-screen' : ''}` : undefined}
     >
-      {/* Navbar */}
-      <div className="theme-navbar shadow-sm border-b px-6 py-5 flex items-center justify-between sticky top-0 z-50 transition-all duration-300 pointer-events-auto" style={{ paddingTop: 'max(env(safe-area-inset-top, 0px), 20px)' }}>
-        <button
-          onClick={() => setIsMenuOpen(!isMenuOpen)}
-          className="p-2 rounded-xl hover:bg-gray-100 transition-colors pointer-events-auto"
-        >
-          {isMenuOpen ? <X className="h-6 w-6" style={{ color: 'var(--navbar-text)' }} /> : <Menu className="h-6 w-6" style={{ color: 'var(--navbar-text)' }} />}
-        </button>
-        <h1 className="text-lg font-bold transition-colors" style={{ color: 'var(--navbar-text)' }}>My Reports</h1>
-        <button
-          onClick={() => onNavigate('home')}
-          className="p-2 rounded-xl transition-colors flex items-center justify-center hover:bg-gray-100" style={{ color: 'var(--navbar-text)' }}
-        >
-          <HomeIcon className="h-5 w-5" />
-        </button>
-      </div>
+      {isPageVariant && (
+        <div className="theme-navbar shadow-sm border-b px-6 py-5 flex items-center justify-between sticky top-0 z-50 transition-all duration-300 pointer-events-auto" style={{ paddingTop: 'max(env(safe-area-inset-top, 0px), 20px)' }}>
+          <button
+            onClick={() => setIsMenuOpen(!isMenuOpen)}
+            className="p-2 rounded-xl hover:bg-gray-100 transition-colors pointer-events-auto"
+          >
+            {isMenuOpen ? <X className="h-6 w-6" style={{ color: 'var(--navbar-text)' }} /> : <Menu className="h-6 w-6" style={{ color: 'var(--navbar-text)' }} />}
+          </button>
+          <h1 className="text-lg font-bold transition-colors" style={{ color: 'var(--navbar-text)' }}>My Reports</h1>
+          <button
+            onClick={() => onNavigate('home')}
+            className="p-2 rounded-xl transition-colors flex items-center justify-center hover:bg-gray-100" style={{ color: 'var(--navbar-text)' }}
+          >
+            <HomeIcon className="h-5 w-5" />
+          </button>
+        </div>
+      )}
 
-      <Sidebar
-        isOpen={isMenuOpen}
-        onClose={() => setIsMenuOpen(false)}
-        onNavigate={onNavigate}
-        currentPage="reports"
-      />
+      {isPageVariant && (
+        <Sidebar
+          isOpen={isMenuOpen}
+          onClose={() => setIsMenuOpen(false)}
+          onNavigate={onNavigate}
+          currentPage="reports"
+        />
+      )}
 
       {/* Header Section */}
       <div className="px-6 pt-6 pb-4">
@@ -484,5 +488,7 @@ const Reports = ({ onNavigate }) => {
     </div>
   );
 };
+
+const Reports = ({ onNavigate }) => <ReportsContent onNavigate={onNavigate} variant="page" />;
 
 export default Reports;

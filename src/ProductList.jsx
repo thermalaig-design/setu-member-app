@@ -815,8 +815,6 @@ function ProductImageCarousel({
         <Heart size={20} strokeWidth={1.8} fill={isWished ? 'currentColor' : 'none'} />
       </button>
 
-      {(Number(price?.discount_pct) || 0) >= 30 && <span className="ws-sale-badge">SALE</span>}
-
       {canSwipe ? (
         <div className="ws-plp-dots" aria-hidden="true">
           {slides.map((image, index) => (
@@ -1240,6 +1238,7 @@ const ProductList = ({ categoryId, onBack, onOpenProduct }) => {
   );
 
   const path = scopedResult.path;
+  const visibleBreadcrumbPath = path.slice(-2);
   const allProducts = scopedResult.products;
   const cartCount = useMemo(
     () => cartItems.reduce((total, item) => total + Number(item?.quantity || 0), 0),
@@ -1439,7 +1438,24 @@ const ProductList = ({ categoryId, onBack, onOpenProduct }) => {
         </div>
       </div>
       <div className="ws-scroll" ref={scrollRef}>
-        <div className="ws-breadcrumb">{path.map((c) => capitalizeFirst(c.name)).filter(Boolean).join(" / ") || 'Products'}</div>
+        <div className="ws-breadcrumb">
+          {visibleBreadcrumbPath.length > 0 ? (
+            visibleBreadcrumbPath.map((category, index) => (
+              <React.Fragment key={category.id}>
+                {index > 0 ? <span className="ws-breadcrumb-separator">/</span> : null}
+                <button
+                  type="button"
+                  className="ws-breadcrumb-link"
+                  onClick={() => navigate(`/categories-products/list/${encodeURIComponent(pickText(category.id))}`)}
+                >
+                  {capitalizeFirst(category.name)}
+                </button>
+              </React.Fragment>
+            ))
+          ) : (
+            'Products'
+          )}
+        </div>
         <div className="ws-plp-toolbar">
           <div className="ws-plp-search">
             <Search size={15} />
@@ -1679,7 +1695,11 @@ const ProductList = ({ categoryId, onBack, onOpenProduct }) => {
         .ws-whitedoor-c1, .ws-whitedoor-c2 { position: absolute; top: 0; width: 14px; height: 14px; border-radius: 999px; border: 1.5px solid ${T.ink}; }
         .ws-whitedoor-c1 { left: 0; } .ws-whitedoor-c2 { left: 6px; }
 
-        .ws-breadcrumb { padding: 14px 18px 0; font-size: 11.5px; color: ${T.inkSoft}; }
+        .ws-breadcrumb { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 14px 18px 0; font-size: 11.5px; color: ${T.inkSoft}; }
+        .ws-breadcrumb-link { border: 0; background: none; padding: 0; color: inherit; font: inherit; cursor: pointer; text-align: left; }
+        .ws-breadcrumb-link:active { opacity: 0.72; }
+        .ws-breadcrumb-link:focus-visible { outline: 2px solid ${T.clay}; outline-offset: 3px; border-radius: 4px; }
+        .ws-breadcrumb-separator { color: ${T.inkFaint}; }
         .ws-plp-toolbar { display: flex; flex-direction: column; gap: 10px; padding: 12px 18px; }
         .ws-plp-search {
           display: flex;
@@ -1901,7 +1921,6 @@ const ProductList = ({ categoryId, onBack, onOpenProduct }) => {
           cursor: pointer;
           color: inherit;
         }
-        .ws-sale-badge { position: absolute; top: 8px; left: 8px; background: ${T.clay}; color: white; font-size: 9.5px; font-weight: 700; padding: 2px 7px; letter-spacing: 0.5px; }
         .ws-plp-name { font-size: 15px; color: ${navbarTextColor}; line-height: 1.3; }
         .ws-plp-code { margin-top: 2px; font-size: 11px; color: ${T.inkSoft}; line-height: 1.25; }
         .ws-price-row { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; }

@@ -33,6 +33,7 @@ import { fetchTrustById } from './services/trustService';
 import { logUserSessionEvent } from './services/sessionAuditService';
 import TermsModal from './components/TermsModal';
 import { clearLoginTermsPromptPending, isLoginTermsPromptPending, resolveLegalTrustId, setLoginTermsPromptPending } from './utils/legalContent';
+import { getAppHomePath } from './utils/tenantNavigation';
 import logo from '../new_logo.png';
 
 const DEFAULT_TRUST_NAME = import.meta.env.VITE_DEFAULT_TRUST_NAME || 'Trust';
@@ -706,7 +707,7 @@ function VIPLogin({ onNavigate, onLogout }) {
             </button>
 
             <button
-              onClick={() => navigate('/')}
+              onClick={() => navigate(getAppHomePath())}
               className="w-full py-4 rounded-2xl font-bold text-base text-gray-700 bg-white border border-amber-200 hover:bg-amber-50 transition-all active:scale-[0.98] flex items-center justify-center gap-2"
             >
               <Home className="h-5 w-5 text-amber-500" />
@@ -726,7 +727,7 @@ function VIPLogin({ onNavigate, onLogout }) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-amber-50 via-white to-yellow-50 flex flex-col px-4 py-8">
         <button
-          onClick={() => { setFormError(''); setApplicationSubmitted(false); navigate('/'); }}
+          onClick={() => { setFormError(''); setApplicationSubmitted(false); navigate(getAppHomePath()); }}
           className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-800 mb-6 self-start"
         >
           <ArrowLeft className="h-4 w-4" /> Back
@@ -963,7 +964,7 @@ function VIPLogin({ onNavigate, onLogout }) {
         <div className="relative flex items-center justify-between px-5 pt-8 pb-4">
           <div className="flex items-center gap-3">
             <button
-              onClick={() => navigate('/')}
+              onClick={() => navigate(getAppHomePath())}
               className="p-2.5 rounded-xl bg-white/10 hover:bg-white/20 transition-colors"
               aria-label="Back"
             >

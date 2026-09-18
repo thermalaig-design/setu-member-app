@@ -5,13 +5,16 @@ import './index.css'
 import './App.css'
 import App from './App.jsx'
 import { NavigationProvider } from './context/ImprovedNavigationProvider'
+import { TenantProvider } from './context/TenantContext'
 
 createRoot(document.getElementById('root')).render(
   <StrictMode>
     <BrowserRouter>
-      <NavigationProvider>
-        <App />
-      </NavigationProvider>
+      <TenantProvider>
+        <NavigationProvider>
+          <App />
+        </NavigationProvider>
+      </TenantProvider>
     </BrowserRouter>
   </StrictMode>,
 )

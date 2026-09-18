@@ -51,6 +51,8 @@ const compactMembership = (membership = {}) => ({
   members_id: membership?.members_id || membership?.member_id || null,
   membership_number: membership?.membership_number || membership?.['Membership number'] || null,
   qr_code: membership?.qr_code || null,
+  trust_status: membership?.trust_status ?? null,
+  source: membership?.source || null,
 });
 
 const normalizeTrustId = (value) => String(value || '').trim();
@@ -128,6 +130,7 @@ export const compactUserForStorage = (user = {}) => {
     isRegisteredMember: Boolean(user?.isRegisteredMember),
     vip_status: user?.vip_status || null,
     reg_member_id: user?.reg_member_id || null,
+    trusts_loaded_from_active_api: Boolean(user?.trusts_loaded_from_active_api),
     hospital_memberships: compactMemberships,
   };
 };
@@ -158,6 +161,25 @@ const setLocalStorageWithRecovery = (key, value) => {
     } catch {
       return false;
     }
+  }
+};
+
+// Used by the tenant onboarding screen's "Use another mobile number" option:
+// clears only the auth/session/selected-Trust keys so a stale saved SETU
+// session isn't silently reused for a Trust the user never actually logged
+// into here. Deliberately does NOT touch installed_app_trust_id/
+// installed_app_slug (TenantContext) — those are this device's tenant PWA
+// identity, not part of the user's login session, and must survive so the
+// user lands back in the same tenant's login flow, not a generic one.
+export const clearTenantUserSession = () => {
+  try {
+    localStorage.removeItem(USER_STORAGE_KEY);
+    localStorage.removeItem(LOGGED_IN_STORAGE_KEY);
+    localStorage.removeItem('selected_trust_id');
+    localStorage.removeItem('selected_trust_name');
+    localStorage.removeItem('last_selected_trust_id');
+  } catch {
+    // ignore storage cleanup failures
   }
 };
 

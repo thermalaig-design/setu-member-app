@@ -13,10 +13,10 @@ import {
   dispatchThemeTemplateApplied
 } from '../utils/themeEvents';
 
-const LAST_THEME_CACHE_KEY = 'last_theme_cache_v3';
-const LEGACY_LAST_THEME_CACHE_KEYS = ['last_theme_cache_v2', 'last_theme_cache_v1'];
-const THEME_CACHE_VERSION = 'v3';
-const LEGACY_THEME_CACHE_VERSIONS = ['v2'];
+const LAST_THEME_CACHE_KEY = 'last_theme_cache_v4';
+const LEGACY_LAST_THEME_CACHE_KEYS = ['last_theme_cache_v3', 'last_theme_cache_v2', 'last_theme_cache_v1'];
+const THEME_CACHE_VERSION = 'v4';
+const LEGACY_THEME_CACHE_VERSIONS = ['v3', 'v2'];
 const getPersistTrustCacheIndexKey = (trustId) => `theme_cache_persist_trust_${THEME_CACHE_VERSION}_${trustId}`;
 const getPersistThemeCacheEntryKey = (trustId, templateId) => `theme_cache_persist_${THEME_CACHE_VERSION}_${trustId}_${templateId || 'none'}`;
 const BASE_TRUST_ID = import.meta.env.VITE_DEFAULT_TRUST_ID || '';
@@ -282,7 +282,7 @@ const hasTemplateMetaChanged = ({ cachedTemplateId, cachedTemplateUpdatedAt, lat
     || latestTemplateUpdatedAt !== (cachedTemplateUpdatedAt || null);
 };
 
-const APP_TEMPLATE_SELECT = 'id, trust_id, name, template_key, theme_config, home_layout, animations, custom_css, updated_at';
+const APP_TEMPLATE_SELECT = 'id, trust_id, name, template_key, theme_config, home_layout, home_layout_modes, animations, custom_css, updated_at';
 
 const fetchTemplateByTrustId = async (targetTrustId) => {
   if (!targetTrustId) return { template: null, error: null };

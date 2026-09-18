@@ -254,8 +254,6 @@ const resolveUnitTaxAmount = (price, unitBaseAmount) => {
 };
 
 const normalizeRpcValue = (value) => {
-  if (value === null || value === undefined) return '';
-  if (typeof value === 'number' && Number.isFinite(value)) return value;
   return normalizeText(value);
 };
 
@@ -344,7 +342,7 @@ const normalizeCartItem = (item) => {
     alias_name: normalizeText(item?.alias_name),
     purchase_id: normalizeText(item?.purchase_id || item?.purchaseId),
     product_price_id: normalizeText(item?.product_price_id || item?.productPriceId || item?.price_id || item?.priceId || item?.price?.id),
-    images: Array.isArray(item?.images) ? item.images : [],
+    images: normalizeProductImages(item?.images),
     selected_image: normalizeText(item?.selected_image),
     selected_attributes: normalizeAttributes(item?.selected_attributes),
     attribute_values: normalizeAttributeRows(item?.attribute_values || item?.attributeValues),
@@ -419,8 +417,8 @@ const mergeRemoteCartItemWithLocalFallback = (remoteItem, localMatch = null) => 
   const remoteProductPriceId = getCartItemPriceId(remoteItem);
   const localProductId = normalizeText(localMatch?.id);
   const remoteProductId = normalizeText(remoteItem?.id);
-  const remoteImages = Array.isArray(remoteItem?.images) ? remoteItem.images : [];
-  const localImages = Array.isArray(localMatch?.images) ? localMatch.images : [];
+  const remoteImages = normalizeProductImages(remoteItem?.images);
+  const localImages = normalizeProductImages(localMatch?.images);
   const shouldUseLocalProductId = (
     localProductId
     && remoteProductPriceId
@@ -587,9 +585,8 @@ export const toCartItem = (product, context = {}) => {
 };
 
 export const findCartItem = (productId, trustId = undefined) => {
-  const key = getCartKey(productId, trustId);
-  if (!key) return null;
-  return readCartItems(trustId).find((item) => item.key === key) || null;
+  const identifiers = getCartItemSearchIdentifiers(productId, trustId);
+  return findCartItemByIdentifiers(readCartItems(trustId), identifiers, trustId);
 };
 
 export const getCartItemQuantity = (productId, trustId = undefined) => {
@@ -697,7 +694,9 @@ const getPurchaseRowTimestamp = (row = {}) => {
 const comparePurchaseRowsNewest = (left = {}, right = {}) => {
   const timeDiff = getPurchaseRowTimestamp(right) - getPurchaseRowTimestamp(left);
   if (timeDiff !== 0) return timeDiff;
-  return normalizeAmount(right?.id || right?.purchase_id) - normalizeAmount(left?.id || left?.purchase_id);
+  const rightId = normalizeText(right?.id || right?.purchase_id);
+  const leftId = normalizeText(left?.id || left?.purchase_id);
+  return rightId.localeCompare(leftId);
 };
 
 const pickLatestCartRowsByPrice = (rows = []) => {
@@ -1213,13 +1212,172 @@ const getRequiredCartMutationIdentity = (trustId) => {
   return { memberId, trustId: normalizedTrustId };
 };
 
+const getCartRpcErrorMessage = (value = {}) => normalizeText(
+  value?.message
+  || value?.error
+  || value?.details
+  || value?.hint
+);
+
 const ensureCartRpcSuccess = (data, error) => {
   if (error) throw error;
   if (data && typeof data === 'object' && !Array.isArray(data) && data.success === false) {
-    const rpcError = new Error(normalizeText(data.message) || 'Unable to update your cart right now.');
+    const rpcError = new Error(getCartRpcErrorMessage(data) || 'Unable to update your cart right now.');
     rpcError.rpcData = data;
     throw rpcError;
   }
+};
+
+const toCartIdentifier = (type, value) => {
+  const normalizedValue = normalizeText(value);
+  if (!normalizedValue) return null;
+  return { type, value: normalizedValue };
+};
+
+const getCartItemSearchIdentifiers = (itemOrId = {}, trustId = undefined) => {
+  if (itemOrId && typeof itemOrId === 'object') {
+    return [
+      toCartIdentifier('key', itemOrId.key),
+      toCartIdentifier('purchase_id', itemOrId.purchase_id || itemOrId.purchaseId),
+      toCartIdentifier('product_price_id', itemOrId.product_price_id || itemOrId.productPriceId || itemOrId.price_id || itemOrId.priceId || itemOrId.price?.id),
+      toCartIdentifier('product_id', itemOrId.product_id || itemOrId.productId || itemOrId.id),
+    ].filter(Boolean);
+  }
+
+  const identity = normalizeText(itemOrId);
+  return [
+    toCartIdentifier('key', identity && trustId ? getCartKey(identity, trustId) : ''),
+    toCartIdentifier('product_id', identity),
+    toCartIdentifier('product_price_id', identity),
+    toCartIdentifier('purchase_id', identity),
+  ].filter(Boolean);
+};
+
+const cartItemMatchesIdentifier = (item = {}, identifier = {}, trustId = undefined) => {
+  const resolvedTrustId = resolveTrustId(trustId || item?.trust_id);
+  const type = normalizeText(identifier.type);
+  const value = normalizeText(identifier.value);
+  if (!value) return false;
+
+  if (type === 'key') return normalizeText(item.key) === value;
+  if (type === 'purchase_id') return normalizeText(item.purchase_id || item.purchaseId) === value;
+  if (type === 'product_price_id') {
+    return normalizeText(item.product_price_id || item.productPriceId || item.price_id || item.priceId || item.price?.id) === value;
+  }
+  if (type === 'product_id') {
+    return normalizeText(item.product_id || item.productId || item.id) === value
+      || normalizeText(item.key) === getCartKey(value, resolvedTrustId);
+  }
+
+  return false;
+};
+
+const findCartItemByIdentifiers = (items = [], identifiers = [], trustId = undefined) => {
+  const compacted = (Array.isArray(identifiers) ? identifiers : [identifiers]).filter(Boolean);
+  if (compacted.length === 0) return null;
+
+  return (Array.isArray(items) ? items : []).find((item) => (
+    compacted.some((identifier) => cartItemMatchesIdentifier(item, identifier, trustId))
+  )) || null;
+};
+
+const getPurchaseRowStatus = (row = {}) => normalizeText(
+  row?.status
+  || row?.purchase_status
+  || row?.purchaseStatus
+  || row?.state
+).toLowerCase();
+
+const getPurchaseRowType = (row = {}) => normalizeText(
+  row?.type
+  || row?.purchase_type
+  || row?.purchaseType
+).toLowerCase();
+
+const getPurchaseRowProductPriceId = (row = {}) => normalizeText(
+  row?.product_price_id
+  || row?.productPriceId
+  || row?.price_id
+  || row?.priceId
+);
+
+const findPurchaseRowByPriceAndType = (rows = [], {
+  trustId,
+  productPriceId,
+  type,
+  preferredStatuses = [],
+} = {}) => {
+  const normalizedTrustId = resolveTrustId(trustId);
+  const normalizedProductPriceId = normalizeText(productPriceId);
+  const normalizedType = normalizeText(type).toLowerCase();
+  if (!normalizedTrustId || !normalizedProductPriceId || !normalizedType) return null;
+
+  const matches = flattenPurchaseRows(rows).filter((row) => (
+    resolveTrustId(row?.trust_id || row?.trustId || normalizedTrustId) === normalizedTrustId
+    && getPurchaseRowType(row) === normalizedType
+    && getPurchaseRowProductPriceId(row) === normalizedProductPriceId
+  ));
+
+  if (matches.length === 0) return null;
+
+  const preferred = preferredStatuses
+    .map((status) => normalizeText(status).toLowerCase())
+    .filter(Boolean);
+
+  return matches.find((row) => preferred.includes(getPurchaseRowStatus(row)))
+    || matches.sort(comparePurchaseRowsNewest)[0]
+    || null;
+};
+
+const fetchAuthoritativePurchaseRow = async ({
+  memberId,
+  trustId,
+  productPriceId,
+  type,
+  preferredStatuses = [],
+}) => {
+  const requestTrustId = resolveTrustId(trustId);
+  const { data, error } = await callCartPurchaseRpc({
+    p_member_id: memberId,
+    p_trust_id: requestTrustId,
+    p_action: 'get',
+    p_payload: {},
+  });
+  ensureCartRpcSuccess(data, error);
+
+  return findPurchaseRowByPriceAndType(extractPurchaseRows(data), {
+    trustId: requestTrustId,
+    productPriceId,
+    type,
+    preferredStatuses,
+  });
+};
+
+const isDuplicateWishlistMutationError = (error = {}) => {
+  const text = [
+    error?.rpcData?.error,
+    error?.rpcData?.message,
+    error?.message,
+    error?.details,
+    error?.hint,
+    error?.code,
+    error?.data?.error,
+    error?.data?.message,
+  ]
+    .map((value) => normalizeText(value).toLowerCase())
+    .filter(Boolean)
+    .join(' ');
+
+  return text.includes('idx_unique_wishlist_item')
+    || text.includes('idx_unique_active_wishlist_item')
+    || text.includes('duplicate key value')
+    || text.includes('unique constraint');
+};
+
+const upsertPurchaseOrThrow = async (request) => {
+  const { data, error } = await callCartPurchaseRpc(request);
+  ensureCartRpcSuccess(data, error);
+  return data;
 };
 
 const persistCartPurchaseMutation = async ({
@@ -1408,11 +1566,12 @@ export const decrementCartProduct = (product, context = {}, step = 1) => {
 
 export const removeCartProduct = async (productId, trustId = undefined, context = {}) => {
   const normalizedTrustId = resolveTrustId(trustId);
-  const key = getCartKey(productId, normalizedTrustId);
-  if (!key) return readCartItems(normalizedTrustId);
-
   const items = readCartItems(normalizedTrustId);
-  const target = items.find((item) => item.key === key) || null;
+  const target = findCartItemByIdentifiers(
+    items,
+    getCartItemSearchIdentifiers(context.item || productId, normalizedTrustId),
+    normalizedTrustId
+  );
   if (!target) return items;
 
   const syncedPurchase = await persistCartPurchaseMutation({
@@ -1432,7 +1591,7 @@ export const removeCartProduct = async (productId, trustId = undefined, context 
     product_price_id: syncedPurchase.productPriceId || target.product_price_id,
   });
 
-  const nextItems = items.filter((item) => item.key !== key);
+  const nextItems = items.filter((item) => item.key !== target.key);
   const persisted = writeScopedCartItems(normalizedTrustId, nextItems);
   notifyCartChange(persisted);
   return persisted;
@@ -1440,16 +1599,12 @@ export const removeCartProduct = async (productId, trustId = undefined, context 
 
 export const moveCartProductToWishlist = async (productId, trustId = undefined, context = {}) => {
   const normalizedTrustId = resolveTrustId(trustId);
-  const key = getCartKey(productId, normalizedTrustId);
-  if (!key) {
-    return {
-      cartItems: readCartItems(normalizedTrustId),
-      wishlistItem: null,
-    };
-  }
-
   const items = readCartItems(normalizedTrustId);
-  const target = items.find((item) => item.key === key) || null;
+  const target = findCartItemByIdentifiers(
+    items,
+    getCartItemSearchIdentifiers(context.item || productId, normalizedTrustId),
+    normalizedTrustId
+  );
   if (!target) {
     return {
       cartItems: items,
@@ -1460,39 +1615,102 @@ export const moveCartProductToWishlist = async (productId, trustId = undefined, 
   const { memberId, trustId: requestTrustId } = getRequiredCartMutationIdentity(normalizedTrustId);
   const existingRef = resolveExistingPurchaseRef(target, requestTrustId, target, context);
   const purchaseId = normalizeText(existingRef.purchaseId || target.purchase_id || target.purchaseId);
+  const productPriceId = normalizeText(existingRef.productPriceId || target.product_price_id || target.productPriceId);
   const quantity = normalizeQuantity(context.quantity ?? target.quantity) || 1;
 
   if (!purchaseId) {
     throw new Error('Could not find the cart purchase ID. Please refresh and try again.');
   }
 
-  const request = {
+  if (!productPriceId) {
+    throw new Error('Product price ID is missing. Please refresh this product and try again.');
+  }
+
+  const wishlistRequest = {
+    p_member_id: memberId,
+    p_trust_id: requestTrustId,
+    p_action: 'upsert_purchase',
+    p_payload: {
+      product_price_id: normalizeRpcValue(productPriceId),
+      type: WISHLIST_TYPE,
+      quantity,
+      unit_price: resolveCartUnitPrice(target, context),
+      status: WISHLIST_STATUS,
+      selected_attributes: target.selected_attributes || {},
+    },
+  };
+  const removalRequest = {
     p_member_id: memberId,
     p_trust_id: requestTrustId,
     p_action: 'upsert_purchase',
     p_payload: {
       id: purchaseId,
-      type: WISHLIST_TYPE,
-      status: WISHLIST_STATUS,
+      status: REMOVE_FROM_CART_STATUS,
       quantity,
-      selected_attributes: target.selected_attributes || {},
     },
   };
 
   try {
-    const { data, error } = await callCartPurchaseRpc(request);
-    ensureCartRpcSuccess(data, error);
+    let wishlistData;
+    let alreadyInWishlist = false;
 
-    const resolvedPurchaseId = resolveResponsePurchaseId(data, {
+    try {
+      wishlistData = await upsertPurchaseOrThrow(wishlistRequest);
+    } catch (wishlistError) {
+      if (!isDuplicateWishlistMutationError(wishlistError)) {
+        throw wishlistError;
+      }
+
+      const existingWishlistRow = await fetchAuthoritativePurchaseRow({
+        memberId,
+        trustId: requestTrustId,
+        productPriceId,
+        type: WISHLIST_TYPE,
+        preferredStatuses: [WISHLIST_STATUS],
+      });
+      const existingWishlistRowId = normalizeText(existingWishlistRow?.id || existingWishlistRow?.purchase_id);
+      if (!existingWishlistRowId) {
+        throw wishlistError;
+      }
+
+      if (getPurchaseRowStatus(existingWishlistRow) !== WISHLIST_STATUS) {
+        await upsertPurchaseOrThrow({
+          p_member_id: memberId,
+          p_trust_id: requestTrustId,
+          p_action: 'upsert_purchase',
+          p_payload: {
+            id: existingWishlistRowId,
+            status: WISHLIST_STATUS,
+            quantity,
+          },
+        });
+      }
+
+      alreadyInWishlist = true;
+      wishlistData = {
+        success: true,
+        purchases: [{
+          ...existingWishlistRow,
+          id: existingWishlistRowId,
+          status: WISHLIST_STATUS,
+          type: WISHLIST_TYPE,
+          product_price_id: productPriceId,
+          quantity,
+        }],
+      };
+    }
+
+    await upsertPurchaseOrThrow(removalRequest);
+
+    const resolvedPurchaseId = resolveResponsePurchaseId(wishlistData, {
       productId: target.id,
-      productPriceId: existingRef.productPriceId || target.product_price_id,
-      fallbackPurchaseId: purchaseId,
+      productPriceId,
     });
     const now = new Date().toISOString();
     const wishlistItem = {
       ...target,
-      purchase_id: resolvedPurchaseId || purchaseId,
-      product_price_id: existingRef.productPriceId || target.product_price_id,
+      purchase_id: resolvedPurchaseId,
+      product_price_id: productPriceId,
       quantity,
       type: WISHLIST_TYPE,
       status: WISHLIST_STATUS,
@@ -1501,123 +1719,33 @@ export const moveCartProductToWishlist = async (productId, trustId = undefined, 
       saved_at: now,
     };
 
-    const nextItems = items.filter((item) => item.key !== key);
+    const nextItems = items.filter((item) => item.key !== target.key);
     const persisted = writeScopedCartItems(normalizedTrustId, nextItems);
     notifyCartChange(persisted);
 
     return {
       cartItems: persisted,
       wishlistItem,
+      alreadyInWishlist,
     };
   } catch (error) {
-    const debugInfo = {
+    console.error('[Cart] move to wishlist API failed', JSON.stringify({
       productId: target.id,
-      productPriceId: existingRef.productPriceId || target.product_price_id,
+      productPriceId,
       purchaseId,
       trustId: requestTrustId,
       memberId,
-      requestPayload: request.p_payload,
+      wishlistPayload: wishlistRequest.p_payload,
+      removalPayload: removalRequest.p_payload,
       message: error?.message || String(error),
       details: error?.details,
       hint: error?.hint,
       code: error?.code,
       rpcData: error?.rpcData,
-    };
-
-    const isDuplicateWishlistItem = normalizeText(error?.rpcData?.error || error?.message)
-      .toLowerCase()
-      .includes('idx_unique_wishlist_item');
-
-    if (!isDuplicateWishlistItem) {
-      console.error('[Cart] move to wishlist API failed', JSON.stringify(debugInfo, null, 2));
-      throw error;
-    }
-
-    // Expected, recoverable case — a row for this product already exists under the wishlist
-    // unique constraint. Log at info level; this only escalates to an error below if the
-    // recovery itself can't find/reactivate the conflicting row.
-    console.info('[Cart] move to wishlist hit an existing wishlist row; resolving', JSON.stringify(debugInfo, null, 2));
-
-    // A row for this product already exists under the wishlist unique constraint — but that
-    // constraint ignores status, so the existing row could be an active wishlist item OR a
-    // previously-removed tombstone. Find out which before touching the cart: if it's a
-    // tombstone, reactivate it first, otherwise we'd drop the cart item while the product is
-    // not actually wishlisted anywhere, silently losing it from both places.
-    const conflictProductPriceId = normalizeText(existingRef.productPriceId || target.product_price_id);
-    const { data: lookupData, error: lookupError } = await callCartPurchaseRpc({
-      p_member_id: memberId,
-      p_trust_id: requestTrustId,
-      p_action: 'get',
-      p_payload: {},
-    });
-    ensureCartRpcSuccess(lookupData, lookupError);
-
-    const existingWishlistRow = flattenPurchaseRows(extractPurchaseRows(lookupData)).find((row) => (
-      normalizeText(row?.trust_id || row?.trustId) === requestTrustId
-      && normalizeText(row?.type || row?.purchase_type).toLowerCase() === WISHLIST_TYPE
-      && normalizeText(row?.product_price_id || row?.productPriceId) === conflictProductPriceId
-    ));
-    const existingWishlistRowId = normalizeText(existingWishlistRow?.id || existingWishlistRow?.purchase_id);
-    const existingWishlistRowIsActive = normalizeText(existingWishlistRow?.status).toLowerCase() === WISHLIST_STATUS;
-
-    if (!existingWishlistRowId) {
-      console.error('[Cart] move to wishlist could not resolve the conflicting wishlist row', JSON.stringify(debugInfo, null, 2));
-      throw error;
-    }
-
-    if (!existingWishlistRowIsActive) {
-      const { data: reactivateData, error: reactivateError } = await callCartPurchaseRpc({
-        p_member_id: memberId,
-        p_trust_id: requestTrustId,
-        p_action: 'upsert_purchase',
-        p_payload: {
-          id: existingWishlistRowId,
-          status: WISHLIST_STATUS,
-          quantity,
-        },
-      });
-      ensureCartRpcSuccess(reactivateData, reactivateError);
-    }
-
-    const removalRequest = {
-      p_member_id: memberId,
-      p_trust_id: requestTrustId,
-      p_action: 'upsert_purchase',
-      p_payload: {
-        id: purchaseId,
-        status: REMOVE_FROM_CART_STATUS,
-        quantity,
-      },
-    };
-
-    const { data: removalData, error: removalError } = await callCartPurchaseRpc(removalRequest);
-    ensureCartRpcSuccess(removalData, removalError);
-
-    const now = new Date().toISOString();
-    const wishlistItem = {
-      ...target,
-      purchase_id: existingWishlistRowId,
-      product_price_id: existingRef.productPriceId || target.product_price_id,
-      quantity,
-      type: WISHLIST_TYPE,
-      status: WISHLIST_STATUS,
-      sync_state: SYNCED_SYNC_STATE,
-      updated_at: now,
-      saved_at: now,
-    };
-
-    const nextItems = items.filter((item) => item.key !== key);
-    const persisted = writeScopedCartItems(normalizedTrustId, nextItems);
-    notifyCartChange(persisted);
-
-    return {
-      cartItems: persisted,
-      wishlistItem,
-      alreadyInWishlist: true,
-    };
+    }, null, 2));
+    throw error;
   }
 };
-
 export const clearCartItems = async (trustId = undefined, { sync = true } = {}) => {
   const normalizedTrustId = resolveTrustId(trustId);
   const items = readCartItems(normalizedTrustId);

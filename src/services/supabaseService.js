@@ -60,6 +60,24 @@ const toDirectoryBoolean = (value) => {
   return ['true', '1', 'yes', 'y'].includes(normalized);
 };
 
+const isActiveDirectoryMemberRow = (row = {}) => {
+  const value = row?.is_active
+    ?? row?.member_is_active
+    ?? row?.membership_is_active
+    ?? row?.reg_member_is_active
+    ?? row?.status
+    ?? row?.member_status
+    ?? row?.membership_status;
+
+  if (value === undefined || value === null) return true;
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'number') return value === 1;
+
+  const normalized = normalizeDirectoryText(value).toLowerCase();
+  if (!normalized) return true;
+  return !['false', '0', 'no', 'n', 'inactive', 'disabled', 'deactivated'].includes(normalized);
+};
+
 const mapDirectoryMemberRow = (row = {}) => {
   const name = firstDirectoryValue(
     row?.Name,
@@ -196,7 +214,7 @@ const fetchDirectoryMembersFromRpc = async (trustId) => {
     if (error) throw error;
 
     const rows = Array.isArray(data) ? data : data ? [data] : [];
-    const mapped = dedupeDirectoryMembers(rows.map(mapDirectoryMemberRow));
+    const mapped = dedupeDirectoryMembers(rows.filter(isActiveDirectoryMemberRow).map(mapDirectoryMemberRow));
     directoryRpcCache.set(cacheKey, { ts: Date.now(), rows: mapped });
     return mapped;
   } catch (error) {

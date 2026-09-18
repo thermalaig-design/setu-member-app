@@ -7,6 +7,7 @@ import { getProfilePhotos } from './services/api';
 import { getNavbarThemeStyles } from './utils/themeUtils';
 import { applyOpacity } from './utils/colorUtils';
 import { MEMBER_PRIVACY_UPDATED_EVENT, matchesMemberIdentity } from './utils/memberIdentity';
+import { getAppHomePath } from './utils/tenantNavigation';
 import {
   buildExecutiveBodyCommitteeSearchResults,
   getExecutiveBodySearchFields,
@@ -92,7 +93,8 @@ const buildCommitteeGroups = (items = []) => {
   });
 };
 
-const ExecutiveBody = ({ onNavigate }) => {
+export const ExecutiveBodyContent = ({ onNavigate, variant = 'page' }) => {
+  const isPageVariant = variant === 'page';
   const navigate = useNavigate();
   const theme = useAppTheme();
   const navbarTheme = getNavbarThemeStyles(theme);
@@ -390,16 +392,18 @@ const ExecutiveBody = ({ onNavigate }) => {
             </button>
           </div>
         </div>
-      </div>
+      )}
 
-      {isMenuOpen && (
+      {isPageVariant && isMenuOpen && (
         <div
           className="fixed inset-0 z-25"
           style={{ background: applyOpacity('var(--brand-navy-dark)', 0.12) }}
           onClick={() => setIsMenuOpen(false)}
         />
       )}
-      <Sidebar isOpen={isMenuOpen} onClose={() => setIsMenuOpen(false)} onNavigate={onNavigate} currentPage="executive-body" />
+      {isPageVariant && (
+        <Sidebar isOpen={isMenuOpen} onClose={() => setIsMenuOpen(false)} onNavigate={onNavigate} currentPage="executive-body" />
+      )}
 
       <div className="executive-search-wrap px-4 pt-4">
         <div className="executive-search rounded-2xl p-3 flex items-center gap-2" style={{ background: applyOpacity(primaryColor, 0.08), border: '1px solid var(--advertisement-card-border)' }}>
@@ -999,5 +1003,7 @@ const ExecutiveBody = ({ onNavigate }) => {
     </div>
   );
 };
+
+const ExecutiveBody = ({ onNavigate }) => <ExecutiveBodyContent onNavigate={onNavigate} variant="page" />;
 
 export default ExecutiveBody;

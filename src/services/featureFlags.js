@@ -1,6 +1,6 @@
 import { supabase } from './supabaseClient';
 
-const CACHE_KEY = 'feature_flags_cache_v3';
+const CACHE_KEY = 'feature_flags_cache_v4';
 const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
 const FEATURE_KEY_ALIASES = {
@@ -39,19 +39,40 @@ const FEATURE_KEY_ALIASES = {
   order_history: 'feature_order_history',
   'order-history': 'feature_order_history',
   feature_order_history: 'feature_order_history',
+  memberbanner: 'feature_member_banner',
+  member_banner: 'feature_member_banner',
+  'member-banner': 'feature_member_banner',
+  feature_member_banner: 'feature_member_banner',
+  othermembership: 'feature_othermembership',
+  other_membership: 'feature_othermembership',
+  'other-membership': 'feature_othermembership',
+  feature_othermembership: 'feature_othermembership',
+  bottomnav: 'feature_bottom_nav',
+  bottom_nav: 'feature_bottom_nav',
+  'bottom-nav': 'feature_bottom_nav',
+  feature_bottom_nav: 'feature_bottom_nav',
 };
 
 export const normalizeFeatureKey = (...values) => {
-  for (const value of values) {
-    const normalized = String(value || '')
-      .trim()
-      .toLowerCase()
-      .replace(/[-\s]+/g, '_');
-    if (!normalized) continue;
-    if (FEATURE_KEY_ALIASES[normalized]) return FEATURE_KEY_ALIASES[normalized];
-    if (normalized.startsWith('feature_')) return normalized;
-    return `feature_${normalized}`;
+  const normalizedValues = values
+    .map((value) => String(value || '').trim().toLowerCase().replace(/[-\s]+/g, '_'))
+    .filter(Boolean);
+
+  // Prefer any candidate that is already a canonical `feature_*` key.
+  const directMatch = normalizedValues.find((value) => value.startsWith('feature_'));
+  if (directMatch) return directMatch;
+
+  // Then check every candidate against the alias table — not just the
+  // first one. Some features are identified by their subname rather than
+  // their generic parent `name` (e.g. features.name = "Community" is just
+  // the parent grouping; features.subname = "Add Community" is the actual
+  // alias key). Stopping at the first (often generic) value here used to
+  // silently resolve to the wrong feature_* key.
+  for (const value of normalizedValues) {
+    if (FEATURE_KEY_ALIASES[value]) return FEATURE_KEY_ALIASES[value];
   }
+
+  if (normalizedValues.length > 0) return `feature_${normalizedValues[0]}`;
   return null;
 };
 
@@ -114,7 +135,7 @@ export const fetchFeatureFlags = async (trustId = null, opts = {}) => {
 
     const { data: rows, error } = await supabase
       .from('feature_flags')
-      .select('is_enabled, display_name, tagline, icon_url, route, quick_order, features!inner(name, subname)')
+      .select('is_enabled, display_name, tagline, icon_url, route, quick_order, display_in_app, features!inner(name, subname)')
       .eq('trust_id', trustId)
       .eq('tier', tier);
 
@@ -140,6 +161,7 @@ export const fetchFeatureFlags = async (trustId = null, opts = {}) => {
         icon_url: row.icon_url || null,
         route: row.route || null,
         quick_order: row.quick_order ?? null,
+        display_in_app: row.display_in_app || 'home',
       };
     });
 

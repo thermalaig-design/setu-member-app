@@ -23,6 +23,7 @@ import {
 } from './utils/orderHistoryDisplay';
 import { useAppTheme } from './context/ThemeContext';
 import { getNavbarThemeStyles } from './utils/themeUtils';
+import { getAppHomePath } from './utils/tenantNavigation';
 
 const T = {
   page: 'var(--page-bg, var(--app-page-bg))',
@@ -78,7 +79,8 @@ const OrderHistoryCardSkeleton = () => (
   </article>
 );
 
-function OrderHistory() {
+export function OrderHistoryContent({ variant = 'page' } = {}) {
+  const isPageVariant = variant === 'page';
   const navigate = useNavigate();
   const theme = useAppTheme();
   const navbarTheme = getNavbarThemeStyles(theme);
@@ -354,44 +356,46 @@ function OrderHistory() {
     : '';
 
   return (
-    <main className="order-history-page">
-      <div
-        className="theme-navbar sticky top-0 z-20"
-        style={{
-          background: navbarTheme?.backgroundStyle || 'var(--navbar-bg, var(--app-navbar-bg))',
-          backdropFilter: `blur(${navbarTheme?.blurPx || '12px'})`,
-          WebkitBackdropFilter: `blur(${navbarTheme?.blurPx || '12px'})`,
-          borderBottom: '1px solid var(--navbar-border)',
-          boxShadow: '0 2px 16px color-mix(in srgb, var(--brand-navy) 16%, transparent)',
-        }}
-      >
-        <div className="h-[3px]" style={{ background: 'var(--navbar-accent)' }} />
-        <div className="px-4 pt-4 pb-4">
-          <div className="flex items-center justify-between gap-3">
-            <button
-              type="button"
-              onClick={() => navigate('/')}
-              className="p-2 rounded-xl transition-colors"
-              style={{
-                color: navbarTextColor,
-                background: 'color-mix(in srgb, var(--navbar-bg) 72%, var(--surface-color))',
-              }}
-              aria-label="Go back"
-            >
-              <ArrowLeft className="h-5 w-5" />
-            </button>
-            <div className="min-w-0 flex-1 text-center">
-              <h1 className="truncate text-lg font-extrabold tracking-wide" style={{ color: navbarTextColor }}>
-                Order History
-              </h1>
-              <p className="mt-0.5 text-[11px] font-medium" style={{ color: 'color-mix(in srgb, var(--body-text-color) 66%, var(--surface-color))' }}>
-                {headerSubtitle}
-              </p>
+    <main className={isPageVariant ? 'order-history-page' : undefined}>
+      {isPageVariant && (
+        <div
+          className="theme-navbar sticky top-0 z-20"
+          style={{
+            background: navbarTheme?.backgroundStyle || 'var(--navbar-bg, var(--app-navbar-bg))',
+            backdropFilter: `blur(${navbarTheme?.blurPx || '12px'})`,
+            WebkitBackdropFilter: `blur(${navbarTheme?.blurPx || '12px'})`,
+            borderBottom: '1px solid var(--navbar-border)',
+            boxShadow: '0 2px 16px color-mix(in srgb, var(--brand-navy) 16%, transparent)',
+          }}
+        >
+          <div className="h-[3px]" style={{ background: 'var(--navbar-accent)' }} />
+          <div className="px-4 pt-4 pb-4">
+            <div className="flex items-center justify-between gap-3">
+              <button
+                type="button"
+                onClick={() => navigate(getAppHomePath())}
+                className="p-2 rounded-xl transition-colors"
+                style={{
+                  color: navbarTextColor,
+                  background: 'color-mix(in srgb, var(--navbar-bg) 72%, var(--surface-color))',
+                }}
+                aria-label="Go back"
+              >
+                <ArrowLeft className="h-5 w-5" />
+              </button>
+              <div className="min-w-0 flex-1 text-center">
+                <h1 className="truncate text-lg font-extrabold tracking-wide" style={{ color: navbarTextColor }}>
+                  Order History
+                </h1>
+                <p className="mt-0.5 text-[11px] font-medium" style={{ color: 'color-mix(in srgb, var(--body-text-color) 66%, var(--surface-color))' }}>
+                  {headerSubtitle}
+                </p>
+              </div>
+              <div className="w-10" aria-hidden="true" />
             </div>
-            <div className="w-10" aria-hidden="true" />
           </div>
         </div>
-      </div>
+      )}
 
       <section className="order-history-content">
         <div className="order-history-summary-toggle-row">
@@ -519,7 +523,7 @@ function OrderHistory() {
                 <button
                   type="button"
                   className="order-history-secondary-btn"
-                  onClick={() => navigate('/')}
+                  onClick={() => navigate(getAppHomePath())}
                 >
                   Go home
                 </button>
@@ -1045,6 +1049,10 @@ function OrderHistory() {
       `}</style>
     </main>
   );
+}
+
+function OrderHistory() {
+  return <OrderHistoryContent variant="page" />;
 }
 
 export default OrderHistory;

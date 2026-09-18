@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { Check, ChevronLeft, Heart, Home as HomeIcon, ShoppingCart, Sparkles, Trash2, X } from 'lucide-react';
 import { useAppTheme } from './context/ThemeContext';
 import { getNavbarThemeStyles } from './utils/themeUtils';
+import { getAppHomePath } from './utils/tenantNavigation';
 import {
   readWishlistItems,
   removeWishlistProduct,
@@ -805,7 +806,7 @@ function Wishlist() {
       return;
     }
 
-    navigate(`/categories-products/list/${categoryId}/detail/${productId}`);
+    navigate(`/categories-products/list/${encodeURIComponent(categoryId)}/detail/${encodeURIComponent(productId)}`);
   };
 
   return (
@@ -842,7 +843,7 @@ function Wishlist() {
               <button
                 type="button"
                 className="ws-header-icon-btn"
-                onClick={() => navigate('/')}
+                onClick={() => navigate(getAppHomePath())}
                 aria-label="Go Home"
               >
                 <HomeIcon size={20} strokeWidth={1.8} />

@@ -3,6 +3,60 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!--
+      Tenant PWA installability fix: browsers evaluate installability (and
+      whether to fire beforeinstallprompt) shortly after this document
+      parses, using whatever <link rel="manifest"> is present at that point.
+      Previously the manifest link was only added later, from React, after
+      an async Supabase fetch resolved the Trust for the slug (see
+      src/utils/pwaManifest.js / src/context/TenantContext.jsx) — often too
+      late for that check to see it, especially on a first visit.
+      The slug itself doesn't need that fetch; it's already in the URL, so
+      this sets the manifest link synchronously during initial HTML parse,
+      before any JS bundle loads. React's applyTenantManifest still runs
+      afterwards and simply re-sets this same href (harmless) plus the
+      title/theme-color, which do need the resolved Trust data.
+    -->
+    <script>
+      (function () {
+        // Injected at build/dev time from src/constants/reservedRoutes.js
+        // (see the injectReservedAppRoutes plugin in vite.config.js) — the
+        // same list TenantLanding.jsx's isReservedSlug() uses, so a
+        // first-level path like /app/login never gets treated as a Trust
+        // app_slug here either.
+        var RESERVED_APP_ROUTES = __SETU_RESERVED_APP_ROUTES__;
+        var match = window.location.pathname.match(/^\/app\/([a-z0-9-]+)\/?$/i);
+        if (!match) return;
+        var slug = match[1].toLowerCase();
+        if (RESERVED_APP_ROUTES.indexOf(slug) !== -1) return;
+        var link = document.createElement('link');
+        link.rel = 'manifest';
+        link.href = '/pwa-manifest/' + encodeURIComponent(slug) + '.webmanifest';
+        document.head.appendChild(link);
+      })();
+    </script>
+    <!--
+      Install-prompt timing fix: beforeinstallprompt can fire before React
+      (and TenantLanding's own listener) has mounted, especially now that
+      the manifest link above is attached this early — losing the event
+      entirely if nothing is listening yet. Capturing it here, as early as
+      possible, and stashing it on window means TenantLanding can pick up
+      an event that already fired via src/utils/installPrompt.js's
+      getInstallPrompt(), instead of only ever seeing ones that fire after
+      it mounts. This never calls .prompt() itself — only the user clicking
+      "Install App" does that.
+    -->
+    <script>
+      (function () {
+        window.addEventListener('beforeinstallprompt', function (event) {
+          event.preventDefault();
+          window.__setuDeferredInstallPrompt = event;
+          if (typeof window.__setuNotifyInstallPrompt === 'function') {
+            window.__setuNotifyInstallPrompt(event);
+          }
+        });
+      })();
+    </script>
     <title>Setu</title>
   </head>
   <body>

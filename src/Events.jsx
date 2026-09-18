@@ -410,7 +410,8 @@ const AttachmentPreviewModal = (props) => {
   return null;
 };
 
-const Events = ({ onNavigate }) => {
+export const EventsContent = ({ onNavigate, variant = 'page' }) => {
+  const isPageVariant = variant === 'page';
   const navigate = useNavigate();
   const theme = useAppTheme();
 
@@ -673,35 +674,39 @@ const Events = ({ onNavigate }) => {
   const TabIcon = meta.icon;
 
   return (
-    <div className={`min-h-screen pb-10 relative${isMenuOpen ? ' overflow-hidden max-h-screen' : ''}`} style={{ background: 'var(--page-bg, var(--app-page-bg))' }}>
-      <div className="theme-navbar border-b px-6 py-5 flex items-center justify-between sticky top-0 z-50 shadow-sm" style={{ paddingTop: 'max(env(safe-area-inset-top, 0px), 20px)' }}>
-        <button
-          onClick={() => setIsMenuOpen(!isMenuOpen)}
-          className="w-10 h-10 rounded-2xl flex items-center justify-center transition-all active:scale-95"
-          style={{
-            background: isMenuOpen
-              ? 'var(--app-button-bg)'
-              : 'color-mix(in srgb, var(--navbar-bg) 72%, var(--surface-color))',
-            boxShadow: isMenuOpen ? `0 4px 12px ${applyOpacity(theme.primary, 0.25)}` : 'none',
-          }}
-        >
-          {isMenuOpen ? <X className="h-5 w-5" style={{ color: 'var(--app-button-text)' }} /> : <Menu className="h-[22px] w-[22px]" style={{ color: 'var(--navbar-text)' }} />}
-        </button>
-        <h1 className="text-lg font-bold" style={{ color: 'var(--navbar-text)' }}>Events</h1>
-        <button
-          onClick={() => onNavigate('home')}
-          className="w-10 h-10 rounded-2xl flex items-center justify-center transition-all active:scale-95"
-          style={{
-            color: 'var(--navbar-text)',
-            background: 'color-mix(in srgb, var(--navbar-bg) 72%, var(--surface-color))'
-          }}
-        >
-          <HomeIcon className="h-[22px] w-[22px]" />
-        </button>
-      </div>
+    <div className={isPageVariant ? `min-h-screen pb-10 relative${isMenuOpen ? ' overflow-hidden max-h-screen' : ''}` : undefined} style={isPageVariant ? { background: 'var(--page-bg, var(--app-page-bg))' } : undefined}>
+      {isPageVariant && (
+        <div className="theme-navbar border-b px-6 py-5 flex items-center justify-between sticky top-0 z-50 shadow-sm" style={{ paddingTop: 'max(env(safe-area-inset-top, 0px), 20px)' }}>
+          <button
+            onClick={() => setIsMenuOpen(!isMenuOpen)}
+            className="w-10 h-10 rounded-2xl flex items-center justify-center transition-all active:scale-95"
+            style={{
+              background: isMenuOpen
+                ? 'var(--app-button-bg)'
+                : 'color-mix(in srgb, var(--navbar-bg) 72%, var(--surface-color))',
+              boxShadow: isMenuOpen ? `0 4px 12px ${applyOpacity(theme.primary, 0.25)}` : 'none',
+            }}
+          >
+            {isMenuOpen ? <X className="h-5 w-5" style={{ color: 'var(--app-button-text)' }} /> : <Menu className="h-[22px] w-[22px]" style={{ color: 'var(--navbar-text)' }} />}
+          </button>
+          <h1 className="text-lg font-bold" style={{ color: 'var(--navbar-text)' }}>Events</h1>
+          <button
+            onClick={() => onNavigate('home')}
+            className="w-10 h-10 rounded-2xl flex items-center justify-center transition-all active:scale-95"
+            style={{
+              color: 'var(--navbar-text)',
+              background: 'color-mix(in srgb, var(--navbar-bg) 72%, var(--surface-color))'
+            }}
+          >
+            <HomeIcon className="h-[22px] w-[22px]" />
+          </button>
+        </div>
+      )}
 
-      {isMenuOpen && <div className="fixed inset-0 z-25" style={{ background: applyOpacity('var(--brand-navy-dark)', 0.01) }} onClick={() => setIsMenuOpen(false)} />}
-      <Sidebar isOpen={isMenuOpen} onClose={() => setIsMenuOpen(false)} onNavigate={onNavigate} currentPage="events" />
+      {isPageVariant && isMenuOpen && <div className="fixed inset-0 z-25" style={{ background: applyOpacity('var(--brand-navy-dark)', 0.01) }} onClick={() => setIsMenuOpen(false)} />}
+      {isPageVariant && (
+        <Sidebar isOpen={isMenuOpen} onClose={() => setIsMenuOpen(false)} onNavigate={onNavigate} currentPage="events" />
+      )}
 
       <div className="events-tabs px-4 pb-4 pt-3">
         <div
@@ -1175,5 +1180,7 @@ const Events = ({ onNavigate }) => {
     </div>
   );
 };
+
+const Events = ({ onNavigate }) => <EventsContent onNavigate={onNavigate} variant="page" />;
 
 export default Events;

@@ -21,33 +21,15 @@ jobs:
           script: |
             set -e
 
-            cd /var/www/app/live
+            cd /var/www/app/staging
 
-            echo "Current branch:"
-            git branch --show-current
-
-            echo "Fetching latest live branch..."
+            echo "Fetching latest develop..."
             GIT_SSH_COMMAND="ssh -i ~/.ssh/id_ed25519" git fetch origin
 
-            echo "Switching to live..."
-            git checkout live
+            echo "Resetting server code to origin/develop..."
+            git reset --hard origin/develop
 
-            echo "Resetting server to origin/live..."
-            git reset --hard origin/live
-
-            echo "Verifying deployed commit..."
-            LOCAL_COMMIT=$(git rev-parse HEAD)
-            REMOTE_COMMIT=$(git rev-parse origin/live)
-
-            echo "Local:  $LOCAL_COMMIT"
-            echo "Remote: $REMOTE_COMMIT"
-
-            if [ "$LOCAL_COMMIT" != "$REMOTE_COMMIT" ]; then
-              echo "ERROR: Live server is not on latest origin/live commit"
-              exit 1
-            fi
-
-            echo "Latest deployed commit:"
+            echo "Checking deployed commit..."
             git log -1 --oneline
 
             echo "Installing frontend dependencies..."
@@ -61,7 +43,7 @@ jobs:
             npm ci
 
             echo "Restarting backend..."
-            pm2 restart app-live --update-env || pm2 start npm --name app-live -- start
+            pm2 restart app-staging --update-env || pm2 start npm --name app-staging -- start
 
             pm2 save
 
@@ -71,4 +53,4 @@ jobs:
             echo "Reloading nginx..."
             systemctl reload nginx
 
-            echo "LIVE DEPLOYMENT COMPLETE"
+            echo "Deployment completed successfully"

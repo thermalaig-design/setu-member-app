@@ -4,6 +4,8 @@ import { useBackNavigation } from './hooks';
 import { useTrustDataVersion } from './hooks/useTrustDataVersion';
 import { checkPhoneNumber } from './services/authService';
 import { fetchTrustById } from './services/trustService';
+import { useTenant } from './context/TenantContext';
+import { getAppHomePath } from './utils/tenantNavigation';
 
 const TRUST_ID = import.meta.env.VITE_DEFAULT_TRUST_ID || '';
 const LOGIN_TRUST_CACHE_KEY = 'cached_base_trust_info';
@@ -66,40 +68,62 @@ function Login() {
   const navigate = useNavigate();
   useBackNavigation();
   const authDefaultTrust = resolveAuthDefaultTrust();
-  const { displayTrustVersion } = useTrustDataVersion(authDefaultTrust.id);
+  const { installedTrustId, installedSlug, tenantTrust } = useTenant();
+  const isTenantMode = Boolean(installedTrustId);
+  // Priority 1: installed/tenant Trust (white-label /app/<slug> identity).
+  // Priority 2: existing selected/default Trust fallback (unchanged).
+  const effectiveTrust = isTenantMode
+    ? { id: installedTrustId, name: '' }
+    : authDefaultTrust;
+  const { displayTrustVersion } = useTrustDataVersion(effectiveTrust.id);
 
   const [phoneNumber, setPhoneNumber] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [focused, setFocused] = useState(false);
-  const [_trustInfo, setTrustInfo] = useState(() => getCachedBaseTrust(authDefaultTrust.id) || null);
+  const [trustInfo, setTrustInfo] = useState(() => {
+    if (isTenantMode && tenantTrust && String(tenantTrust.id) === String(installedTrustId)) {
+      return tenantTrust;
+    }
+    return getCachedBaseTrust(effectiveTrust.id) || null;
+  });
 
   useEffect(() => {
     const user = localStorage.getItem('user');
     const isLoggedIn = localStorage.getItem('isLoggedIn') === 'true';
-    if (user && user !== 'null' && user !== 'undefined' && isLoggedIn) navigate('/', { replace: true });
+    if (user && user !== 'null' && user !== 'undefined' && isLoggedIn) navigate(getAppHomePath(), { replace: true });
   }, [navigate]);
 
   useEffect(() => {
     try { localStorage.removeItem('cached_trust_info'); } catch { /* ignore */ }
   }, []);
 
+  // Pick up tenant Trust info as soon as TenantContext resolves it (e.g. it
+  // was already resolved earlier this session), instead of waiting on a
+  // separate fetch below.
+  useEffect(() => {
+    if (isTenantMode && tenantTrust && String(tenantTrust.id) === String(installedTrustId)) {
+      setTrustInfo(tenantTrust);
+      setCachedBaseTrust(tenantTrust, installedTrustId);
+    }
+  }, [isTenantMode, tenantTrust, installedTrustId]);
+
   useEffect(() => {
     let active = true;
     const loadTrust = async () => {
       try {
-        if (!authDefaultTrust.id) return;
-        const trust = await fetchTrustById(authDefaultTrust.id);
+        if (!effectiveTrust.id) return;
+        const trust = await fetchTrustById(effectiveTrust.id);
         if (!active || !trust) return;
         setTrustInfo(trust);
-        setCachedBaseTrust(trust, authDefaultTrust.id);
+        setCachedBaseTrust(trust, effectiveTrust.id);
       } catch (err) {
         console.warn('[Login] Failed to refresh base trust info:', err?.message || err);
       }
     };
     loadTrust();
     return () => { active = false; };
-  }, [authDefaultTrust.id]);
+  }, [effectiveTrust.id]);
 
   const handleCheckPhone = async (e) => {
     e.preventDefault();
@@ -116,7 +140,12 @@ function Login() {
 
       sessionStorage.setItem(OTP_FLOW_KEY, 'normal');
       navigate('/otp-verification', {
-        state: { user: checkResult.data.user, accounts: checkResult.data.accounts || [checkResult.data.user], phoneNumber }
+        state: {
+          user: checkResult.data.user,
+          accounts: checkResult.data.accounts || [checkResult.data.user],
+          phoneNumber,
+          tenantSlug: isTenantMode ? installedSlug : ''
+        }
       });
     } catch (err) {
       console.error('[Login] Error checking phone:', err);
@@ -370,6 +399,25 @@ const styles = {
   },
   cardBody: {
     padding: '32px 24px 28px',
+  },
+  tenantBrand: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: '8px',
+    marginBottom: '14px',
+  },
+  tenantLogo: {
+    width: '28px',
+    height: '28px',
+    borderRadius: '7px',
+    objectFit: 'cover',
+  },
+  tenantName: {
+    fontSize: '13px',
+    fontWeight: 700,
+    color: '#d4af37',
+    letterSpacing: '0.3px',
   },
   headingGroup: {
     marginBottom: '28px',

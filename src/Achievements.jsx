@@ -307,7 +307,8 @@ const AchievementSummaryCard = ({ item, featured = false, showTimelineDot = fals
   );
 };
 
-const Achievements = ({ onNavigate }) => {
+export const AchievementsContent = ({ onNavigate, variant = 'page' }) => {
+  const isPageVariant = variant === 'page';
   const initialTrust = resolveTrustContext();
   const [selectedTrustId, setSelectedTrustId] = useState(() => initialTrust.trustId || '');
   const [currentPage, setCurrentPage] = useState(1);
@@ -605,28 +606,32 @@ const Achievements = ({ onNavigate }) => {
   };
 
   return (
-    <div className={`min-h-screen pb-8 relative${isMenuOpen ? ' overflow-hidden max-h-screen' : ''}`} style={{ background: 'var(--page-bg, var(--app-page-bg))', color: 'var(--body-text-color)' }}>
-      <div className="theme-navbar border-b px-6 py-5 flex items-center justify-between sticky top-0 z-50 shadow-sm" style={{ paddingTop: 'max(env(safe-area-inset-top, 0px), 20px)' }}>
-        <button
-          onClick={() => setIsMenuOpen(!isMenuOpen)}
-          className="p-2 rounded-xl transition-colors"
-          aria-label="Toggle menu"
-        >
-          {isMenuOpen ? <X className="h-5 w-5" style={{ color: 'var(--navbar-text)' }} /> : <Menu className="h-5 w-5" style={{ color: 'var(--navbar-text)' }} />}
-        </button>
-        <h1 className="text-lg font-bold" style={{ color: 'var(--navbar-text)' }}>Achievements</h1>
-        <button
-          onClick={() => onNavigate?.('home')}
-          className="p-2 rounded-xl transition-colors"
-          style={{ color: 'var(--navbar-text)' }}
-          aria-label="Go to home"
-        >
-          <HomeIcon className="h-5 w-5" />
-        </button>
-      </div>
+    <div className={isPageVariant ? `min-h-screen pb-8 relative${isMenuOpen ? ' overflow-hidden max-h-screen' : ''}` : undefined} style={isPageVariant ? { background: 'var(--page-bg, var(--app-page-bg))', color: 'var(--body-text-color)' } : undefined}>
+      {isPageVariant && (
+        <div className="theme-navbar border-b px-6 py-5 flex items-center justify-between sticky top-0 z-50 shadow-sm" style={{ paddingTop: 'max(env(safe-area-inset-top, 0px), 20px)' }}>
+          <button
+            onClick={() => setIsMenuOpen(!isMenuOpen)}
+            className="p-2 rounded-xl transition-colors"
+            aria-label="Toggle menu"
+          >
+            {isMenuOpen ? <X className="h-5 w-5" style={{ color: 'var(--navbar-text)' }} /> : <Menu className="h-5 w-5" style={{ color: 'var(--navbar-text)' }} />}
+          </button>
+          <h1 className="text-lg font-bold" style={{ color: 'var(--navbar-text)' }}>Achievements</h1>
+          <button
+            onClick={() => onNavigate?.('home')}
+            className="p-2 rounded-xl transition-colors"
+            style={{ color: 'var(--navbar-text)' }}
+            aria-label="Go to home"
+          >
+            <HomeIcon className="h-5 w-5" />
+          </button>
+        </div>
+      )}
 
-      {isMenuOpen && <div className="fixed inset-0 z-25" style={{ background: 'rgba(0,0,0,0.02)' }} onClick={() => setIsMenuOpen(false)} />}
-      <Sidebar isOpen={isMenuOpen} onClose={() => setIsMenuOpen(false)} onNavigate={onNavigate} currentPage="achievements" />
+      {isPageVariant && isMenuOpen && <div className="fixed inset-0 z-25" style={{ background: 'rgba(0,0,0,0.02)' }} onClick={() => setIsMenuOpen(false)} />}
+      {isPageVariant && (
+        <Sidebar isOpen={isMenuOpen} onClose={() => setIsMenuOpen(false)} onNavigate={onNavigate} currentPage="achievements" />
+      )}
 
       <div className="achievements-content px-4 py-5">
         {loading ? (
@@ -809,5 +814,7 @@ const Achievements = ({ onNavigate }) => {
     </div>
   );
 };
+
+const Achievements = ({ onNavigate }) => <AchievementsContent onNavigate={onNavigate} variant="page" />;
 
 export default Achievements;

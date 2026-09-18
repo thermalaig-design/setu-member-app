@@ -94,6 +94,17 @@ const normalizeText = (value) => {
   return ['null', 'undefined', 'nan'].includes(lowered) ? '' : text;
 };
 
+const isActiveProductImage = (image) => {
+  const status = normalizeText(image?.status).toLowerCase();
+  if (['inactive', 'disabled', 'deleted', 'archived'].includes(status)) return false;
+  if (image?.is_active === false || image?.isActive === false) return false;
+  return true;
+};
+
+const normalizeProductImages = (images) =>
+  (Array.isArray(images) ? images : [])
+    .filter((image) => normalizeText(image?.image_url) && isActiveProductImage(image));
+
 const normalizeAmount = (value) => {
   if (typeof value === 'number') {
     return Number.isFinite(value) ? value : 0;
@@ -452,7 +463,7 @@ const normalizeWishlistItem = (item, fallbackTrustId = undefined) => {
     product_code: normalizeText(item?.product_code),
     product_type: normalizeText(item?.product_type),
     alias_name: normalizeText(item?.alias_name),
-    images: Array.isArray(item?.images) ? item.images : [],
+    images: normalizeProductImages(item?.images),
     selected_image: normalizeText(item?.selected_image || item?.image_url || item?.imageUrl),
     selected_attributes: normalizeAttributes(item?.selected_attributes || {}),
     attribute_values: normalizeAttributeRows(item?.attribute_values || item?.attributeValues || []),
@@ -988,7 +999,7 @@ const enrichWishlistRowsWithCatalog = async (rows = [], trustId = undefined) => 
       product_code: normalizeText(product?.product_code || row?.product_code),
       product_type: normalizeText(product?.product_type || row?.product_type),
       alias_name: normalizeText(product?.alias_name || row?.alias_name),
-      images: Array.isArray(product?.images) ? product.images : (Array.isArray(row?.images) ? row.images : []),
+      images: normalizeProductImages(Array.isArray(product?.images) ? product.images : row?.images),
       selected_image: normalizeText(row?.selected_image || row?.image_url || row?.imageUrl || product?.selected_image || product?.image_url || product?.imageUrl),
       attribute_values: Array.isArray(product?.attribute_values) ? product.attribute_values : (row?.attribute_values || row?.attributeValues || []),
       price: buildRemoteWishlistPrice(row, priceRow, matchedPriceId),

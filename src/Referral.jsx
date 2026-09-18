@@ -6,7 +6,39 @@ import { registerSidebarState, useAndroidBack } from './hooks';
 
 import Sidebar from './features/sidebar/Sidebar';
 
-const Referral = ({ onNavigate, referenceView, setReferenceView, newReference, setNewReference }) => {
+const DEFAULT_NEW_REFERENCE = {
+  patientName: '',
+  age: '',
+  gender: '',
+  phone: '',
+  referredTo: '',
+  doctorId: null,
+  doctorName: '',
+  doctorDepartment: '',
+  condition: '',
+  category: '',
+  notes: ''
+};
+
+// referenceView/newReference are normally lifted to App.jsx so the in-progress form
+// survives navigating away from /reference and back. When embedded as Home content
+// (variant="home"), there is no App-level state to receive — fall back to local state
+// so the embedded widget still works as a self-contained, independent instance.
+export const ReferralContent = ({
+  onNavigate,
+  referenceView: referenceViewProp,
+  setReferenceView: setReferenceViewProp,
+  newReference: newReferenceProp,
+  setNewReference: setNewReferenceProp,
+  variant = 'page',
+}) => {
+  const isPageVariant = variant === 'page';
+  const [localReferenceView, setLocalReferenceView] = useState('menu');
+  const [localNewReference, setLocalNewReference] = useState(DEFAULT_NEW_REFERENCE);
+  const referenceView = referenceViewProp ?? localReferenceView;
+  const setReferenceView = setReferenceViewProp ?? setLocalReferenceView;
+  const newReference = newReferenceProp ?? localNewReference;
+  const setNewReference = setNewReferenceProp ?? setLocalNewReference;
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const mainContainerRef = useRef(null);
   const doctorPickerRef = useRef(null);
@@ -404,46 +436,49 @@ const Referral = ({ onNavigate, referenceView, setReferenceView, newReference, s
   return (
     <div
       ref={mainContainerRef}
-      className={`bg-white min-h-screen pb-10 relative${isMenuOpen ? ' overflow-hidden max-h-screen' : ''}`}
+      className={isPageVariant ? `bg-white min-h-screen pb-10 relative${isMenuOpen ? ' overflow-hidden max-h-screen' : ''}` : undefined}
     >
-      {/* Navbar */}
-      <div className="theme-navbar shadow-sm border-b px-4 sm:px-6 py-5 flex items-center justify-between sticky top-0 z-50 transition-all duration-300 pointer-events-auto" style={{ paddingTop: 'max(env(safe-area-inset-top, 0px), 20px)' }}>
-        <button
-          onClick={() => setIsMenuOpen(!isMenuOpen)}
-          className="p-2 rounded-xl hover:bg-gray-100 transition-colors pointer-events-auto"
-        >
-          {isMenuOpen ? <X className="h-6 w-6" style={{ color: 'var(--navbar-text)' }} /> : <Menu className="h-6 w-6" style={{ color: 'var(--navbar-text)' }} />}
-        </button>
-        <h1 className="text-lg font-bold transition-colors" style={{ color: 'var(--navbar-text)' }}>Patient Referral</h1>
-        <div className="flex items-center gap-2">
+      {isPageVariant && (
+        <div className="theme-navbar shadow-sm border-b px-4 sm:px-6 py-5 flex items-center justify-between sticky top-0 z-50 transition-all duration-300 pointer-events-auto" style={{ paddingTop: 'max(env(safe-area-inset-top, 0px), 20px)' }}>
           <button
-            onClick={() => onNavigate('home')}
-            className="p-2.5 rounded-xl transition-colors hover:bg-gray-100"
-            style={{ color: 'var(--navbar-text)' }}
-            title="Back"
+            onClick={() => setIsMenuOpen(!isMenuOpen)}
+            className="p-2 rounded-xl hover:bg-gray-100 transition-colors pointer-events-auto"
           >
-            <ArrowLeft className="h-5 w-5" />
+            {isMenuOpen ? <X className="h-6 w-6" style={{ color: 'var(--navbar-text)' }} /> : <Menu className="h-6 w-6" style={{ color: 'var(--navbar-text)' }} />}
           </button>
-          <button
-            onClick={() => onNavigate('home')}
-            className="p-2.5 rounded-xl transition-colors hover:bg-indigo-100"
-            style={{
-              border: '1px solid color-mix(in srgb, var(--navbar-text) 26%, transparent)',
-              color: 'var(--navbar-text)',
-              background: 'color-mix(in srgb, var(--navbar-bg) 76%, #ffffff)'
-            }}
-          >
-            <HomeIcon className="h-5 w-5" />
-          </button>
+          <h1 className="text-lg font-bold transition-colors" style={{ color: 'var(--navbar-text)' }}>Patient Referral</h1>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => onNavigate('home')}
+              className="p-2.5 rounded-xl transition-colors hover:bg-gray-100"
+              style={{ color: 'var(--navbar-text)' }}
+              title="Back"
+            >
+              <ArrowLeft className="h-5 w-5" />
+            </button>
+            <button
+              onClick={() => onNavigate('home')}
+              className="p-2.5 rounded-xl transition-colors hover:bg-indigo-100"
+              style={{
+                border: '1px solid color-mix(in srgb, var(--navbar-text) 26%, transparent)',
+                color: 'var(--navbar-text)',
+                background: 'color-mix(in srgb, var(--navbar-bg) 76%, #ffffff)'
+              }}
+            >
+              <HomeIcon className="h-5 w-5" />
+            </button>
+          </div>
         </div>
-      </div>
+      )}
 
-      <Sidebar
-        isOpen={isMenuOpen}
-        onClose={() => setIsMenuOpen(false)}
-        onNavigate={onNavigate}
-        currentPage="reference"
-      />
+      {isPageVariant && (
+        <Sidebar
+          isOpen={isMenuOpen}
+          onClose={() => setIsMenuOpen(false)}
+          onNavigate={onNavigate}
+          currentPage="reference"
+        />
+      )}
 
       {referenceView === 'menu' && (
         <>
@@ -490,7 +525,7 @@ const Referral = ({ onNavigate, referenceView, setReferenceView, newReference, s
           </div>
 
           {/* ── White card pulled up over header ── */}
-          <div className="bg-gray-50 rounded-t-3xl -mt-5 pt-5 px-4 min-h-screen">
+          <div className={`bg-gray-50 rounded-t-3xl -mt-5 pt-5 px-4${isPageVariant ? ' min-h-screen' : ''}`}>
 
             {/* ── PRIMARY CTA — New Reference ── */}
             <button
@@ -1205,5 +1240,16 @@ const Referral = ({ onNavigate, referenceView, setReferenceView, newReference, s
     </div>
   );
 };
+
+const Referral = ({ onNavigate, referenceView, setReferenceView, newReference, setNewReference }) => (
+  <ReferralContent
+    onNavigate={onNavigate}
+    referenceView={referenceView}
+    setReferenceView={setReferenceView}
+    newReference={newReference}
+    setNewReference={setNewReference}
+    variant="page"
+  />
+);
 
 export default Referral;

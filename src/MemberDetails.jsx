@@ -3,6 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { User, Users, Stethoscope, Building2, Star, Award, ChevronLeft, Phone, Mail, MapPin, FileText, Clock, HomeIcon } from 'lucide-react';
 import { getProfilePhotos } from './services/api';
 import { getNavbarThemeStyles } from './utils/themeUtils';
+import { getAppHomePath } from './utils/tenantNavigation';
 import { useNavigate } from 'react-router-dom';
 
 const MemberDetails = ({ member, onNavigateBack, previousScreenName }) => {
@@ -136,7 +137,7 @@ const MemberDetails = ({ member, onNavigateBack, previousScreenName }) => {
             {/* <h1 className="text-2xl font-bold flex-1 text-center pr-16" style={{ color: navbarTextColor }}>Member Details</h1> */}
             <button
                           type="button"
-                          onClick={() => navigate('/')}
+                          onClick={() => navigate(getAppHomePath())}
                           className="p-2 rounded-xl transition-colors"
                           style={{ color: navbarTextColor, background: 'transparent' }}
                           aria-label="Home"

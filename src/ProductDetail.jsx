@@ -12,6 +12,7 @@ import {
   toggleWishlistProductAsync,
 } from './utils/productWishlist';
 import { getCartKey, readCartItems, setCartProductQuantity, subscribeCart } from './utils/productCart';
+import { getAppHomePath } from './utils/tenantNavigation';
 import {
   isTrustCatalogCacheFresh,
   readTrustCatalogCacheForCandidates,
@@ -74,6 +75,13 @@ const HERO_DRAG_ACTIVATION_PX = 8;
 const HERO_CLICK_SUPPRESS_MS = 250;
 const HERO_SWIPE_THRESHOLD_PX = 48;
 const IMAGE_ZOOM_RESET_EPSILON = 0.02;
+const PRODUCT_SPEC_TABS = [
+  { id: 'features', label: 'Features & Specs' },
+  { id: 'measurements', label: 'Measurements' },
+  { id: 'itemDetails', label: 'Item details' },
+];
+const MEASUREMENT_SPEC_PATTERN = /(size|dimension|length|width|height|weight|area|sq\.?\s*ft|measurement|capacity|volume|floor|seat|tonne|ton|inch|cm|mm|meter|metre|kg|gram|liter|litre)/i;
+const ITEM_DETAIL_SPEC_PATTERN = /(product\s*code|code|sku|brand|model|item\s*form|material|color|colour|type|category|manufacturer|seller|maintenance|electricity|water|security|location|availability|warranty)/i;
 
 const PALETTE = [
   ["#EFE7D8", "#CBB994"],
@@ -85,6 +93,43 @@ const PALETTE = [
   ["#E4E4E0", "#9C9C94"],
   ["#EDE6D6", "#D6A24A"],
 ];
+
+const splitSpecLine = (line) => {
+  const trimmed = String(line || '').trim();
+  if (!trimmed) return null;
+  const match = trimmed.match(/^([^:：-]{2,60})\s*[:：-]\s*(.+)$/);
+  if (!match) return null;
+  const label = match[1].trim();
+  const value = match[2].trim();
+  if (!label || !value) return null;
+  return { label: toTitleCase(label), value };
+};
+
+const getSpecTabId = (label) => {
+  if (MEASUREMENT_SPEC_PATTERN.test(label)) return 'measurements';
+  if (ITEM_DETAIL_SPEC_PATTERN.test(label)) return 'itemDetails';
+  return 'features';
+};
+
+const buildProductSpecs = (lines) => {
+  const sections = PRODUCT_SPEC_TABS.reduce((acc, tab) => {
+    acc[tab.id] = [];
+    return acc;
+  }, {});
+  const overviewLines = [];
+
+  lines.forEach((line) => {
+    const spec = splitSpecLine(line);
+    if (!spec) {
+      const cleanLine = String(line || '').trim();
+      if (cleanLine) overviewLines.push(cleanLine);
+      return;
+    }
+    sections[getSpecTabId(spec.label)].push(spec);
+  });
+
+  return { sections, overviewText: overviewLines.join('\n\n') };
+};
 
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 
@@ -787,6 +832,13 @@ const isActiveImage = (image) => {
 const getProductDisplayName = (product) =>
   pickText(product?.product_name, product?.alias_name, `Product ${pickText(product?.id)}`);
 
+const isActiveImage = (image) => {
+  const status = pickText(image?.status).toLowerCase();
+  if (['inactive', 'disabled', 'deleted', 'archived'].includes(status)) return false;
+  if (image?.is_active === false || image?.isActive === false) return false;
+  return true;
+};
+
 const resolveProductImages = (product) =>
   (Array.isArray(product?.images) ? product.images : [])
     .filter((image) => isActiveImage(image) && pickText(image?.image_url))
@@ -1334,6 +1386,7 @@ const ProductDetail = ({ categoryId, productId, onBack }) => {
   const [heroDragX, setHeroDragX] = useState(0);
   const [heroIsDragging, setHeroIsDragging] = useState(false);
   const [chosen, setChosen] = useState({});
+  const [activeSpecTab, setActiveSpecTab] = useState('features');
   const [descriptionExpanded, setDescriptionExpanded] = useState(false);
   const [descriptionHasOverflow, setDescriptionHasOverflow] = useState(false);
   const [ctaMessage, setCtaMessage] = useState('');
@@ -1420,6 +1473,7 @@ const ProductDetail = ({ categoryId, productId, onBack }) => {
     displayAttributes = [],
     selectionAttributes = [],
   } = attributeState;
+  const visibleBreadcrumbPath = path.slice(-2);
   const activeImage = images[activeImg] || images[0] || null;
   const activeImageUrl = pickText(activeImage?.image_url);
   const heroCanPreview = Boolean(activeImageUrl);
@@ -1472,6 +1526,14 @@ const ProductDetail = ({ categoryId, productId, onBack }) => {
   });
 
   const descriptionText = descriptionLines.join('\n');
+  const descriptionSpecLines = descriptionLines.flatMap((line) => String(line || '').split(/\r?\n/));
+  const productSpecs = useMemo(
+    () => buildProductSpecs(descriptionSpecLines),
+    [descriptionText]
+  );
+  const availableSpecTabs = PRODUCT_SPEC_TABS.filter((tab) => productSpecs.sections[tab.id]?.length > 0);
+  const hasStructuredSpecs = availableSpecTabs.length > 0;
+  const activeSpecRows = productSpecs.sections[activeSpecTab] || [];
 
   useEffect(() => {
     setDescriptionExpanded(false);
@@ -1479,7 +1541,14 @@ const ProductDetail = ({ categoryId, productId, onBack }) => {
   }, [productId, descriptionText]);
 
   useEffect(() => {
-    if (!descriptionText || descriptionExpanded) return undefined;
+    const hasActiveTab = availableSpecTabs.some((tab) => tab.id === activeSpecTab);
+    if (!hasActiveTab) {
+      setActiveSpecTab(availableSpecTabs[0]?.id || 'features');
+    }
+  }, [availableSpecTabs, activeSpecTab]);
+
+  useEffect(() => {
+    if (!productSpecs.overviewText || descriptionExpanded) return undefined;
 
     const element = descriptionRef.current;
     if (!element) return undefined;
@@ -1516,7 +1585,7 @@ const ProductDetail = ({ categoryId, productId, onBack }) => {
         window.removeEventListener('resize', scheduleMeasure);
       }
     };
-  }, [descriptionText, descriptionExpanded]);
+  }, [productSpecs.overviewText, descriptionExpanded]);
 
   const missingRequiredSelections = selectionAttributes
     .filter((group) => !hasChosenSelectionValue(chosen[group.key], group.mode))
@@ -1858,7 +1927,7 @@ const ProductDetail = ({ categoryId, productId, onBack }) => {
       onBack();
       return;
     }
-    navigate('/');
+    navigate(getAppHomePath());
   };
 
   return (
@@ -1922,7 +1991,24 @@ const ProductDetail = ({ categoryId, productId, onBack }) => {
                 </div>
               </div>
       <div className="ws-scroll">
-        <div className="ws-breadcrumb">{path.map((c) => capitalizeFirst(c.name)).filter(Boolean).join(" / ") || 'Products'}</div>
+        <div className="ws-breadcrumb">
+          {visibleBreadcrumbPath.length > 0 ? (
+            visibleBreadcrumbPath.map((category, index) => (
+              <React.Fragment key={category.id}>
+                {index > 0 ? <span className="ws-breadcrumb-separator">/</span> : null}
+                <button
+                  type="button"
+                  className="ws-breadcrumb-link"
+                  onClick={() => navigate(`/categories-products/list/${encodeURIComponent(pickText(category.id))}`)}
+                >
+                  {capitalizeFirst(category.name)}
+                </button>
+              </React.Fragment>
+            ))
+          ) : (
+            'Products'
+          )}
+        </div>
 
         {loading ? (
           <ProductDetailSkeleton />
@@ -2153,24 +2239,57 @@ const ProductDetail = ({ categoryId, productId, onBack }) => {
 
           {descriptionText ? (
             <div className="ws-attr-group ws-attr-group--panel ws-description-group">
-              <div className="ws-description-title">Description</div>
-              <p
-                id={`product-description-${productId || 'detail'}`}
-                ref={descriptionRef}
-                className={`ws-description-text ${!descriptionExpanded && descriptionHasOverflow ? 'ws-description-text--clamped' : ''}`}
-              >
-                {descriptionText}
-              </p>
-              {descriptionHasOverflow ? (
-                <button
-                  type="button"
-                  className="ws-description-more"
-                  onClick={() => setDescriptionExpanded((value) => !value)}
-                  aria-expanded={descriptionExpanded}
-                  aria-controls={`product-description-${productId || 'detail'}`}
-                >
-                  {descriptionExpanded ? 'Show less' : 'Read more'}
-                </button>
+              {hasStructuredSpecs ? (
+                <>
+                  <div className="ws-description-title">Product specifications</div>
+                  <div className="ws-spec-tabs" role="tablist" aria-label="Product specifications">
+                    {availableSpecTabs.map((tab) => (
+                      <button
+                        key={tab.id}
+                        type="button"
+                        role="tab"
+                        className={`ws-spec-tab ${activeSpecTab === tab.id ? 'ws-spec-tab--active' : ''}`}
+                        onClick={() => setActiveSpecTab(tab.id)}
+                        aria-selected={activeSpecTab === tab.id}
+                      >
+                        {tab.label}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="ws-spec-table" role="table" aria-label={`${PRODUCT_SPEC_TABS.find((tab) => tab.id === activeSpecTab)?.label || 'Product'} specifications`}>
+                    {activeSpecRows.map((row, index) => (
+                      <div className="ws-spec-row" role="row" key={`${row.label}:${index}`}>
+                        <div className="ws-spec-key" role="cell">{row.label}</div>
+                        <div className="ws-spec-value" role="cell">{row.value}</div>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              ) : (
+                <div className="ws-description-title">Description</div>
+              )}
+              {productSpecs.overviewText ? (
+                <>
+                  {hasStructuredSpecs ? <div className="ws-description-subtitle">Overview</div> : null}
+                  <p
+                    id={`product-description-${productId || 'detail'}`}
+                    ref={descriptionRef}
+                    className={`ws-description-text ${!descriptionExpanded && descriptionHasOverflow ? 'ws-description-text--clamped' : ''}`}
+                  >
+                    {productSpecs.overviewText}
+                  </p>
+                  {descriptionHasOverflow ? (
+                    <button
+                      type="button"
+                      className="ws-description-more"
+                      onClick={() => setDescriptionExpanded((value) => !value)}
+                      aria-expanded={descriptionExpanded}
+                      aria-controls={`product-description-${productId || 'detail'}`}
+                    >
+                      {descriptionExpanded ? 'Show less' : 'Read more'}
+                    </button>
+                  ) : null}
+                </>
               ) : null}
             </div>
           ) : null}
@@ -2246,9 +2365,37 @@ const ProductDetail = ({ categoryId, productId, onBack }) => {
         }
 
         .ws-breadcrumb {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          flex-wrap: wrap;
           padding: 14px 18px 0;
           font-size: 11.5px;
           color: ${T.inkSoft};
+        }
+
+        .ws-breadcrumb-link {
+          border: 0;
+          background: none;
+          padding: 0;
+          color: inherit;
+          font: inherit;
+          cursor: pointer;
+          text-align: left;
+        }
+
+        .ws-breadcrumb-link:active {
+          opacity: 0.72;
+        }
+
+        .ws-breadcrumb-link:focus-visible {
+          outline: 2px solid ${T.clay};
+          outline-offset: 3px;
+          border-radius: 4px;
+        }
+
+        .ws-breadcrumb-separator {
+          color: ${T.inkFaint};
         }
 
         .ws-price-row {
@@ -2394,7 +2541,6 @@ const ProductDetail = ({ categoryId, productId, onBack }) => {
         }
 
         .ws-attr-group--panel {
-          padding: 0 14px 0 14px;
           border-radius: 18px;
         }
 
@@ -2425,16 +2571,87 @@ const ProductDetail = ({ categoryId, productId, onBack }) => {
         }
 
         .ws-description-group {
-          padding: 12px 14px;
           border-radius: 16px;
+          margin-top: 16px;
           
         }
 
         .ws-description-title {
           font-size: 15px;
           font-weight: 700;
-          margin-bottom: 8px;
+          margin-bottom: 18px;
           color: ${THEME.buttonBg};
+        }
+
+        .ws-description-subtitle {
+          margin: 14px 0 7px;
+          color: ${THEME.buttonBg};
+          font-size: 13px;
+          font-weight: 800;
+        }
+
+        .ws-spec-tabs {
+          display: flex;
+          gap: 8px;
+          margin: 12px 0 10px;
+          padding-bottom: 2px;
+          overflow-x: auto;
+          -ms-overflow-style: none;
+          scrollbar-width: none;
+        }
+
+        .ws-spec-tabs::-webkit-scrollbar {
+          display: none;
+        }
+
+        .ws-spec-tab {
+          flex: 0 0 auto;
+          min-height: 38px;
+          max-width: 170px;
+          padding: 0 14px;
+          border-radius: 8px;
+          border: 1px solid ${T.line};
+          background: ${T.bg};
+          color: ${THEME.text};
+          font-size: 13px;
+          font-weight: 700;
+          white-space: nowrap;
+          cursor: pointer;
+        }
+
+        .ws-spec-tab--active {
+          border: 2px solid ${THEME.buttonBg};
+          color: ${THEME.buttonBg};
+          box-shadow: 0 6px 14px color-mix(in srgb, ${THEME.buttonBg} 12%, transparent);
+        }
+
+        .ws-spec-table {
+          border-top: 1px solid ${T.line};
+        }
+
+        .ws-spec-row {
+          display: grid;
+          grid-template-columns: minmax(104px, 36%) minmax(0, 1fr);
+          gap: 14px;
+          padding: 11px 0;
+          border-bottom: 1px solid ${T.line};
+        }
+
+        .ws-spec-key {
+          color: ${THEME.buttonBg};
+          font-size: 13px;
+          font-weight: 800;
+          line-height: 1.35;
+          overflow-wrap: anywhere;
+        }
+
+        .ws-spec-value {
+          color: color-mix(in srgb, ${THEME.surface} 78%, ${THEME.text} 22%);
+          font-size: 13px;
+          font-weight: 600;
+          line-height: 1.45;
+          overflow-wrap: anywhere;
+          white-space: pre-line;
         }
 
         .ws-description-text {

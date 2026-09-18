@@ -1,9 +1,9 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { fetchGalleryFoldersPaginated, fetchPhotosByFolderPaginated } from '../services/galleryService';
 
-const GALLERY_CONTEXT_VERSION = 5;
-const GALLERY_CACHE_KEY_PREFIX = 'gallery_normalized_cache_v5';
-const LEGACY_GALLERY_CACHE_KEY = 'gallery_normalized_cache_v4';
+const GALLERY_CONTEXT_VERSION = 6;
+const GALLERY_CACHE_KEY_PREFIX = 'gallery_normalized_cache_v6';
+const LEGACY_GALLERY_CACHE_KEY = null;
 const ALBUMS_META_TTL_MS = 20 * 60 * 1000; // 20 mins
 const ALBUM_DETAIL_TTL_MS = 12 * 60 * 1000; // 12 mins
 const PAGE_TTL_MS = 12 * 60 * 1000; // 12 mins
@@ -51,6 +51,16 @@ const dedupeImagesById = (images = []) => {
     result.push(image);
   }
   return result;
+};
+
+const pickObjectKeys = (source = {}, allowedIds = new Set()) => {
+  const next = {};
+  Object.entries(source || {}).forEach(([id, value]) => {
+    if (allowedIds.has(String(id))) {
+      next[id] = value;
+    }
+  });
+  return next;
 };
 
 const createEmptyStore = (trustId = null) => ({
@@ -104,11 +114,11 @@ const readPersistedStoreForTrust = (requestedTrustId) => {
       }
     }
 
-    const legacyRaw = localStorage.getItem(LEGACY_GALLERY_CACHE_KEY);
+    const legacyRaw = LEGACY_GALLERY_CACHE_KEY ? localStorage.getItem(LEGACY_GALLERY_CACHE_KEY) : null;
     if (legacyRaw) {
       const legacyParsed = JSON.parse(legacyRaw);
       if (
-        legacyParsed?.version === 4
+        legacyParsed?.version === GALLERY_CONTEXT_VERSION - 1
         && normalizeTrustId(legacyParsed?.trustId) === trustId
         && legacyParsed?.data
       ) {
@@ -329,7 +339,8 @@ export function GalleryProvider({ children }) {
       try {
         const { folders, hasMore, previewsByFolder } = await fetchAlbumsMetaPage(activeTrustId, safePage);
         const pageAlbumIds = [];
-        const nextAlbumsById = { ...sourceAlbumsById };
+        const isAuthoritativeFirstPage = safePage === 1 && replaceFirstPage;
+        const nextAlbumsById = isAuthoritativeFirstPage ? {} : { ...sourceAlbumsById };
 
         folders.forEach((folder) => {
           const id = String(folder.id);
@@ -348,8 +359,7 @@ export function GalleryProvider({ children }) {
         const nextAlbumOrder = (() => {
           const existing = [...sourceAlbumOrder];
           if (safePage === 1 && replaceFirstPage) {
-            const remaining = existing.filter((id) => !pageAlbumIds.includes(id));
-            return [...pageAlbumIds, ...remaining];
+            return pageAlbumIds;
           }
           const seen = new Set(existing);
           pageAlbumIds.forEach((id) => {
@@ -360,20 +370,29 @@ export function GalleryProvider({ children }) {
           return existing;
         })();
 
+        const validAlbumIds = new Set(nextAlbumOrder.map(String));
+
         const nextAlbumListPages = {
-          ...sourceAlbumListPages,
+          ...(isAuthoritativeFirstPage ? {} : sourceAlbumListPages),
           [safePage]: pageAlbumIds,
         };
+        const nextAlbumDetails = isAuthoritativeFirstPage
+          ? pickObjectKeys(sourceAlbumDetails, validAlbumIds)
+          : sourceAlbumDetails;
 
         const now = Date.now();
         const nextTimestamps = {
           albumsMeta: now,
           albumListPages: {
-            ...(sourceCacheTimestamps.albumListPages || {}),
+            ...(isAuthoritativeFirstPage ? {} : (sourceCacheTimestamps.albumListPages || {})),
             [safePage]: now,
           },
-          albumDetails: { ...(sourceCacheTimestamps.albumDetails || {}) },
-          pages: { ...(sourceCacheTimestamps.pages || {}) },
+          albumDetails: isAuthoritativeFirstPage
+            ? pickObjectKeys(sourceCacheTimestamps.albumDetails || {}, validAlbumIds)
+            : { ...(sourceCacheTimestamps.albumDetails || {}) },
+          pages: isAuthoritativeFirstPage
+            ? pickObjectKeys(sourceCacheTimestamps.pages || {}, validAlbumIds)
+            : { ...(sourceCacheTimestamps.pages || {}) },
         };
         const nextPage = hasMore ? (safePage + 1) : safePage;
 
@@ -384,7 +403,7 @@ export function GalleryProvider({ children }) {
           albumListPages: nextAlbumListPages,
           hasMoreAlbums: hasMore,
           nextAlbumPage: nextPage,
-          albumDetails: sourceAlbumDetails,
+          albumDetails: nextAlbumDetails,
           cacheTimestamps: nextTimestamps,
           lastFetchTime: now,
         };
@@ -394,6 +413,7 @@ export function GalleryProvider({ children }) {
         setAlbumListPages(nextAlbumListPages);
         setHasMoreAlbums(hasMore);
         setNextAlbumPage(nextPage);
+        setAlbumDetails(nextAlbumDetails);
         setCacheTimestamps(nextTimestamps);
         setLastFetchTime(now);
         setError(null);

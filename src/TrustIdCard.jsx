@@ -9,6 +9,7 @@ import { getProfile } from './services/api';
 import { fetchTrustById } from './services/trustService';
 import { applyOpacity } from './utils/colorUtils';
 import { getNavbarThemeStyles, getThemeToken } from './utils/themeUtils';
+import { getAppHomePath } from './utils/tenantNavigation';
 
 const SecureScreen = registerPlugin('SecureScreen');
 
@@ -297,7 +298,7 @@ const TrustIdCard = ({ onNavigate, cardData: cardDataProp = null, embedded = fal
       onNavigate('home');
       return;
     }
-    navigate('/');
+    navigate(getAppHomePath());
   };
 
   return (

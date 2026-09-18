@@ -7,6 +7,7 @@ import { getProfilePhotos } from './services/api';
 import { getNavbarThemeStyles } from './utils/themeUtils';
 import { applyOpacity } from './utils/colorUtils';
 import { MEMBER_PRIVACY_UPDATED_EVENT, matchesMemberIdentity } from './utils/memberIdentity';
+import { getAppHomePath } from './utils/tenantNavigation';
 import Sidebar from './features/sidebar/Sidebar';
 
 const MEMBERS_PER_PAGE = 20;
@@ -88,7 +89,8 @@ const readCurrentUserPhotoCache = () => {
   }
 };
 
-const Directory = ({ onNavigate }) => {
+export const DirectoryContent = ({ onNavigate, variant = 'page' }) => {
+  const isPageVariant = variant === 'page';
   const navigate = useNavigate();
   const theme = useAppTheme();
   const navbarTheme = getNavbarThemeStyles(theme);
@@ -517,16 +519,18 @@ const Directory = ({ onNavigate }) => {
             </button>
           </div>
         </div>
-      </div>
+      )}
 
-      {isMenuOpen && (
+      {isPageVariant && isMenuOpen && (
         <div
           className="fixed inset-0 z-25"
           style={{ background: applyOpacity('var(--brand-navy-dark)', 0.12) }}
           onClick={() => setIsMenuOpen(false)}
         />
       )}
-      <Sidebar isOpen={isMenuOpen} onClose={() => setIsMenuOpen(false)} onNavigate={onNavigate} currentPage="directory" />
+      {isPageVariant && (
+        <Sidebar isOpen={isMenuOpen} onClose={() => setIsMenuOpen(false)} onNavigate={onNavigate} currentPage="directory" />
+      )}
 
       {/* <div className="px-4 pt-4 grid grid-cols-1 gap-2 sm:grid-cols-[1fr_220px]"> */}
       <div className="directory-search-row px-4 pt-4 flex items-center gap-2 w-full justify-between">
@@ -1127,5 +1131,7 @@ const Directory = ({ onNavigate }) => {
     </div>
   );
 };
+
+const Directory = ({ onNavigate }) => <DirectoryContent onNavigate={onNavigate} variant="page" />;
 
 export default Directory;

@@ -37,6 +37,54 @@
 .app-route-shell h6 {
 	color: var(--heading-color, #111827);
 }
+.other-memberships-page {
+	background:
+		radial-gradient(circle at 50% -18%, rgba(226,178,39,0.16), transparent 34%),
+		linear-gradient(180deg, #171722 0%, #1f1d2b 100%);
+	color: var(--body-text-color);
+}
+
+.other-memberships-header {
+	margin: 0 3px;
+	background: var(--navbar-bg, var(--app-navbar-bg)) !important;
+	color: var(--navbar-text) !important;
+	border-bottom: 1px solid var(--navbar-border) !important;
+}
+
+.other-memberships-content {
+	padding: 16px 12px 34px;
+}
+
+.other-membership-card img,
+.other-membership-card > div > div > img {
+	border: 1px solid rgba(226,178,39,0.5) !important;
+}
+
+.other-membership-card--light img,
+.other-membership-card--light > div > div > img {
+	border: 1px solid color-mix(in srgb, var(--app-accent, var(--brand-red)) 50%, transparent) !important;
+}
+
+@media (max-width: 560px) {
+	.other-memberships-content {
+		padding: 14px 12px 34px;
+	}
+
+	.other-memberships-header {
+		margin: 0;
+	}
+
+	.other-memberships-grid {
+		column-gap: 10px !important;
+		row-gap: 12px !important;
+	}
+}
+
+/* ── Other Membership Card marquee animation ─────────────────────────────── */
+@keyframes om-marquee-scroll {
+  0%   { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
+}
 
 @media (min-width: 1024px) {
 	.app-root-shell.has-desktop-sidebar {

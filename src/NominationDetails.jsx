@@ -6,6 +6,7 @@ import { applyOpacity } from './utils/colorUtils';
 import { getFamilyMembers } from './services/api';
 import { supabase } from './services/supabaseClient';
 import { getNavbarThemeStyles } from './utils/themeUtils';
+import { getAppHomePath } from './utils/tenantNavigation';
 import Sidebar from './features/sidebar/Sidebar';
 
 const resolveInitialMemberships = () => {
@@ -392,7 +393,7 @@ const NominationDetails = ({ onNavigate }) => {
             <h1 className="text-lg font-extrabold tracking-wide" style={{ color: navbarTextColor }}>Nomination Details</h1>
             <button
               type="button"
-              onClick={() => navigate('/')}
+              onClick={() => navigate(getAppHomePath())}
               className="p-2 rounded-xl transition-colors"
               style={{ color: navbarTextColor, background: 'transparent' }}
               aria-label="Home"

@@ -6,6 +6,7 @@ import {
   Menu, Home as HomeIcon, FolderOpen, Play, Pause, ArrowLeft
 } from 'lucide-react';
 import Sidebar from './features/sidebar/Sidebar';
+import { getAppHomePath } from './utils/tenantNavigation';
 
 function FolderCover({ photos, folderName }) {
   const [p1Err, setP1Err] = useState(false);
@@ -145,7 +146,8 @@ function buildPaginationItems(currentPage, totalPages) {
   return items;
 }
 
-export function Gallery({ onNavigate }) {
+export function GalleryContent({ onNavigate, variant = 'page' }) {
+  const isPageVariant = variant === 'page';
   const navigate = useNavigate();
   const {
     trustId,
@@ -428,10 +430,30 @@ export function Gallery({ onNavigate }) {
           </span>
         </div>
 
-        <button onClick={() => navigate('/')} style={nb.iconBtn}>
-          <HomeIcon style={{ width: 22, height: 22, color: 'var(--app-button-text, var(--surface-color))' }} />
-        </button>
-      </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            {selectedAlbumId && (
+              <button
+                onClick={() => {
+                  setSelectedAlbumId(null);
+                  setAlbumPageImages([]);
+                  setAlbumTotalPages(0);
+                  setCurrentPage(1);
+                }}
+                style={{ ...nb.iconBtn, width: 34, height: 34, background: 'color-mix(in srgb, var(--surface-color) 18%, transparent)', marginRight: 2 }}
+              >
+                <ArrowLeft style={{ width: 18, height: 18, color: 'var(--app-button-text, var(--surface-color))' }} />
+              </button>
+            )}
+            <span style={{ color: 'var(--app-button-text, var(--surface-color))', fontWeight: 800, fontSize: 17, letterSpacing: '-0.3px' }}>
+              {selectedAlbumId ? (selectedAlbum?.name || 'Album') : 'Gallery'}
+            </span>
+          </div>
+
+          <button onClick={() => navigate(getAppHomePath())} style={nb.iconBtn}>
+            <HomeIcon style={{ width: 22, height: 22, color: 'var(--app-button-text, var(--surface-color))' }} />
+          </button>
+        </div>
+      )}
 
       <div className="gallery-content" style={{ padding: '16px 14px 40px', maxWidth: 520, margin: '0 auto' }}>
         {isLoading && !showLoadingFallback && !hasSettledInitialAlbums && (
@@ -599,7 +621,9 @@ export function Gallery({ onNavigate }) {
         )}
       </div>
 
-      <Sidebar isOpen={isMenuOpen} onClose={() => setIsMenuOpen(false)} onNavigate={onNavigate} currentPage="gallery" />
+      {isPageVariant && (
+        <Sidebar isOpen={isMenuOpen} onClose={() => setIsMenuOpen(false)} onNavigate={onNavigate} currentPage="gallery" />
+      )}
 
       {selectedImage && (
         <div
@@ -1024,6 +1048,10 @@ const pg = {
     userSelect: 'none',
   },
 };
+
+export function Gallery({ onNavigate }) {
+  return <GalleryContent onNavigate={onNavigate} variant="page" />;
+}
 
 export default Gallery;
 

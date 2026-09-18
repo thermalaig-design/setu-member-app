@@ -89,7 +89,7 @@ export const getStatusMeta = (rawStatus) => {
 export const normalizeOrderLine = (item, index) => {
   if (typeof item === 'string') {
     const name = normalizeText(item);
-    return name ? { key: `${index}`, name, quantity: 1 } : null;
+    return name ? { key: `line-${index}`, name, quantity: 1 } : null;
   }
 
   if (!item || typeof item !== 'object') return null;
@@ -108,7 +108,7 @@ export const normalizeOrderLine = (item, index) => {
   const quantity = Number.isFinite(quantityValue) && quantityValue > 0 ? Math.floor(quantityValue) : 1;
 
   return {
-    key: normalizeText(item.id || item.product_id || item.sku || `${index}`) || `${index}`,
+    key: normalizeText(item.id || item.product_id || item.sku) || `line-${index}`,
     name,
     quantity,
   };
@@ -183,7 +183,7 @@ export const normalizeOrderRecord = (order, index) => {
     const singleProductName = normalizeText(order.product_name || order.productName);
     if (singleProductName) {
       items = [{
-        key: normalizeText(order.product_price_id || order.productPriceId || order.id) || '0',
+        key: normalizeText(order.product_price_id || order.productPriceId || order.id) || `line-${index}`,
         name: singleProductName,
         quantity: Number.isFinite(Number(order.quantity)) && Number(order.quantity) > 0 ? Math.floor(Number(order.quantity)) : 1,
       }];

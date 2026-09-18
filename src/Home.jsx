@@ -1,10 +1,28 @@
 import React, { useState, useEffect, useRef, useMemo, memo } from 'react';
 import { User, Users, Clock, FileText, UserPlus, Bell, ChevronRight, Heart, Shield, Plus, ArrowRight, Pill, ShoppingCart, Calendar, Stethoscope, Building2, QrCode, Monitor, Brain, Package, FileCheck, Search, Filter, Star, HelpCircle, BookOpen, Video, Headphones, Menu, X, Home as HomeIcon, Settings, UserCircle, Image, Trash2, Code, FolderOpen, Crown } from 'lucide-react';
 import Sidebar from './features/sidebar/Sidebar';
+import BottomNav from './components/BottomNav';
 import TermsModal from './components/TermsModal';
 import ImageSlider from './components/ImageSlider';
 import { getProfile, getMarqueeUpdates, getUserNotifications, markNotificationAsRead, markAllNotificationsAsRead, deleteNotification } from './services/api';
 import { useGalleryContext } from './context/GalleryContext';
+import { GalleryContent } from './Gallery';
+import { SponsorsContent } from './SponsorsList';
+import { NoticesContent } from './Notices';
+import { FacilitiesContent } from './Facilities';
+import { EventsContent } from './Events';
+import { AchievementsContent } from './Achievements';
+import { DonationContent } from './Donation';
+import { ReportsContent } from './Reports';
+import { DirectoryContent } from './Directory';
+import { ExecutiveBodyContent } from './ExecutiveBody';
+import { AppointmentsContent } from './Appointments';
+import { CategoriesProductsContent } from './CategoriesProducts';
+import { OrderHistoryContent } from './OrderHistory';
+import { ReferralContent } from './Referral';
+import { AddCommunityContent } from './AddCommunity';
+import { UserPanelContent } from './components/PersistentUserPanel';
+import { OtherMembershipsContent } from './OtherMemberships';
 import { useAppTheme } from './context/ThemeContext';
 import { registerSidebarState, useTrustDataVersion } from './hooks';
 import { supabase } from './services/supabaseClient';
@@ -12,7 +30,7 @@ import { clearLoginTermsPromptPending, isLoginTermsPromptPending, resolveLegalTr
 import { readNotificationCache, writeNotificationCache } from './services/notificationCache';
 import { getCurrentNotificationContext, matchesNotificationForContext } from './services/notificationAudience';
 import { fetchFeatureFlags, subscribeFeatureFlags, isFeatureVisible } from './services/featureFlags';
-import { fetchMemberTrusts, fetchTrustById, fetchDefaultTrust } from './services/trustService';
+import { fetchActiveTrustsByMobile, fetchMemberTrusts, fetchTrustById, fetchDefaultTrust } from './services/trustService';
 import {
   ensureAllSponsorsLoaded,
   getCachedCarouselBatch,
@@ -31,15 +49,120 @@ import {
   getFooterThemeStyles,
   getNavbarThemeStyles,
   getThemeToken,
-  normalizeHomeLayout
+  normalizeHomeLayout,
+  HOME_LAYOUT_MODE_KEY_ALIASES
 } from './utils/themeUtils';
 import { applyOpacity } from './utils/colorUtils';
 import { resolveNotificationRedirectRoute } from './services/notificationRedirectService';
 
+const toTitleCase = (value = '') =>
+  String(value || '')
+    .trim()
+    .replace(/\s+/g, ' ')
+    .replace(/\w\S*/g, (word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase());
+
+// Quick-action modules with a registered chrome-free *Content component.
+// route slug (matches enabledQuickActions[].route / theme.homeLayoutModes key) -> component.
+// Any route not listed here always renders as its normal tile, regardless of home_layout_modes,
+// so DB values for not-yet-supported features degrade safely instead of breaking anything.
+const HOME_CONTENT_RENDERERS = {
+  gallery: GalleryContent,
+  sponsors: SponsorsContent,
+  notices: NoticesContent,
+  facilities: FacilitiesContent,
+  events: EventsContent,
+  achievements: AchievementsContent,
+  donation: DonationContent,
+  reports: ReportsContent,
+  directory: DirectoryContent,
+  'executive-body': ExecutiveBodyContent,
+  appointment: AppointmentsContent,
+  products: CategoriesProductsContent,
+  'order-history': OrderHistoryContent,
+  reference: ReferralContent,
+  'add-community': AddCommunityContent,
+  'user-panel': UserPanelContent,
+  'other-memberships': OtherMembershipsContent,
+};
+
+// Resolves the box/content mode for a section, checking each candidate key (canonical
+// route slug and/or raw feature_flags name) both as an exact theme.homeLayoutModes key
+// and via HOME_LAYOUT_MODE_KEY_ALIASES. Falls back to "box" when nothing matches.
+const resolveHomeSectionMode = (theme, ...candidateKeys) => {
+  const modes = theme?.homeLayoutModes || {};
+  const isValidMode = (value) => value === 'box' || value === 'content';
+
+  for (const rawKey of candidateKeys) {
+    const key = String(rawKey || '').trim();
+    if (key && isValidMode(modes[key])) return modes[key];
+  }
+  for (const rawKey of candidateKeys) {
+    const normalizedKey = HOME_LAYOUT_MODE_KEY_ALIASES[String(rawKey || '').trim().toLowerCase()];
+    if (normalizedKey && isValidMode(modes[normalizedKey])) return modes[normalizedKey];
+  }
+  return 'box';
+};
+
 const DEFAULT_TRUST_NAME = import.meta.env.VITE_DEFAULT_TRUST_NAME || 'Trust';
 const SPONSOR_CHUNK_SIZE = sponsorConfig.CAROUSEL_BATCH_SIZE;
 const LAST_SELECTED_TRUST_ID_KEY = 'last_selected_trust_id';
+const PENDING_CREATED_APP_URL_KEY = 'pending_created_app_install_url';
+const PENDING_CREATED_APP_TS_KEY = 'pending_created_app_install_url_ts';
+const PENDING_CREATED_APP_REDIRECT_MAX_AGE_MS = 2 * 60 * 1000;
 const POWERED_BY_URL = 'https://teiltd.in';
+
+// Reads and validates a pending "just created this app, still finishing the
+// redirect to /app/<slug>" URL left by AddCommunity.jsx, clearing it if
+// stale/invalid. Called synchronously from a lazy useState initializer (see
+// below) so Home can skip painting its own branded content — instead of
+// only noticing this in a useEffect, which would always flash the current
+// trust's full Home UI (marquee, cards, navbar) first.
+const getValidPendingCreatedAppUrl = () => {
+  let pendingUrl = '';
+  let pendingTs = 0;
+  try {
+    pendingUrl = sessionStorage.getItem(PENDING_CREATED_APP_URL_KEY)
+      || localStorage.getItem(PENDING_CREATED_APP_URL_KEY)
+      || '';
+    pendingTs = Number(
+      sessionStorage.getItem(PENDING_CREATED_APP_TS_KEY)
+      || localStorage.getItem(PENDING_CREATED_APP_TS_KEY)
+      || 0
+    );
+  } catch {
+    return '';
+  }
+
+  if (!pendingUrl) return '';
+
+  const clearPending = () => {
+    try {
+      sessionStorage.removeItem(PENDING_CREATED_APP_URL_KEY);
+      sessionStorage.removeItem(PENDING_CREATED_APP_TS_KEY);
+      localStorage.removeItem(PENDING_CREATED_APP_URL_KEY);
+      localStorage.removeItem(PENDING_CREATED_APP_TS_KEY);
+    } catch {
+      // ignore storage failures
+    }
+  };
+
+  if (pendingTs && Date.now() - pendingTs > PENDING_CREATED_APP_REDIRECT_MAX_AGE_MS) {
+    clearPending();
+    return '';
+  }
+
+  try {
+    const target = new URL(pendingUrl, window.location.origin);
+    if (target.origin !== window.location.origin || !target.pathname.startsWith('/app/')) {
+      clearPending();
+      return '';
+    }
+    return target.href;
+  } catch {
+    clearPending();
+    return '';
+  }
+};
 const getInitialSponsorTrustId = () =>
   localStorage.getItem('selected_trust_id') || import.meta.env.VITE_DEFAULT_TRUST_ID || '';
 const BASE_TRUST_ID = String(import.meta.env.VITE_DEFAULT_TRUST_ID || '').trim();
@@ -90,7 +213,7 @@ const readCachedTrustList = () => {
   }
 };
 
-const FEATURE_FLAGS_CACHE_PREFIX = 'feature_flags_cache_v3:';
+const FEATURE_FLAGS_CACHE_PREFIX = 'feature_flags_cache_v4:';
 const readInitialFeatureFlagsCache = (trustId) => {
   try {
     const normalizedTrustId = String(trustId || '').trim();
@@ -162,6 +285,21 @@ const buildCacheBustedIconUrl = (iconUrl, versionToken) => {
   return `${src}${separator}v=${encodeURIComponent(String(versionToken))}`;
 };
 
+// Resolves a possibly-local asset path against Vite's configured base
+// ('/' in dev, '/_setu-app/' in production) instead of the hardcoded site
+// root. Local icons (e.g. '/icons/quick-access/notices.svg') are only ever
+// deployed under that base, so a bare '/' path resolves against the wrong
+// host location — most visibly on white-label tenant hosts. Full remote
+// URLs (Supabase storage, CDNs, data URIs) are left untouched.
+const resolveAssetUrl = (path) => {
+  const value = String(path || '').trim();
+  if (!value) return '';
+  if (/^([a-z][a-z0-9+.-]*:)?\/\//i.test(value) || value.startsWith('data:')) return value;
+  if (!value.startsWith('/')) return value;
+  const base = String(import.meta.env.BASE_URL || '/').replace(/\/+$/, '');
+  return `${base}${value}`;
+};
+
 const resolveTrustIconToken = (trust, fallback = '1') =>
   String(
     trust?.version ||
@@ -170,6 +308,33 @@ const resolveTrustIconToken = (trust, fallback = '1') =>
     trust?.icon_url ||
     fallback
   );
+
+const hasAuthoritativeApiMemberships = () => {
+  try {
+    const parsedUser = JSON.parse(localStorage.getItem('user') || 'null');
+    return Boolean(parsedUser?.trusts_loaded_from_active_api)
+      || Array.isArray(parsedUser?.hospital_memberships)
+      && parsedUser.hospital_memberships.some((membership) => membership?.source === 'active_trusts_by_mobile');
+  } catch {
+    return false;
+  }
+};
+
+const getStoredUserForTrustApi = () => {
+  try {
+    const parsedUser = JSON.parse(localStorage.getItem('user') || 'null');
+    if (!parsedUser) return null;
+    const mobile = String(parsedUser?.mobile || parsedUser?.Mobile || parsedUser?.phone || '').replace(/\D/g, '').slice(-10);
+    if (!mobile) return null;
+    return {
+      ...parsedUser,
+      mobile,
+      name: normalizeMemberName(parsedUser?.name || parsedUser?.Name || '')
+    };
+  } catch {
+    return null;
+  }
+};
 
 const TrustChipIcon = memo(({ iconUrl, altText, versionToken, state }) => {
   const [failedSrc, setFailedSrc] = useState('');
@@ -199,6 +364,28 @@ const TrustChipIcon = memo(({ iconUrl, altText, versionToken, state }) => {
   && prevProps.versionToken === nextProps.versionToken
   && prevProps.state === nextProps.state
 ));
+
+// Quick-access tile icon: resolves local asset paths against the app's base
+// (see resolveAssetUrl) and falls back to a generic glyph if the URL is
+// missing or the image fails to load, instead of a broken-image placeholder.
+const QuickActionIcon = memo(({ src, alt }) => {
+  const [failedSrc, setFailedSrc] = useState('');
+  const resolvedSrc = resolveAssetUrl(src);
+  const hasValidIcon = Boolean(resolvedSrc) && failedSrc !== resolvedSrc;
+
+  if (!hasValidIcon) {
+    return <HelpCircle className="h-[18px] w-[18px]" style={{ color: 'var(--body-text-color)' }} />;
+  }
+
+  return (
+    <img
+      src={resolvedSrc}
+      alt={alt}
+      className="h-[18px] w-[18px] object-contain"
+      onError={() => setFailedSrc(resolvedSrc)}
+    />
+  );
+}, (prevProps, nextProps) => prevProps.src === nextProps.src && prevProps.alt === nextProps.alt);
 
 const normalizeMemberName = (value) => {
   const raw = String(value || '').trim();
@@ -250,6 +437,10 @@ const Home = ({ onNavigate, onLogout }) => {
     if (lowered === 'null' || lowered === 'undefined' || lowered === 'nan') return '';
     return normalized;
   };
+  // Computed synchronously (lazy initializer, not an effect) so the very
+  // first render already knows to skip Home's own branded content when a
+  // just-created-app redirect is still pending.
+  const [pendingCreatedAppUrl] = useState(() => getValidPendingCreatedAppUrl());
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const mainContainerRef = useRef(null);
   const channelRef = useRef(null);
@@ -258,6 +449,13 @@ const Home = ({ onNavigate, onLogout }) => {
   const trustChipRefs = useRef({});
   const trustSwitchAnimationTimerRef = useRef(null);
   const previousSelectedTrustIdRef = useRef('');
+
+  useEffect(() => {
+    if (!pendingCreatedAppUrl) return;
+    if (window.location.href !== pendingCreatedAppUrl) {
+      window.location.replace(pendingCreatedAppUrl);
+    }
+  }, [pendingCreatedAppUrl]);
 
   // Welcome strip: initialize from localStorage instantly to avoid delay
   const [userProfile, setUserProfile] = useState(() => getCachedUserProfileSnapshot());
@@ -299,8 +497,13 @@ const Home = ({ onNavigate, onLogout }) => {
     return null;
   });
 
-  // trustList: pre-populate from full trust list cache so selector shows instantly
+  const [strictTrustApiState, setStrictTrustApiState] = useState(() =>
+    getStoredUserForTrustApi() ? 'loading' : 'fallback'
+  );
+
+  // trustList: in strict API mode, start empty so stale cached chips do not flash.
   const [trustList, setTrustList] = useState(() => {
+    if (getStoredUserForTrustApi()) return [];
     try {
       const listCached = localStorage.getItem('trust_list_cache');
       if (listCached) {
@@ -489,6 +692,98 @@ const Home = ({ onNavigate, onLogout }) => {
   };
 
   useEffect(() => {
+    const storedUser = getStoredUserForTrustApi();
+    if (!storedUser) {
+      setStrictTrustApiState('fallback');
+      return undefined;
+    }
+
+    let active = true;
+    setStrictTrustApiState('loading');
+    setTrustList([]);
+
+    const loadApiTrusts = async () => {
+      try {
+        const result = await fetchActiveTrustsByMobile({
+          mobile: storedUser.mobile,
+          name: storedUser.name || null
+        });
+        if (!active) return;
+
+        const apiMemberships = Array.isArray(result?.memberships) ? result.memberships : [];
+        if (!result?.success || result?.member_found === false) {
+          setStrictTrustApiState('fallback');
+          return;
+        }
+
+        const apiTrusts = mergeUniqueTrusts(apiMemberships.map((membership) => ({
+          id: membership?.trust_id || membership?.id || null,
+          name: membership?.trust_name || null,
+          icon_url: membership?.trust_icon_url || null,
+          remark: membership?.trust_remark || null,
+          is_active: membership?.is_active !== false,
+          role: membership?.role || null,
+          membership_number: membership?.membership_number || null,
+          members_id: membership?.members_id || membership?.member_id || null,
+        })));
+
+        setTrustList(apiTrusts);
+        try { localStorage.setItem('trust_list_cache', JSON.stringify(apiTrusts)); } catch { /* ignore */ }
+
+        const nextUser = {
+          ...storedUser,
+          id: result?.member_id || storedUser?.id || null,
+          members_id: result?.member_id || storedUser?.members_id || null,
+          member_id: result?.member_id || storedUser?.member_id || null,
+          member_ids: result?.member_id ? [String(result.member_id)] : (storedUser?.member_ids || []),
+          Name: result?.member_name || storedUser?.Name || storedUser?.name || '',
+          name: result?.member_name || storedUser?.name || storedUser?.Name || '',
+          Mobile: result?.mobile || storedUser?.Mobile || storedUser?.mobile || '',
+          mobile: result?.mobile || storedUser?.mobile || storedUser?.Mobile || '',
+          hospital_memberships: apiMemberships,
+          trusts_loaded_from_active_api: true
+        };
+        try { localStorage.setItem('user', JSON.stringify(nextUser)); } catch { /* ignore */ }
+
+        const currentSelected = normalizeTrustId(localStorage.getItem('selected_trust_id') || selectedTrustId);
+        const selectedExists = apiTrusts.some((trust) => normalizeTrustId(trust?.id) === currentSelected);
+        const effectiveTrust = (selectedExists
+          ? apiTrusts.find((trust) => normalizeTrustId(trust?.id) === currentSelected)
+          : apiTrusts.find((trust) => trust?.is_active !== false) || apiTrusts[0]) || null;
+
+        if (effectiveTrust?.id) {
+          const effectiveTrustId = normalizeTrustId(effectiveTrust.id);
+          setSelectedTrustId(effectiveTrustId);
+          setTrustInfo(effectiveTrust);
+          localStorage.setItem('selected_trust_id', effectiveTrustId);
+          localStorage.setItem(LAST_SELECTED_TRUST_ID_KEY, effectiveTrustId);
+          if (effectiveTrust?.name) localStorage.setItem('selected_trust_name', effectiveTrust.name);
+          window.dispatchEvent(new CustomEvent('trust-changed', {
+            detail: { trustId: effectiveTrustId, trustName: effectiveTrust?.name || null }
+          }));
+        } else {
+          localStorage.removeItem('selected_trust_id');
+          localStorage.removeItem(LAST_SELECTED_TRUST_ID_KEY);
+          setSelectedTrustId('');
+          setTrustInfo(null);
+        }
+
+        hasLoadedMemberTrusts.current = true;
+        setStrictTrustApiState('success');
+      } catch (error) {
+        if (!active) return;
+        console.warn('[Home] Strict trust API failed, falling back:', error?.message || error);
+        setStrictTrustApiState('fallback');
+      }
+    };
+
+    loadApiTrusts();
+    return () => { active = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: strict refresh runs on mount from stored user
+  }, []);
+
+  useEffect(() => {
+    if (strictTrustApiState !== 'fallback') return undefined;
     let isActive = true;
     const loadDefaultTrust = async () => {
       try {
@@ -507,6 +802,7 @@ const Home = ({ onNavigate, onLogout }) => {
         if (isActive && trust) {
           const normalizedDefaultId = normalizeTrustId(trust.id);
           const currentSelected = normalizeTrustId(localStorage.getItem('selected_trust_id') || selectedTrustId);
+          const isApiAuthoritative = hasAuthoritativeApiMemberships();
 
           setDefaultTrust(trust);
           setTrustList((prev) => {
@@ -516,6 +812,7 @@ const Home = ({ onNavigate, onLogout }) => {
                 normalizeTrustId(t.id) === normalizedDefaultId ? { ...t, ...trust } : t
               );
             }
+            if (isApiAuthoritative) return prev || [];
             return [trust, ...(prev || [])];
           });
 
@@ -523,8 +820,10 @@ const Home = ({ onNavigate, onLogout }) => {
           // Also apply default when selected trust is just stale env id
           // that failed to resolve (common after env/db trust id changes).
           const shouldApplyDefaultSelection =
-            !currentSelected ||
-            (!resolvedViaEnv && normalizedEnvTrustId && currentSelected === normalizedEnvTrustId);
+            !isApiAuthoritative && (
+              !currentSelected ||
+              (!resolvedViaEnv && normalizedEnvTrustId && currentSelected === normalizedEnvTrustId)
+            );
           if (shouldApplyDefaultSelection) {
             setSelectedTrustId(normalizedDefaultId);
             localStorage.setItem('selected_trust_id', normalizedDefaultId);
@@ -541,7 +840,7 @@ const Home = ({ onNavigate, onLogout }) => {
     loadDefaultTrust();
     return () => { isActive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: run once on mount, selectedTrustId only read as an initial fallback
-  }, []);
+  }, [strictTrustApiState]);
   // Close sidebar when clicking outside
   useEffect(() => {
     const handleClickOutside = (event) => {
@@ -747,6 +1046,7 @@ const Home = ({ onNavigate, onLogout }) => {
 
   // Load trusts from user localStorage
   useEffect(() => {
+    if (strictTrustApiState === 'loading') return;
     const user = localStorage.getItem('user');
     if (!user) return;
     try {
@@ -781,9 +1081,11 @@ const Home = ({ onNavigate, onLogout }) => {
         localStorage.getItem('selected_trust_id') || selectedTrustId
       );
       const selectedExistsInMerged = mergedTrusts.some((t) => normalizeTrustId(t.id) === normalizedSelected);
+      const lastSelectedTrustId = normalizeTrustId(localStorage.getItem(LAST_SELECTED_TRUST_ID_KEY) || '');
+      const lastSelectedExistsInMerged = mergedTrusts.some((t) => normalizeTrustId(t.id) === lastSelectedTrustId);
       const effectiveTrustId =
         (selectedExistsInMerged ? normalizedSelected : '') ||
-        normalizeTrustId(localStorage.getItem(LAST_SELECTED_TRUST_ID_KEY) || '') ||
+        (lastSelectedExistsInMerged ? lastSelectedTrustId : '') ||
         normalizeTrustId(primaryTrust?.id) ||
         normalizeTrustId(defaultTrust?.id) ||
         normalizeTrustId(mergedTrusts[0]?.id) ||
@@ -814,7 +1116,7 @@ const Home = ({ onNavigate, onLogout }) => {
       console.warn('Could not parse user trust info:', error);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: re-run only when defaultTrust id changes; selectedTrustId/defaultTrust read fresh from localStorage/closure each run
-  }, [defaultTrust?.id]);
+  }, [defaultTrust?.id, strictTrustApiState]);
 
   // Hydrate trust visuals from Trust table so stale membership/cache values are corrected.
   useEffect(() => {
@@ -940,7 +1242,15 @@ const Home = ({ onNavigate, onLogout }) => {
               icon_url: freshTrust?.icon_url || trust?.icon_url || null,
             };
           });
-          const finalList = found ? next : [...next, freshTrust];
+          const hasStoredMembershipTrusts = (() => {
+            try {
+              const parsedUser = JSON.parse(localStorage.getItem('user') || 'null');
+              return Array.isArray(parsedUser?.hospital_memberships) && parsedUser.hospital_memberships.length > 0;
+            } catch {
+              return false;
+            }
+          })();
+          const finalList = found || hasStoredMembershipTrusts ? next : [...next, freshTrust];
           try { localStorage.setItem('trust_list_cache', JSON.stringify(finalList)); } catch { /* ignore */ }
           return finalList;
         });
@@ -998,11 +1308,45 @@ const Home = ({ onNavigate, onLogout }) => {
         name: m?.trust_name || null,
         icon_url: m?.trust_icon_url || null,
         remark: m?.trust_remark || null,
-        is_active: m?.is_active
+        is_active: m?.is_active,
+        role: m?.role || null,
+        membership_number: m?.membership_number || m?.['Membership number'] || null,
+        members_id: m?.members_id || m?.member_id || null,
       }))
       : [];
+    const hasAuthoritativeApiTrusts = strictTrustApiState === 'success' || Array.isArray(parsedUser?.hospital_memberships)
+      && parsedUser.hospital_memberships.some((membership) => membership?.source === 'active_trusts_by_mobile');
 
     console.log('📋 User derived trusts from hospital_memberships:', userDerivedTrusts.length, userDerivedTrusts.map(t => t.name).join(', '));
+
+    if (hasAuthoritativeApiTrusts) {
+      let apiTrusts = mergeUniqueTrusts(userDerivedTrusts);
+      apiTrusts = mergeTrustsWithExistingVisuals(apiTrusts, readCachedTrustList());
+      setTrustList(apiTrusts);
+      try { localStorage.setItem('trust_list_cache', JSON.stringify(apiTrusts)); } catch { /* ignore */ }
+
+      const normalizedSelected = normalizeTrustId(selectedTrustId);
+      const selectedExists = apiTrusts.some((trust) => normalizeTrustId(trust?.id) === normalizedSelected);
+      const effectiveTrust = (selectedExists
+        ? apiTrusts.find((trust) => normalizeTrustId(trust?.id) === normalizedSelected)
+        : apiTrusts.find((trust) => trust?.is_active !== false) || apiTrusts[0]) || null;
+
+      if (effectiveTrust?.id) {
+        const effectiveTrustId = normalizeTrustId(effectiveTrust.id);
+        if (effectiveTrustId !== selectedTrustId) {
+          setSelectedTrustId(effectiveTrustId);
+          localStorage.setItem('selected_trust_id', effectiveTrustId);
+          localStorage.setItem(LAST_SELECTED_TRUST_ID_KEY, effectiveTrustId);
+          window.dispatchEvent(new CustomEvent('trust-changed', {
+            detail: { trustId: effectiveTrustId, trustName: effectiveTrust?.name || null }
+          }));
+        }
+        setTrustInfo(effectiveTrust);
+        if (effectiveTrust.name) localStorage.setItem('selected_trust_name', effectiveTrust.name);
+      }
+      hasLoadedMemberTrusts.current = true;
+      return;
+    }
 
     const fallbackIdsFromMemberships = Array.isArray(parsedUser?.hospital_memberships)
       ? parsedUser.hospital_memberships.map((m) => m?.members_id).filter(Boolean)
@@ -1075,9 +1419,11 @@ const Home = ({ onNavigate, onLogout }) => {
         });
         const normalizedSelected = normalizeTrustId(selectedTrustId);
         const selectedExistsInFinalList = withDefault.some((t) => normalizeTrustId(t.id) === normalizedSelected);
+        const lastSelectedTrustId = normalizeTrustId(localStorage.getItem(LAST_SELECTED_TRUST_ID_KEY) || '');
+        const lastSelectedExistsInFinalList = withDefault.some((t) => normalizeTrustId(t.id) === lastSelectedTrustId);
         const effectiveTrustId =
           (selectedExistsInFinalList ? normalizedSelected : '') ||
-          normalizeTrustId(localStorage.getItem(LAST_SELECTED_TRUST_ID_KEY) || '') ||
+          (lastSelectedExistsInFinalList ? lastSelectedTrustId : '') ||
           normalizeTrustId(primaryTrust?.id) ||
           normalizeTrustId(withDefault[0]?.id) ||
           '';
@@ -1108,7 +1454,7 @@ const Home = ({ onNavigate, onLogout }) => {
       }
     };
     loadMemberTrusts();
-  }, [selectedTrustId, defaultTrust?.id]);
+  }, [selectedTrustId, defaultTrust?.id, strictTrustApiState]);
 
 
   // Feature flags
@@ -1137,6 +1483,20 @@ const Home = ({ onNavigate, onLogout }) => {
 
   const handleTrustSelect = async (trustId) => {
     const normalizedId = normalizeTrustId(trustId);
+    const isApiAuthoritative = hasAuthoritativeApiMemberships();
+    const selectedFromList = (trustList || []).find((t) => normalizeTrustId(t.id) === normalizedId) || null;
+    if (isApiAuthoritative && !selectedFromList) {
+      const fallbackTrust = (trustList || []).find((trust) => trust?.is_active !== false) || trustList?.[0] || null;
+      const fallbackTrustId = normalizeTrustId(fallbackTrust?.id);
+      if (fallbackTrustId) {
+        setSelectedTrustId(fallbackTrustId);
+        setTrustInfo(fallbackTrust);
+        localStorage.setItem('selected_trust_id', fallbackTrustId);
+        localStorage.setItem(LAST_SELECTED_TRUST_ID_KEY, fallbackTrustId);
+        if (fallbackTrust?.name) localStorage.setItem('selected_trust_name', fallbackTrust.name);
+      }
+      return;
+    }
     if (normalizedId === normalizeTrustId(selectedTrustId)) return;
     console.log(`🔄 Switching trust from "${selectedTrustId}" to "${normalizedId}"`);
 
@@ -1168,7 +1528,7 @@ const Home = ({ onNavigate, onLogout }) => {
     localStorage.setItem(LAST_SELECTED_TRUST_ID_KEY, normalizedId);
     setSessionSelectionFlag();
 
-    const selected = trustList.find((t) => normalizeTrustId(t.id) === normalizedId) || null;
+    const selected = selectedFromList;
     setTrustInfo(selected);
     if (selected?.name) {
       localStorage.setItem('selected_trust_name', selected.name);
@@ -1927,6 +2287,9 @@ const Home = ({ onNavigate, onLogout }) => {
   };
 
   const ff = (key) => isFeatureVisible(featureFlags, key);
+  const normalizeDisplayInApp = (value) => String(value || 'home').trim().toLowerCase();
+  const isFeaturePlacedInHome = (key) => normalizeDisplayInApp(flagsData?.[key]?.display_in_app) === 'home';
+  const showMemberBannerFeature = ff('feature_member_banner');
   const normalizeQuickRoute = (route) => {
     const raw = String(route || '').trim().toLowerCase();
     const value = raw
@@ -1946,6 +2309,9 @@ const Home = ({ onNavigate, onLogout }) => {
     if (value === 'directory' || value === 'healthcare-trustee-directory') return 'directory';
     if (value === 'product' || value === 'products' || value === 'categories-products' || value === 'categoriesproducts') return 'products';
     if (value === 'order-history' || value === 'order_history' || value === 'order history' || value === 'orderhistory') return 'order-history';
+    if (value === 'add-community' || value === 'add_community' || value === 'addcommunity' || value === 'launch-app' || value === 'launch app' || value === 'launch your app') return 'add-community';
+    if (value === 'app-gallery' || value === 'app_gallery' || value === 'app gallery' || value === 'other-memberships' || value === 'other_memberships' || value === 'othermemberships') return 'other-memberships';
+    if (value === 'user-panel' || value === 'user_panel' || value === 'userpanel' || value === 'bottom-nav' || value === 'bottom_nav' || value === 'bottomnav') return 'user-panel';
     return value || '';
   };
 
@@ -1954,6 +2320,9 @@ const Home = ({ onNavigate, onLogout }) => {
     feature_product: 'products',
     feature_products: 'products',
     feature_order_history: 'order-history',
+    feature_othermembership: 'other-memberships',
+    feature_add_community: 'add-community',
+    feature_bottom_nav: 'user-panel',
   };
 
   const resolveQuickRoute = (route, featureKey = '') => {
@@ -1979,6 +2348,8 @@ const Home = ({ onNavigate, onLogout }) => {
       reports: '/icons/quick-access/reports.svg',
       products: '/icons/quick-access/products.svg',
       'order-history': '/icons/quick-access/order-history.svg',
+      'add-community': '/icons/quick-access/directory.svg',
+      'user-panel': '/icons/quick-access/directory.svg',
     };
     return iconByRoute[normalized] || '/icons/quick-access/directory.svg';
   };
@@ -1988,10 +2359,9 @@ const Home = ({ onNavigate, onLogout }) => {
     .filter(([key, data]) => (
       Boolean(key)
       && data?.is_enabled
-      && key !== 'feature_add_community'
+      && normalizeDisplayInApp(data?.display_in_app) === 'home'
       && key !== 'feature_nomination_details'
       && key !== 'feature_nomination'
-      && normalizeQuickRoute(data?.route) !== 'add-community'
       && normalizeQuickRoute(data?.route) !== 'nomination-details'
       && normalizeQuickRoute(data?.route) !== 'nomination'
       && Boolean(resolveQuickRoute(data?.route, key))
@@ -2001,7 +2371,7 @@ const Home = ({ onNavigate, onLogout }) => {
       return {
         id: key,
         route,
-        displayName: data.display_name,
+        displayName: toTitleCase(data.display_name),
         tagline: data.tagline,
         icon_url: resolveQuickIcon(route, data.icon_url),
         quick_order: data.quick_order ?? null,
@@ -2010,7 +2380,7 @@ const Home = ({ onNavigate, onLogout }) => {
 
   // Fallback tiles only mirror existing enabled rows. Deleted rows are not resurrected here.
   const fallbackQuickActions = [
-    ff('feature_directory') ? {
+    ff('feature_directory') && isFeaturePlacedInHome('feature_directory') ? {
       id: 'feature_directory_fallback',
       route: 'directory',
       displayName: 'Directory',
@@ -2018,7 +2388,7 @@ const Home = ({ onNavigate, onLogout }) => {
       icon_url: '/icons/quick-access/directory.svg',
       quick_order: 50,
     } : null,
-    ff('feature_opd') ? {
+    ff('feature_opd') && isFeaturePlacedInHome('feature_opd') ? {
       id: 'feature_opd_fallback',
       route: 'appointment',
       displayName: 'OPD',
@@ -2026,7 +2396,7 @@ const Home = ({ onNavigate, onLogout }) => {
       icon_url: '/icons/quick-access/opd.svg',
       quick_order: 60,
     } : null,
-    ff('feature_referral') ? {
+    ff('feature_referral') && isFeaturePlacedInHome('feature_referral') ? {
       id: 'feature_referral_fallback',
       route: 'reference',
       displayName: 'Referral',
@@ -2034,7 +2404,7 @@ const Home = ({ onNavigate, onLogout }) => {
       icon_url: '/icons/quick-access/referral.svg',
       quick_order: 70,
     } : null,
-    ff('feature_reports') ? {
+    ff('feature_reports') && isFeaturePlacedInHome('feature_reports') ? {
       id: 'feature_reports_fallback',
       route: 'reports',
       displayName: 'Reports',
@@ -2042,7 +2412,7 @@ const Home = ({ onNavigate, onLogout }) => {
       icon_url: '/icons/quick-access/reports.svg',
       quick_order: 75,
     } : null,
-    ff('feature_noticeboard') ? {
+    ff('feature_noticeboard') && isFeaturePlacedInHome('feature_noticeboard') ? {
       id: 'feature_noticeboard_fallback',
       route: 'notices',
       displayName: 'Noticeboard',
@@ -2050,7 +2420,7 @@ const Home = ({ onNavigate, onLogout }) => {
       icon_url: '/icons/quick-access/noticeboard.svg',
       quick_order: 80,
     } : null,
-    ff('feature_facilities') ? {
+    ff('feature_facilities') && isFeaturePlacedInHome('feature_facilities') ? {
       id: 'feature_facilities_fallback',
       route: 'facilities',
       displayName: 'Facilities',
@@ -2058,7 +2428,7 @@ const Home = ({ onNavigate, onLogout }) => {
       icon_url: '/icons/quick-access/facilities.svg',
       quick_order: 85,
     } : null,
-    ff('feature_events') ? {
+    ff('feature_events') && isFeaturePlacedInHome('feature_events') ? {
       id: 'feature_events_fallback',
       route: 'events',
       displayName: 'Events',
@@ -2066,7 +2436,7 @@ const Home = ({ onNavigate, onLogout }) => {
       icon_url: '/icons/quick-access/events.svg',
       quick_order: 90,
     } : null,
-    ff('feature_achievements') ? {
+    ff('feature_achievements') && isFeaturePlacedInHome('feature_achievements') ? {
       id: 'feature_achievements_fallback',
       route: 'achievements',
       displayName: 'Achievements',
@@ -2074,7 +2444,7 @@ const Home = ({ onNavigate, onLogout }) => {
       icon_url: '/icons/quick-access/directory.svg',
       quick_order: 92,
     } : null,
-    ff('feature_donation') ? {
+    ff('feature_donation') && isFeaturePlacedInHome('feature_donation') ? {
       id: 'feature_donation_fallback',
       route: 'donation',
       displayName: 'Donation',
@@ -2091,14 +2461,14 @@ const Home = ({ onNavigate, onLogout }) => {
         'gallery',
         'notifications',
         'notification',
-        'add-community',
         'nomination',
         'nomination-details',
         'developers',
         'developer-info',
         'developerinfo',
         'trustlist',
-        'trust-list'
+        'trust-list',
+        'user-panel'
       ]);
       return !excludedQuickRoutes.has(normalizedRoute);
     })
@@ -2114,12 +2484,15 @@ const Home = ({ onNavigate, onLogout }) => {
 
   const activeTrust = useMemo(() => (
     trustList.find((trust) => normalizeTrustId(trust?.id) === normalizeTrustId(selectedTrustId)) ||
-    trustInfo ||
-    defaultTrust ||
+    (trustList.length === 0 ? trustInfo : null) ||
+    (trustList.length === 0 ? defaultTrust : null) ||
     null
   ), [selectedTrustId, trustList, trustInfo, defaultTrust]);
 
-  const selectedTrust = activeTrust;
+  const selectedTrust = useMemo(() => {
+    if (!Array.isArray(trustList) || trustList.length === 0) return activeTrust;
+    return trustList.find((trust) => normalizeTrustId(trust?.id) === normalizeTrustId(activeTrust?.id)) || null;
+  }, [activeTrust, trustList]);
   const otherTrusts = useMemo(() => {
     if (!Array.isArray(trustList) || trustList.length === 0) return [];
     const normalizedSelectedTrustId = normalizeTrustId(selectedTrustId);
@@ -2248,7 +2621,7 @@ const Home = ({ onNavigate, onLogout }) => {
     );
   };
 
-  const shouldShowTrustSelector = trustList.length > 0;
+  const shouldShowTrustSelector = trustList.length > 0 && ff('feature_trustlist');
   const showTrustSelector = shouldShowTrustSelector;
   const surfaceColor = getThemeToken(theme, 'accent_bg', null)
     || theme?.accentBg
@@ -2333,6 +2706,38 @@ const Home = ({ onNavigate, onLogout }) => {
 
     return mergedLayout;
   }, [theme?.homeLayout]);
+
+  // A just-created-app redirect is still pending (see getValidPendingCreatedAppUrl
+  // above and the effect that fires it) — never paint this trust's own Home
+  // content (navbar, marquee, cards) in that window, or it flashes before the
+  // redirect to /app/<slug> takes over. Neutral loader only, then hand off.
+  if (pendingCreatedAppUrl) {
+    return (
+      <div
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          minHeight: '100dvh',
+          background: '#101014',
+          gap: '14px',
+        }}
+      >
+        <div
+          style={{
+            width: 40,
+            height: 40,
+            border: '3px solid rgba(255,255,255,0.15)',
+            borderTopColor: '#e2b227',
+            borderRadius: '50%',
+            animation: 'homePendingRedirectSpin 0.8s linear infinite',
+          }}
+        />
+        <style>{'@keyframes homePendingRedirectSpin { to { transform: rotate(360deg); } }'}</style>
+      </div>
+    );
+  }
 
   return (
     <div
@@ -2436,7 +2841,8 @@ const Home = ({ onNavigate, onLogout }) => {
                     className="home-navbar-title font-extrabold text-[15px] whitespace-nowrap"
                     style={{ color: navbarTextColor, animation: 'marquee 15s linear infinite', maxWidth: '9rem' }}
                   >
-                    {trustName}&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+                    <span>{trustName}&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span>
+                    <span aria-hidden="true">{trustName}&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span>
                   </h1>
                 </div>
               ) : (
@@ -2450,8 +2856,20 @@ const Home = ({ onNavigate, onLogout }) => {
             })()}
           </div>
 
-          {/* Bell / placeholder */}
-          <div className="flex-shrink-0">
+          {/* Quick action (+) / bell */}
+          <div className="flex items-center gap-2 flex-shrink-0">
+            <button
+              type="button"
+              onClick={() => onNavigate('user-panel')}
+              aria-label="User Panel"
+              className="w-10 h-10 rounded-2xl flex items-center justify-center transition-all active:scale-95"
+              style={{
+                background: 'color-mix(in srgb, var(--navbar-bg) 72%, var(--surface-color))',
+                boxShadow: 'none',
+              }}
+            >
+              <Plus className="h-[22px] w-[22px]" style={{ color: navbarTextColor }} />
+            </button>
             {ff('feature_notifications') ? (
               <div className="relative">
                 <button
@@ -2689,6 +3107,8 @@ const Home = ({ onNavigate, onLogout }) => {
       >
       
         {(() => {
+          const galleryHomeMode = resolveHomeSectionMode(theme, 'gallery', 'feature_gallery');
+          const sponsorsHomeMode = resolveHomeSectionMode(theme, 'sponsors', 'feature_sponsors');
           const SECTIONS = {
             trustList: showTrustSelector && (selectedTrust || otherTrusts.length > 0) ? (
               <div className="home-section home-section-full" key="trustList">
@@ -2732,16 +3152,6 @@ const Home = ({ onNavigate, onLogout }) => {
                 key="marquee"
               >
                 <div className="flex items-stretch">
-                  <div className="flex-shrink-0 px-3 flex items-center gap-2" style={{ background: `color-mix(in srgb, ${theme.secondary} 28%, transparent)` }}>
-                    <span className="relative flex h-2 w-2">
-                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-70" style={{ background: 'var(--marquee-text)' }} />
-                      <span className="relative inline-flex rounded-full h-2 w-2" style={{ background: 'var(--marquee-text)' }} />
-                    </span>
-                    <span className="text-[11px] font-bold uppercase tracking-widest whitespace-nowrap" style={{ color: 'var(--marquee-text)' }}>
-                      {flagsData?.feature_marquee?.display_name || 'Updates'}
-                    </span>
-                  </div>
-                  <div className="w-px my-1.5" style={{ background: 'color-mix(in srgb, var(--marquee-text) 30%, transparent)' }} />
                   <div className="overflow-hidden flex-1 py-2">
                     <div className="marquee-track flex">
                       {[...marqueeUpdates, ...marqueeUpdates].map((msg, i) => (
@@ -2817,6 +3227,7 @@ const Home = ({ onNavigate, onLogout }) => {
                   )}
                 </div>
               </div>
+              )
             ) : null,
 
             quickActions: enabledQuickActions.length > 0 ? (
@@ -2836,39 +3247,73 @@ const Home = ({ onNavigate, onLogout }) => {
                         }}
                       >
                         <div
-                          className="h-[4px]"
-                          style={{ background: `linear-gradient(90deg, ${quickActionsText} 0%, color-mix(in srgb, ${quickActionsText} 60%, var(--surface-color)) 100%)` }}
-                        />
-                        <div className="p-3.5">
-                          <div
-                            className="w-10 h-10 rounded-xl flex items-center justify-center mb-2.5"
-                            style={{
-                              background: quickActionsIconBg,
-                              border: `1px solid color-mix(in srgb, ${quickActionsText} 20%, transparent)`,
-                            }}
-                          >
-                            <img
-                              src={action.icon_url}
-                              alt={action.displayName}
-                              className="h-[18px] w-[18px] object-contain"
-                            />
-                          </div>
-                          <div className="flex items-start justify-between gap-1">
-                            <div className="min-w-0 flex-1">
-                              <h3 className="text-[12px] font-extrabold leading-snug" style={{ color: quickActionsText }}>
-                                {action.displayName}
-                              </h3>
-                              <p className="text-[10px] font-medium mt-0.5 leading-snug" style={{ color: `color-mix(in srgb, ${quickActionsText} 80%, var(--surface-color))` }}>
-                                {action.tagline}
-                              </p>
-                            </div>
-                            <ChevronRight className="h-3.5 w-3.5 flex-shrink-0 mt-0.5" style={{ color: `color-mix(in srgb, ${quickActionsText} 72%, transparent)` }} />
-                          </div>
+                          className="w-10 h-10 rounded-xl flex items-center justify-center mb-2.5"
+                          style={{
+                            background: quickActionsIconBg,
+                            border: `1px solid color-mix(in srgb, ${quickActionsText} 20%, transparent)`,
+                          }}
+                        >
+                          <QuickActionIcon src={action.icon_url} alt={action.displayName} />
                         </div>
-                      </button>
+                        <div className="flex items-start justify-between gap-1">
+                          <div className="min-w-0 flex-1">
+                            <h3 className="text-[12px] font-extrabold leading-snug" style={{ color: quickActionsText }}>
+                              {action.displayName}
+                            </h3>
+                            <p className="text-[10px] font-medium mt-0.5 leading-snug" style={{ color: `color-mix(in srgb, ${quickActionsText} 80%, var(--surface-color))` }}>
+                              {action.tagline}
+                            </p>
+                          </div>
+                          <ChevronRight className="h-3.5 w-3.5 flex-shrink-0 mt-0.5" style={{ color: `color-mix(in srgb, ${quickActionsText} 72%, transparent)` }} />
+                        </div>
+                      </div>
+                    </button>
+                  );
+
+                  // Group consecutive box-mode actions into shared tile grids, and render any
+                  // action explicitly set to "content" (with a registered *Content component)
+                  // as its own full-width block, preserving enabledQuickActions order.
+                  const groups = [];
+                  let tileBatch = [];
+                  enabledQuickActions.forEach((action) => {
+                    const mode = resolveHomeSectionMode(theme, action.route, action.id, action.displayName);
+                    const ContentRenderer = mode === 'content' ? HOME_CONTENT_RENDERERS[action.route] : null;
+                    if (ContentRenderer) {
+                      if (tileBatch.length > 0) {
+                        groups.push({ type: 'tiles', items: tileBatch });
+                        tileBatch = [];
+                      }
+                      groups.push({ type: 'content', action, ContentRenderer });
+                    } else {
+                      tileBatch.push(action);
+                    }
+                  });
+                  if (tileBatch.length > 0) groups.push({ type: 'tiles', items: tileBatch });
+
+                  return groups.map((group, groupIndex) => {
+                    const spacingClass = groupIndex > 0 ? 'mt-4' : '';
+                    if (group.type === 'content') {
+                      const { action, ContentRenderer } = group;
+                      const contentKey = action.route === 'products'
+                        ? `quickaction-content-${action.id}-${selectedTrustId || 'none'}`
+                        : `quickaction-content-${action.id}`;
+                      return (
+                        <div key={contentKey} className={spacingClass}>
+                          <ContentRenderer
+                            variant="home"
+                            onNavigate={onNavigate}
+                            selectedTrustId={action.route === 'products' ? selectedTrustId : undefined}
+                          />
+                        </div>
+                      );
+                    }
+                    return (
+                      <div key={`quickaction-tiles-${groupIndex}`} className={`grid grid-cols-2 gap-3 ${spacingClass}`}>
+                        {group.items.map((action) => renderTile(action))}
+                      </div>
                     );
-                  })}
-                </div>
+                  });
+                })()}
               </div>
             ) : null,
 
@@ -3102,6 +3547,7 @@ const Home = ({ onNavigate, onLogout }) => {
                 )}
 
               </div>
+              )
             ) : null,
           };
 
@@ -3130,6 +3576,17 @@ const Home = ({ onNavigate, onLogout }) => {
         @keyframes marquee-scroll {
           0%   { transform: translateX(0); }
           100% { transform: translateX(-50%); }
+        }
+
+        .trust-heading-marquee {
+          display: inline-block;
+          animation: trust-heading-scroll 30s linear infinite;
+          will-change: transform;
+        }
+
+        @keyframes trust-heading-scroll {
+          0%, 15% { transform: translateX(0); }
+          85%, 100% { transform: translateX(-50%); }
         }
 
         @keyframes themeFadeIn {
@@ -3549,6 +4006,9 @@ const Home = ({ onNavigate, onLogout }) => {
         </div>
         <p className="text-[11px] font-semibold text-center mt-2 opacity-80">App Version {displayTrustVersion}</p>
       </footer>
+
+      <BottomNav onNavigate={onNavigate} />
+
       <TermsModal
         isOpen={showTermsModal}
         onAccept={handleAcceptTerms}
@@ -3563,23 +4023,3 @@ const Home = ({ onNavigate, onLogout }) => {
 };
 
 export default Home;
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

@@ -103,7 +103,7 @@ test('formatOrderDate returns a readable label for a valid timestamp and a fallb
 
 test('normalizeOrderLine accepts a plain string as a single-quantity line', () => {
   const line = normalizeOrderLine('Kurta Set', 0);
-  assert.deepEqual(line, { key: '0', name: 'Kurta Set', quantity: 1 });
+  assert.deepEqual(line, { key: 'line-0', name: 'Kurta Set', quantity: 1 });
 });
 
 test('normalizeOrderLine reads name/quantity from common field name variants', () => {
@@ -279,6 +279,25 @@ test('normalizeOrderRecord synthesizes one item from product_name when no items 
   assert.equal(record.items[0].name, 'Kurta Set');
   assert.equal(record.items[0].quantity, 2);
   assert.equal(record.itemCount, 2);
+});
+
+test('normalizeOrderRecord preserves UUID purchase and product price identifiers', () => {
+  const purchaseId = '550e8400-e29b-41d4-a716-446655440000';
+  const priceId = '750e8400-e29b-41d4-a716-446655440002';
+  const record = normalizeOrderRecord({
+    id: purchaseId,
+    product_price_id: priceId,
+    product_name: 'UUID Order Product',
+    quantity: 1,
+    total_amount: 499,
+    status: 'order_payment_done',
+    created_at: '2026-07-30T10:00:00.000Z',
+  }, 0);
+
+  assert.equal(record.id, purchaseId);
+  assert.equal(record.items[0].key, priceId);
+  assert.equal(record.items[0].key.includes('NaN'), false);
+  assert.notEqual(record.items[0].key, '0');
 });
 
 test('normalizeOrderRecord shows no synthesized item when the catalog lookup found no product name', () => {

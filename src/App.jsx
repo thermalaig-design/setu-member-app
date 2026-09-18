@@ -39,6 +39,7 @@ import ProtectedRoute from './ProtectedRoute';
 import SponsorDetails from './SponsorDetails';
 import SponsorsList from './SponsorsList';
 import DeveloperDetails from './DeveloperDetails';
+import PersistentUserPanel from './components/PersistentUserPanel';
 import FeatureGuard from './components/FeatureGuard';
 import Sidebar from './features/sidebar/Sidebar';
 
@@ -53,6 +54,8 @@ import NominationDetails from './NominationDetails';
 import AddCommunity from './AddCommunity';
 import TrustIdCard from './TrustIdCard';
 import AppVersionUpdatePrompt from './components/AppVersionUpdatePrompt';
+import TenantLanding from './TenantLanding';
+import { useTenant, getTenantSlugFromPath } from './context/TenantContext';
 import { getCurrentNotificationContext, matchesNotificationForContext } from './services/notificationAudience';
 import { initPushNotifications } from './services/pushNotificationService';
 import { createUserNotification } from './services/api';
@@ -61,6 +64,7 @@ import { logUserSessionEvent } from './services/sessionAuditService';
 import { applyThemeCssVariables, scopeCustomCss } from './utils/themeUtils';
 import { clearLoginTermsPromptPending } from './utils/legalContent';
 import { colorToHex } from './utils/colorUtils';
+import { getAppHomePath } from './utils/tenantNavigation';
 import {
   THEME_REFRESH_EVENT
 } from './utils/themeEvents';
@@ -88,10 +92,12 @@ const getPersistTrustCacheIndexKey = (trustId) => `theme_cache_persist_trust_${T
 const SHOP_ROOT_PATH = '/categories-products';
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const isUuid = (value) => UUID_RE.test(String(value || '').trim());
-const resolvePositiveId = (value) => {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+const resolveRouteId = (value) => {
+  const text = String(value ?? '').trim();
+  if (!text) return '';
+  return ['null', 'undefined', 'nan'].includes(text.toLowerCase()) ? '' : text;
 };
+const encodeRouteId = (value) => encodeURIComponent(resolveRouteId(value));
 
 const safeParse = (value) => {
   try {
@@ -111,6 +117,30 @@ const readLastKnownThemeTrust = () => {
   const id = String(parsed.selectedTrustId || parsed.trustId || '').trim();
   const name = String(parsed.selectedTrustName || parsed.trustName || '').trim();
   return { id, name };
+};
+
+// The pre-tenant fallback chain for "which Trust is active" — only valid
+// when this isn't a /app/<slug> tenant route. On a tenant route the tenant
+// resolved from THAT route is authoritative (see callers below); falling
+// through to these caches there would resurrect whichever Trust happened
+// to be selected/cached from a previously opened tenant on this origin.
+const resolveLegacyCachedTrustId = () => {
+  const selected = localStorage.getItem('selected_trust_id') || '';
+  if (selected) return selected;
+  const persistedSelected = String(localStorage.getItem(LAST_SELECTED_TRUST_ID_KEY) || '').trim();
+  if (persistedSelected) return persistedSelected;
+  try {
+    const cachedDefault = localStorage.getItem('default_trust_cache');
+    if (cachedDefault) {
+      const parsed = JSON.parse(cachedDefault);
+      if (parsed?.id) return String(parsed.id);
+    }
+  } catch {
+    // ignore malformed cache
+  }
+  const lastKnownThemeTrust = readLastKnownThemeTrust();
+  if (lastKnownThemeTrust.id) return lastKnownThemeTrust.id;
+  return '';
 };
 
 const readBootThemeCache = (trustId) => {
@@ -210,7 +240,7 @@ const applyThemeToDocument = (theme) => {
 const CategoriesProductListRoute = () => {
   const navigate = useNavigate();
   const { categoryId } = useParams();
-  const resolvedCategoryId = resolvePositiveId(categoryId);
+  const resolvedCategoryId = resolveRouteId(categoryId);
 
   if (!resolvedCategoryId) {
     return <Navigate to={SHOP_ROOT_PATH} replace />;
@@ -221,9 +251,9 @@ const CategoriesProductListRoute = () => {
       categoryId={resolvedCategoryId}
       onBack={() => navigate(-1)}
       onOpenProduct={(productId) => {
-        const resolvedProductId = resolvePositiveId(productId);
+        const resolvedProductId = resolveRouteId(productId);
         if (!resolvedProductId) return;
-        navigate(`${SHOP_ROOT_PATH}/list/${resolvedCategoryId}/detail/${resolvedProductId}`);
+        navigate(`${SHOP_ROOT_PATH}/list/${encodeRouteId(resolvedCategoryId)}/detail/${encodeRouteId(resolvedProductId)}`);
       }}
     />
   );
@@ -232,8 +262,8 @@ const CategoriesProductListRoute = () => {
 const CategoriesProductDetailRoute = () => {
   const navigate = useNavigate();
   const { categoryId, productId } = useParams();
-  const resolvedCategoryId = resolvePositiveId(categoryId);
-  const resolvedProductId = resolvePositiveId(productId);
+  const resolvedCategoryId = resolveRouteId(categoryId);
+  const resolvedProductId = resolveRouteId(productId);
 
   if (!resolvedCategoryId || !resolvedProductId) {
     return <Navigate to={SHOP_ROOT_PATH} replace />;
@@ -255,6 +285,7 @@ const HospitalTrusteeApp = () => {
   const PUBLIC_ROUTES = ['/login', '/otp-verification', '/special-otp-verification', '/terms-and-conditions', '/privacy-policy', '/developers', '/vip-login'];
   const navigate = useNavigate();
   const location = useLocation();
+  const { installedTrustId: tenantInstalledTrustId, tenantTrust } = useTenant();
   const [isMember] = useState(true);
   const shouldRestoreMemberState =
     location.pathname === '/member-details'
@@ -285,24 +316,36 @@ const HospitalTrusteeApp = () => {
   const resolvedCommitteePreviousScreen = selectedMember?.previousScreen || previousScreen;
   const resolvedCommitteePreviousScreenName = selectedMember?.previousScreenName || previousScreenName;
   const [activeTrustId, setActiveTrustId] = useState(() => {
-    const selected = localStorage.getItem('selected_trust_id') || '';
-    if (selected) return selected;
-    const persistedSelected = String(localStorage.getItem(LAST_SELECTED_TRUST_ID_KEY) || '').trim();
-    if (persistedSelected) return persistedSelected;
-    try {
-      const cachedDefault = localStorage.getItem('default_trust_cache');
-      if (cachedDefault) {
-        const parsed = JSON.parse(cachedDefault);
-        if (parsed?.id) return String(parsed.id);
-      }
-    } catch {
-      // ignore malformed cache
+    // On a tenant PWA route (/app/<slug>), the tenant resolved from THIS
+    // route is authoritative — never fall back to a stale selected/
+    // default/theme Trust cached from a previously opened tenant on this
+    // origin (e.g. Backup) just because it resolves faster/first.
+    if (getTenantSlugFromPath(location.pathname)) {
+      return tenantInstalledTrustId || '';
     }
-    const lastKnownThemeTrust = readLastKnownThemeTrust();
-    if (lastKnownThemeTrust.id) return lastKnownThemeTrust.id;
-    return '';
+    return resolveLegacyCachedTrustId();
   });
   const resolveDefaultThemeTrust = () => {
+    // Installed/tenant Trust identity (from a white-label /app/<slug> link) takes
+    // priority for the pre-login/auth theme so a customer-branded PWA shows
+    // its own colors before the user ever logs in. This does not affect
+    // `activeTrustId`/`selected_trust_id`, which still governs the app once
+    // a user is inside it.
+    if (tenantInstalledTrustId) {
+      const tenantName = (tenantTrust && String(tenantTrust.id) === String(tenantInstalledTrustId) && tenantTrust.name)
+        || BASE_TRUST_NAME;
+      return { id: tenantInstalledTrustId, name: tenantName };
+    }
+
+    // Still on a tenant route but the tenant hasn't resolved yet — there is
+    // no valid fallback Trust to show. Falling through to the caches below
+    // would render whichever Trust was cached from a previously opened
+    // tenant on this origin instead of staying neutral until this tenant
+    // resolves.
+    if (getTenantSlugFromPath(location.pathname)) {
+      return { id: '', name: BASE_TRUST_NAME };
+    }
+
     try {
       const cachedDefault = localStorage.getItem('default_trust_cache');
       if (cachedDefault) {
@@ -497,25 +540,26 @@ const HospitalTrusteeApp = () => {
   }, [location.pathname]);
 
   useEffect(() => {
+    // On a tenant PWA route, the current tenant is authoritative — never
+    // resync activeTrustId from the legacy selected/default/theme caches,
+    // which may still hold a previously opened tenant's Trust (e.g.
+    // Backup) until (or even after) this tenant resolves.
+    const isTenantRoute = Boolean(getTenantSlugFromPath(location.pathname));
+
     const syncTrustId = () => {
-      let next = localStorage.getItem('selected_trust_id') || '';
-      if (!next) next = String(localStorage.getItem(LAST_SELECTED_TRUST_ID_KEY) || '').trim();
-      if (!next) {
-        try {
-          const cachedDefault = localStorage.getItem('default_trust_cache');
-          if (cachedDefault) {
-            const parsed = JSON.parse(cachedDefault);
-            next = parsed?.id ? String(parsed.id) : '';
-          }
-        } catch {
-          // ignore malformed cache
-        }
+      if (isTenantRoute) {
+        const next = tenantInstalledTrustId || '';
+        setActiveTrustId((prev) => (prev === next ? prev : next));
+        return;
       }
+      const next = resolveLegacyCachedTrustId();
       setActiveTrustId((prev) => (prev === next ? prev : next));
     };
 
     const onTrustChanged = (event) => {
-      const next = event?.detail?.trustId || localStorage.getItem('selected_trust_id') || '';
+      const next = event?.detail?.trustId
+        || (isTenantRoute ? (tenantInstalledTrustId || '') : localStorage.getItem('selected_trust_id'))
+        || '';
       setActiveTrustId((prev) => (prev === next ? prev : next));
     };
 
@@ -531,7 +575,7 @@ const HospitalTrusteeApp = () => {
       window.removeEventListener('storage', syncTrustId);
       document.removeEventListener('visibilitychange', syncTrustId);
     };
-  }, []);
+  }, [location.pathname, tenantInstalledTrustId]);
 
   useEffect(() => {
     if (!activeTrustId) return undefined;
@@ -988,7 +1032,7 @@ const HospitalTrusteeApp = () => {
       navigate('/committee-members');
     } else {
       const routeMap = {
-        'home': '/',
+        'home': getAppHomePath(),
         'login': '/login',
         'vip-login': '/vip-login',
         'profile': '/profile',
@@ -1013,6 +1057,7 @@ const HospitalTrusteeApp = () => {
         'sponsor-details': '/sponsor-details',
         'sponsors': '/sponsors',
         'developers': '/developers',
+        'user-panel': '/user-panel',
         'gallery': '/gallery',
         'admin-profiles': '/admin-profiles',
         'contact-us': '/contact-us',
@@ -1127,7 +1172,7 @@ const HospitalTrusteeApp = () => {
               <FeatureGuard featureKey="feature_profile">
                 <Profile
                   onNavigate={handleNavigate}
-                  onNavigateBack={() => navigate('/')}
+                  onNavigateBack={() => navigate(getAppHomePath())}
                   onProfileUpdate={() => { }}
                 />
               </FeatureGuard>
@@ -1141,7 +1186,7 @@ const HospitalTrusteeApp = () => {
               <FeatureGuard featureKey="feature_directory">
                 <Directory
                   onNavigate={handleNavigate}
-                  onNavigateBack={() => navigate('/')}
+                  onNavigateBack={() => navigate(getAppHomePath())}
                   onLogout={clearAuthAndRedirectToLogin}
                 />
               </FeatureGuard>
@@ -1155,7 +1200,7 @@ const HospitalTrusteeApp = () => {
               <FeatureGuard featureKey="feature_directory">
                 <HealthcareTrusteeDirectory
                   onNavigate={handleNavigate}
-                  onNavigateBack={() => navigate('/')}
+                  onNavigateBack={() => navigate(getAppHomePath())}
                   onLogout={clearAuthAndRedirectToLogin}
                 />
               </FeatureGuard>
@@ -1171,7 +1216,7 @@ const HospitalTrusteeApp = () => {
                   onNavigate={handleNavigate}
                   appointmentForm={appointmentForm}
                   setAppointmentForm={setAppointmentForm}
-                  onNavigateBack={() => navigate('/')}
+                  onNavigateBack={() => navigate(getAppHomePath())}
                 />
               </FeatureGuard>
             </ProtectedRoute>
@@ -1487,13 +1532,28 @@ const HospitalTrusteeApp = () => {
           }
         />
         <Route
+          path="/user-panel"
+          element={
+            <ProtectedRoute>
+              {/* Actual content is PersistentUserPanel below, kept mounted
+                  outside <Routes> so its iframe survives navigating away and
+                  back. This route only exists so ProtectedRoute can gate
+                  direct/refresh navigation here. Not gated behind
+                  feature_bottom_nav: that flag only controls the bottom
+                  nav's own "+" button — the top navbar's "+" links here too
+                  and must keep working when the bottom nav is toggled off. */}
+              {null}
+            </ProtectedRoute>
+          }
+        />
+        <Route
           path="/gallery"
           element={
             <ProtectedRoute>
               <FeatureGuard featureKey="feature_gallery">
                 <Gallery
                   onNavigate={handleNavigate}
-                  onNavigateBack={() => navigate('/')}
+                  onNavigateBack={() => navigate(getAppHomePath())}
                 />
               </FeatureGuard>
             </ProtectedRoute>
@@ -1505,7 +1565,7 @@ const HospitalTrusteeApp = () => {
             <ProtectedRoute>
               <FeatureGuard featureKey="ContactUs">
                 <ContactUs
-                  onNavigateBack={() => navigate('/')}
+                  onNavigateBack={() => navigate(getAppHomePath())}
                 />
               </FeatureGuard>
             </ProtectedRoute>
@@ -1538,7 +1598,7 @@ const HospitalTrusteeApp = () => {
           element={
             <ProtectedRoute>
               <FeatureGuard featureKey="feature_add_community">
-                <AddCommunity onNavigateBack={() => navigate('/')} />
+                <AddCommunity onNavigateBack={() => navigate(getAppHomePath())} />
               </FeatureGuard>
             </ProtectedRoute>
           }
@@ -1563,7 +1623,9 @@ const HospitalTrusteeApp = () => {
           path="/other-memberships"
           element={
             <ProtectedRoute>
-              <OtherMemberships onNavigate={handleNavigate} />
+              <FeatureGuard featureKey="feature_othermembership">
+                <OtherMemberships onNavigate={handleNavigate} />
+              </FeatureGuard>
             </ProtectedRoute>
           }
         />
@@ -1584,8 +1646,22 @@ const HospitalTrusteeApp = () => {
           path="/privacy-policy"
           element={<PrivacyPolicy />}
         />
-        <Route path="*" element={<Navigate to="/" replace />} />
+        <Route
+          path="/app/:appSlug"
+          element={
+            <TenantLanding
+              onNavigate={handleNavigate}
+              onLogout={clearAuthAndRedirectToLogin}
+              isMember={isMember}
+            />
+          }
+        />
+        <Route path="*" element={<Navigate to={getAppHomePath()} replace />} />
       </Routes>
+      <PersistentUserPanel
+        isActive={location.pathname === '/user-panel'}
+        onNavigate={handleNavigate}
+      />
     </div>
   );
 
