@@ -204,6 +204,37 @@ const isAndroid = () => {
   return /Android/i.test(navigator.userAgent || '');
 };
 
+// Detects "this page load is very likely a continuation of an install the
+// user just accepted on this exact tenant's own page" — WITHOUT relying on
+// any Web Storage. Real-device testing showed Android/Chrome can, on some
+// devices, hand a just-accepted install off into a browsing context that
+// shares neither sessionStorage nor localStorage with the original tab, so
+// storage-based signals (INSTALL_PENDING_KEY) cannot be trusted to survive
+// that specific transition. document.referrer, however, is set by the
+// browser itself as part of that very navigation and needs no storage to
+// read: when Chrome auto-navigates this tab to its canonical URL once the
+// WebAPK finishes installing, the new page's referrer is the tenant's own
+// previous URL. An ordinary fresh visitor (typed URL, bookmark, external
+// link, QR code, home-screen icon) essentially never has that same-tenant
+// referrer. This is used only to decide whether it's worth waiting longer
+// for a delayed appinstalled/getInstalledRelatedApps signal before ever
+// showing the Install App card — never to claim anything is installed by
+// itself.
+const isLikelyInstallContinuation = (slug) => {
+  if (typeof document === 'undefined' || typeof window === 'undefined') return false;
+  try {
+    const ref = document.referrer;
+    if (!ref) return false;
+    const refUrl = new URL(ref);
+    if (refUrl.origin !== window.location.origin) return false;
+    const match = refUrl.pathname.match(/^\/app\/([^/?#]+)/i);
+    const refSlug = match && match[1] ? decodeURIComponent(match[1]).trim().toLowerCase() : '';
+    return Boolean(refSlug) && refSlug === slug;
+  } catch {
+    return false;
+  }
+};
+
 const isStandaloneDisplay = () => {
   if (typeof window === 'undefined') return false;
   const mql = window.matchMedia && window.matchMedia('(display-mode: standalone)');
@@ -378,6 +409,11 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
   // Install App card even though the user had already accepted — see the
   // forceInstallLanding reset effect below, which has the matching guard.
   const isResumingAcceptedInstall = readInstallPending(normalizedAppSlug);
+  // Computed once per mount (document.referrer doesn't change during a
+  // page's lifetime) — see isLikelyInstallContinuation's own comment. Used
+  // below to scope the mount grace window to the cases that actually need
+  // it, instead of delaying every ordinary fresh visitor.
+  const cameFromOwnInstallPage = isLikelyInstallContinuation(normalizedAppSlug);
 
   const [deferredPrompt, setDeferredPrompt] = useState(null);
   const [installOutcome, setInstallOutcome] = useState('');
@@ -414,19 +450,23 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
   // demonstrably ran and persisted in the original context, yet the freshly
   // mounted page's very first readInstallPending() still came back empty) —
   // so INSTALL_PENDING_KEY cannot bridge that specific boundary no matter
-  // which Web Storage it uses. What DOES still arrive on that fresh page is
-  // a second, genuine `appinstalled` event, just not instantly — there is a
-  // short real gap between mount and that event. Painting the Install App
-  // card immediately during that gap is exactly what caused it to visibly
-  // flash back up. This grace window only delays revealing the idle
-  // Install App card by a short, bounded amount so that gap has a chance to
-  // resolve itself first via a real signal (appinstalled firing, or
-  // getInstalledRelatedApps confirming) — it never marks anything installed
-  // by itself, and a genuinely fresh first-time visitor still lands on the
-  // normal Install App card the moment it elapses.
-  const MOUNT_INSTALL_CHECK_GRACE_MS = 900;
+  // which Web Storage it uses, and a fixed short delay isn't reliable either
+  // (observed delays on real devices ranged from under a second to over 30
+  // seconds — no fixed number covers every device). What DOES still arrive
+  // on that fresh page is a second, genuine `appinstalled` event or a
+  // getInstalledRelatedApps() match, just not instantly.
+  //
+  // Rather than guess a duration, this window is scoped by
+  // cameFromOwnInstallPage (document.referrer — see its own comment): only
+  // when this page load looks like a continuation of this exact tenant's
+  // own previous page is it worth waiting a long, bounded time for that
+  // delayed signal instead of showing Install App immediately. An ordinary
+  // fresh visitor (empty/external referrer) gets zero extra delay — this
+  // never applies to them at all. It never marks anything installed by
+  // itself either way — only genuine signals do that.
+  const MOUNT_INSTALL_CHECK_GRACE_MS = cameFromOwnInstallPage ? 20000 : 0;
   const [initialInstallCheckPending, setInitialInstallCheckPending] = useState(
-    () => !isResumingAcceptedInstall
+    () => !isResumingAcceptedInstall && cameFromOwnInstallPage
   );
   // Not every Chromium build/version fires appinstalled reliably after an
   // 'accepted' outcome (browser bugs, unusual install flows, etc.) — a ref
@@ -637,19 +677,26 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
     const manifestPath = `/pwa-manifest/${normalizedAppSlug}.webmanifest`.toLowerCase();
     // A single check right at mount can miss a genuine install: real-device
     // captures showed the OS's own installed-app registry (what this API
-    // reads) can take a beat to catch up right after a WebAPK finishes —
-    // the very first call at mount came back empty even though the install
-    // had already completed moments earlier. A few retries over the same
-    // short window MOUNT_INSTALL_CHECK_GRACE_MS already covers (so this
-    // stays a fast, bounded check, not an indefinite poll) gives that catch-
-    // up a real chance, without ever claiming "installed" on anything but a
-    // genuine match. Deliberately still never touches
-    // autoEnterAfterInstallRef here — a match found this way could equally
-    // be an ordinary revisit to an already-installed tenant, which must
-    // never auto-navigate; only a genuine `appinstalled` event (handled
-    // separately below) is trusted for that.
-    const MOUNT_CHECK_RETRY_MS = 300;
-    const MOUNT_CHECK_MAX_ATTEMPTS = 3;
+    // reads) can take anywhere from under a second to 30+ seconds to catch
+    // up right after a WebAPK finishes. Retrying gives that catch-up a real
+    // chance, without ever claiming "installed" on anything but a genuine
+    // match. Deliberately still never touches autoEnterAfterInstallRef here
+    // — a match found this way could equally be an ordinary revisit to an
+    // already-installed tenant, which must never auto-navigate; only a
+    // genuine `appinstalled` event (handled separately below) is trusted
+    // for that.
+    //
+    // How long/hard this retries mirrors MOUNT_INSTALL_CHECK_GRACE_MS's own
+    // reasoning (see its comment): only worth polling persistently when
+    // cameFromOwnInstallPage suggests this page load is actually a
+    // continuation of an install just accepted on this same tenant's page.
+    // An ordinary fresh visitor gets a single, immediate check (same as
+    // before) — never delayed waiting on retries that would rarely matter
+    // for them.
+    const MOUNT_CHECK_RETRY_MS = 500;
+    const MOUNT_CHECK_MAX_ATTEMPTS = cameFromOwnInstallPage
+      ? Math.ceil(MOUNT_INSTALL_CHECK_GRACE_MS / MOUNT_CHECK_RETRY_MS)
+      : 1;
 
     const checkOnce = () => {
       attempt += 1;
@@ -684,7 +731,7 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
     checkOnce();
 
     return () => { cancelled = true; };
-  }, [normalizedAppSlug, forceInstallLanding]);
+  }, [normalizedAppSlug, forceInstallLanding, cameFromOwnInstallPage, MOUNT_INSTALL_CHECK_GRACE_MS]);
 
   // Keep a ref mirror of isInstalled so the safety-timeout callback below
   // (started from handleInstallClick, possibly still pending several
@@ -766,12 +813,14 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
       `resuming=${isResumingAcceptedInstall}`,
       `pending=${readInstallPending(normalizedAppSlug)}`,
       `grace=${initialInstallCheckPending}`,
+      `cameFromOwn=${cameFromOwnInstallPage}`,
+      `referrer=${typeof document !== 'undefined' ? document.referrer : ''}`,
       `url=${typeof window !== 'undefined' ? window.location.href : ''}`
     ].join('  ');
     return () => {
       if (el && el.parentNode) el.parentNode.removeChild(el);
     };
-  }, [normalizedAppSlug, forceInstallLanding, installPhase, isInstalled, autoEntering, isResumingAcceptedInstall, initialInstallCheckPending]);
+  }, [normalizedAppSlug, forceInstallLanding, installPhase, isInstalled, autoEntering, isResumingAcceptedInstall, initialInstallCheckPending, cameFromOwnInstallPage]);
 
   // See INSTALL_PENDING_KEY/INSTALL_PENDING_MAX_AGE_MS above: keeps the
   // pending flag's timestamp fresh for as long as this tab is actively
@@ -992,7 +1041,17 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
 
   useEffect(() => {
     const handleAppInstalled = () => {
-      logInstallFlow('appinstalled-fired', { slug: normalizedAppSlug, at: Date.now() });
+      logInstallFlow('appinstalled-fired', { slug: normalizedAppSlug, at: Date.now(), alreadyInstalled: isInstalledRef.current });
+      // Real-device testing on some Android/Chrome builds showed
+      // `appinstalled` can fire MORE than once for the same install (e.g.
+      // once on the original tab, again later on a page reached after
+      // "Open App" navigates/hands off and falls back to a plain
+      // navigation). Once this page has already confirmed the install via
+      // an earlier appinstalled/getInstalledRelatedApps match, a later
+      // firing is redundant — it must never regress installPhase back to
+      // 'finalizing' and show the "Installing on your device…" loader
+      // again after the user has already opened the app.
+      if (isInstalledRef.current) return;
       if (acceptedTimeoutRef.current) {
         clearTimeout(acceptedTimeoutRef.current);
         acceptedTimeoutRef.current = null;
@@ -1808,17 +1867,25 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
       ? ['Click "File" in Safari’s menu bar', 'Choose "Add to Dock…"', 'Click "Add" to confirm']
       : null;
 
-  // See MOUNT_INSTALL_CHECK_GRACE_MS above: only reached while installPhase
-  // is still 'idle' (every other phase already returned its own screen
-  // earlier) — a brief, bounded, neutral loading state instead of the
-  // Install App card itself, so a delayed-but-already-in-flight
-  // appinstalled/getInstalledRelatedApps signal gets a short head start to
-  // arrive and move installPhase elsewhere first.
+  // See MOUNT_INSTALL_CHECK_GRACE_MS/cameFromOwnInstallPage above: only ever
+  // reached when this page load looks like a continuation of an install
+  // just accepted on this exact tenant's own page (never for an ordinary
+  // fresh visitor — initialInstallCheckPending starts false for them) —
+  // every other phase already returned its own screen earlier. Worded as a
+  // genuine "still finishing" state, not generic loading, since that's
+  // specifically what this is waiting on: a delayed-but-already-in-flight
+  // appinstalled/getInstalledRelatedApps signal moving installPhase
+  // elsewhere.
   if (initialInstallCheckPending) {
     return (
       <div style={{ ...styles.page, background: backgroundColor }}>
         <div style={{ ...styles.spinner, borderTopColor: accent.from }} />
-        <p style={{ ...styles.loadingText, color: palette.textSecondary }}>Loading…</p>
+        <p style={{ ...styles.loadingText, color: palette.textPrimary, fontSize: '15px', fontWeight: 700 }}>
+          Finishing installation…
+        </p>
+        <p style={{ ...styles.loadingText, color: palette.textSecondary, marginTop: '4px' }}>
+          Please keep this screen open.
+        </p>
         <style>{'@keyframes spin { to { transform: rotate(360deg); } }'}</style>
       </div>
     );
