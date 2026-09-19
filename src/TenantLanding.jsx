@@ -407,6 +407,27 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
   // genuine getInstalledRelatedApps() match, or if a real (delayed)
   // appinstalled event still arrives on this page.
   const [installPhase, setInstallPhase] = useState(() => (isResumingAcceptedInstall ? 'unconfirmed' : 'idle'));
+  // MOUNT GRACE WINDOW — real-device captures showed Android/Chrome can, on
+  // some devices, hand a just-accepted install off into a browsing context
+  // that does NOT share sessionStorage OR localStorage with the tab the
+  // user actually tapped Install in (confirmed: writeInstallPending()
+  // demonstrably ran and persisted in the original context, yet the freshly
+  // mounted page's very first readInstallPending() still came back empty) —
+  // so INSTALL_PENDING_KEY cannot bridge that specific boundary no matter
+  // which Web Storage it uses. What DOES still arrive on that fresh page is
+  // a second, genuine `appinstalled` event, just not instantly — there is a
+  // short real gap between mount and that event. Painting the Install App
+  // card immediately during that gap is exactly what caused it to visibly
+  // flash back up. This grace window only delays revealing the idle
+  // Install App card by a short, bounded amount so that gap has a chance to
+  // resolve itself first via a real signal (appinstalled firing, or
+  // getInstalledRelatedApps confirming) — it never marks anything installed
+  // by itself, and a genuinely fresh first-time visitor still lands on the
+  // normal Install App card the moment it elapses.
+  const MOUNT_INSTALL_CHECK_GRACE_MS = 900;
+  const [initialInstallCheckPending, setInitialInstallCheckPending] = useState(
+    () => !isResumingAcceptedInstall
+  );
   // Not every Chromium build/version fires appinstalled reliably after an
   // 'accepted' outcome (browser bugs, unusual install flows, etc.) — a ref
   // (not state, so the timeout callback below always reads the latest
@@ -612,30 +633,55 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
     }
 
     let cancelled = false;
+    let attempt = 0;
     const manifestPath = `/pwa-manifest/${normalizedAppSlug}.webmanifest`.toLowerCase();
+    // A single check right at mount can miss a genuine install: real-device
+    // captures showed the OS's own installed-app registry (what this API
+    // reads) can take a beat to catch up right after a WebAPK finishes —
+    // the very first call at mount came back empty even though the install
+    // had already completed moments earlier. A few retries over the same
+    // short window MOUNT_INSTALL_CHECK_GRACE_MS already covers (so this
+    // stays a fast, bounded check, not an indefinite poll) gives that catch-
+    // up a real chance, without ever claiming "installed" on anything but a
+    // genuine match. Deliberately still never touches
+    // autoEnterAfterInstallRef here — a match found this way could equally
+    // be an ordinary revisit to an already-installed tenant, which must
+    // never auto-navigate; only a genuine `appinstalled` event (handled
+    // separately below) is trusted for that.
+    const MOUNT_CHECK_RETRY_MS = 300;
+    const MOUNT_CHECK_MAX_ATTEMPTS = 3;
 
-    navigator.getInstalledRelatedApps()
-      .then((relatedApps) => {
-        if (cancelled) return;
-        // Per-tenant match against THIS slug's own manifest — a different
-        // tenant PWA installed on the same device/browser must never flip
-        // this tenant's card to the installed/Open App state; that tenant
-        // must still show Install App unless it is itself installed.
-        const matchesThisTenant = (Array.isArray(relatedApps) ? relatedApps : []).some((app) => {
-          const url = String(app?.url || '').toLowerCase();
-          const id = String(app?.id || '').toLowerCase();
-          return url.includes(manifestPath) || id.includes(normalizedAppSlug);
+    const checkOnce = () => {
+      attempt += 1;
+      navigator.getInstalledRelatedApps()
+        .then((relatedApps) => {
+          if (cancelled) return;
+          // Per-tenant match against THIS slug's own manifest — a different
+          // tenant PWA installed on the same device/browser must never flip
+          // this tenant's card to the installed/Open App state; that tenant
+          // must still show Install App unless it is itself installed.
+          const matchesThisTenant = (Array.isArray(relatedApps) ? relatedApps : []).some((app) => {
+            const url = String(app?.url || '').toLowerCase();
+            const id = String(app?.id || '').toLowerCase();
+            return url.includes(manifestPath) || id.includes(normalizedAppSlug);
+          });
+          logInstallFlow('mount-getInstalledRelatedApps', { slug: normalizedAppSlug, relatedApps, matchesThisTenant, attempt });
+          if (matchesThisTenant) {
+            setIsInstalled(true);
+            setInstallOutcome('installed');
+            setInstallPhase('installed');
+            return;
+          }
+          if (attempt < MOUNT_CHECK_MAX_ATTEMPTS) {
+            setTimeout(() => { if (!cancelled) checkOnce(); }, MOUNT_CHECK_RETRY_MS);
+          }
+        })
+        .catch(() => {
+          // Unsupported/failed — never claim installed without real evidence.
         });
-        logInstallFlow('mount-getInstalledRelatedApps', { slug: normalizedAppSlug, relatedApps, matchesThisTenant });
-        if (matchesThisTenant) {
-          setIsInstalled(true);
-          setInstallOutcome('installed');
-          setInstallPhase('installed');
-        }
-      })
-      .catch(() => {
-        // Unsupported/failed — never claim installed without real evidence.
-      });
+    };
+
+    checkOnce();
 
     return () => { cancelled = true; };
   }, [normalizedAppSlug, forceInstallLanding]);
@@ -647,6 +693,20 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
   useEffect(() => {
     isInstalledRef.current = isInstalled;
   }, [isInstalled]);
+
+  // Runs the MOUNT_INSTALL_CHECK_GRACE_MS window described above — a single
+  // bounded timer per mount, not tied to any other state, so it can't be
+  // restarted/extended by later renders. If a real signal (appinstalled,
+  // getInstalledRelatedApps match) arrives first and moves installPhase off
+  // 'idle', this flag becomes irrelevant (the idle-card render branch below
+  // never checks it once phase isn't 'idle') — it only ever delays, never
+  // blocks, revealing the Install App card.
+  useEffect(() => {
+    if (!initialInstallCheckPending) return undefined;
+    const timeoutId = setTimeout(() => setInitialInstallCheckPending(false), MOUNT_INSTALL_CHECK_GRACE_MS);
+    return () => clearTimeout(timeoutId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // TEMPORARY DIAGNOSTICS — see INSTALL_FLOW_DEBUG at the top of this file.
   // Logs the resolved tenant identity and the <link rel="manifest"> href
@@ -705,12 +765,13 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
       `auto=${autoEntering}`,
       `resuming=${isResumingAcceptedInstall}`,
       `pending=${readInstallPending(normalizedAppSlug)}`,
+      `grace=${initialInstallCheckPending}`,
       `url=${typeof window !== 'undefined' ? window.location.href : ''}`
     ].join('  ');
     return () => {
       if (el && el.parentNode) el.parentNode.removeChild(el);
     };
-  }, [normalizedAppSlug, forceInstallLanding, installPhase, isInstalled, autoEntering, isResumingAcceptedInstall]);
+  }, [normalizedAppSlug, forceInstallLanding, installPhase, isInstalled, autoEntering, isResumingAcceptedInstall, initialInstallCheckPending]);
 
   // See INSTALL_PENDING_KEY/INSTALL_PENDING_MAX_AGE_MS above: keeps the
   // pending flag's timestamp fresh for as long as this tab is actively
@@ -936,6 +997,23 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
         clearTimeout(acceptedTimeoutRef.current);
         acceptedTimeoutRef.current = null;
       }
+      // A genuine `appinstalled` firing on THIS page is, by itself, proof a
+      // fresh install just completed right now — the browser only ever
+      // dispatches it once, at the moment installation finishes, never on
+      // an ordinary revisit to an already-installed tenant's URL (that case
+      // is handled entirely by the separate isStandaloneDisplay()/
+      // getInstalledRelatedApps() effect above, which never touches this
+      // ref). So this is safe to rely on directly, INSTEAD of only trusting
+      // autoEnterAfterInstallRef's earlier value — real-device testing
+      // showed Android/Chrome can hand the accepted install off into a
+      // browsing context that shares neither sessionStorage nor
+      // localStorage with the tab the user actually tapped Install in, so
+      // neither this ref's original value nor isResumingAcceptedInstall
+      // (INSTALL_PENDING_KEY) can be trusted to already be true on this
+      // exact page — without this, that page fell back to the manual
+      // Installed/"Open App" card instead of auto-continuing straight into
+      // the tenant app the way a fresh install always should.
+      autoEnterAfterInstallRef.current = true;
       clearInstallPrompt();
       setDeferredPrompt(null);
       setInstallPhase('finalizing');
@@ -1729,6 +1807,22 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
     : installOutcome === 'mac-safari-instructions'
       ? ['Click "File" in Safari’s menu bar', 'Choose "Add to Dock…"', 'Click "Add" to confirm']
       : null;
+
+  // See MOUNT_INSTALL_CHECK_GRACE_MS above: only reached while installPhase
+  // is still 'idle' (every other phase already returned its own screen
+  // earlier) — a brief, bounded, neutral loading state instead of the
+  // Install App card itself, so a delayed-but-already-in-flight
+  // appinstalled/getInstalledRelatedApps signal gets a short head start to
+  // arrive and move installPhase elsewhere first.
+  if (initialInstallCheckPending) {
+    return (
+      <div style={{ ...styles.page, background: backgroundColor }}>
+        <div style={{ ...styles.spinner, borderTopColor: accent.from }} />
+        <p style={{ ...styles.loadingText, color: palette.textSecondary }}>Loading…</p>
+        <style>{'@keyframes spin { to { transform: rotate(360deg); } }'}</style>
+      </div>
+    );
+  }
 
   return (
     <div style={{ ...styles.page, background: pageBackground }}>
