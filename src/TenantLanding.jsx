@@ -7,6 +7,15 @@ import { saveProfile } from './services/api';
 import { getUserHospitalMemberships, clearTenantUserSession } from './utils/storageUtils';
 import { getAppHomePath } from './utils/tenantNavigation';
 import { getInstallPrompt, clearInstallPrompt, subscribeInstallPrompt } from './utils/installPrompt';
+import {
+  readPendingRecord,
+  isInstallConfirmed as isInstallConfirmedRecord,
+  writePendingRecord,
+  clearPendingRecord,
+  isInstallVerified,
+  writeVerifiedRecord,
+  clearVerifiedRecord
+} from './utils/installPendingState';
 import Home from './Home';
 
 import TenantProfileModal from './components/TenantProfileModal';
@@ -41,37 +50,57 @@ const logInstallFlow = (label, data) => {
 // that reload, which is exactly what used to bring back the Install App
 // card (and a second "Installing…" loader once appinstalled/verification
 // caught up on the fresh page) even though the user had already accepted.
-// This sessionStorage flag is the one piece of that state that survives a
-// same-tab reload, so the very first render after such a reload can resume
-// straight into the finalizing loader instead of flashing Install App
-// again. It deliberately does NOT survive a genuinely new visit (a closed
-// tab / new tab clears sessionStorage), so it can never wrongly resume a
-// loader on an unrelated later visit.
+// This localStorage-backed flag (see installPendingState.js) is the one
+// piece of that state that survives a same-tab reload, so the very first
+// render after such a reload can resume straight into the finalizing loader
+// instead of flashing Install App again.
 // Keyed per-slug (tenant_install_pending_v1:<slug>) rather than one shared
 // key, so two different tenant PWAs mid-install in two different tabs at
-// the same time can never clobber each other's pending flag.
-const getInstallPendingKey = (slug) => `tenant_install_pending_v1:${slug}`;
-// If the flag hasn't been refreshed (see the heartbeat below) by this age,
-// treat it as stale — either genuinely abandoned, or verification gave up a
-// while ago — rather than resuming a loader forever. This is deliberately
-// measured from the LAST refresh, not from the original accept: a slow
-// WebAPK install that's still actively being polled keeps sliding this
-// window forward every INSTALL_PENDING_HEARTBEAT_MS, so a reload at any
-// point during a genuinely slow (but still in-progress) install still sees
-// a fresh flag and resumes straight into the loader instead of flashing
-// Install App. Real-device captures showed Android/Chrome can take 30+
-// seconds between the native prompt's 'accepted' outcome and completing the
-// WebAPK package install (and only THEN navigating this tab to its
-// canonical start_url) — 120s leaves comfortable headroom above that
-// before this is ever treated as abandoned.
-const INSTALL_PENDING_MAX_AGE_MS = 120000;
+// the same time can never clobber each other's pending flag. The actual
+// record read/write/clear logic lives in utils/installPendingState.js (kept
+// framework-free so it's unit-testable under plain `node --test`) — the
+// thin wrappers below add this file's diagnostic logging on top of it.
+//
+// The record has two independent pieces, both persisted (see that module's
+// own comments for the full reasoning):
+// - `confirmed`: set the instant a genuine `appinstalled` event fires
+//   (handleAppInstalled below). Once true, the record is treated as
+//   TERMINAL for this slug — it never goes stale from elapsed time alone,
+//   because a real appinstalled event is itself proof positive, and a
+//   backgrounded/throttled/discarded tab can miss the heartbeat below for
+//   far longer than any fixed TTL without the install having failed. Before
+//   this existed, a slow WebAPK install that outlived
+//   INSTALL_PENDING_MAX_AGE_MS purely due to a throttled heartbeat would
+//   read back as "abandoned" on the next mount, seed installPhase back to
+//   'idle', and flash the Install App card again mid-install — see (2) and
+//   (6)-(8) below.
+// - the separate INSTALLED record (isInstallVerified/writeVerifiedRecord):
+//   written the instant verification actually succeeds, BEFORE the pending
+//   record above is cleared (see markInstalled) — see (5)/(6) below.
+//
+// (1) appinstalled is terminal confirmation for this slug: `confirmed`
+//     above, set unconditionally in handleAppInstalled before anything else.
+// (2) After appinstalled, nothing may put the UI back in 'idle'/Install
+//     App: every read of "is an install pending" below consults this
+//     terminal `confirmed` record, not a plain boolean the heartbeat could
+//     let expire.
+// (3) getInstalledRelatedApps is secondary verification only — it is still
+//     only ever used by runFinalizeVerification to decide when to call
+//     markInstalled; it is never consulted to decide whether it's safe to
+//     go back to 'idle'.
+// (6) On any remount, mount-time state is seeded in installed -> pending ->
+//     idle priority — see isFullyVerifiedInstall/isResumingAcceptedInstall
+//     below, checked in that order.
+// (9) `/app/<slug>` and `/app/<slug>/` are the same install identity —
+//     enforced by normalizeSlugIdentity (stripping a trailing slash) inside
+//     installPendingState.js, applied to every read/write here.
 // How often the flag's timestamp is refreshed while an install is actively
 // being waited on/verified (started in handleInstallClick's accepted branch
 // and on the reload-resume path; stopped once markInstalled runs, the
 // unconfirmed-phase's bounded verification window runs out, or the outcome
-// wasn't 'accepted'). Comfortably under INSTALL_PENDING_MAX_AGE_MS so a
-// single missed tick (e.g. the tab backgrounded and throttled) doesn't
-// immediately make the flag look stale.
+// wasn't 'accepted'). Comfortably under INSTALL_PENDING_MAX_AGE_MS (imported
+// above) so a single missed tick (e.g. the tab backgrounded and throttled)
+// doesn't immediately make an unconfirmed flag look stale.
 const INSTALL_PENDING_HEARTBEAT_MS = 5000;
 // How long the 20s-timeout "unconfirmed" phase keeps polling
 // getInstalledRelatedApps() before giving up on ever confirming this
@@ -80,58 +109,48 @@ const INSTALL_PENDING_HEARTBEAT_MS = 5000;
 // trustFallback option and its own comment.
 const UNCONFIRMED_POLL_MAX_MS = 20000;
 
-// localStorage, not sessionStorage: real-device captures showed Chrome can
-// navigate this tab to its canonical start_url (e.g. adding a trailing
-// slash) once the WebAPK finishes installing — a genuine top-level
-// navigation that lands in a fresh browsing context whose sessionStorage is
-// empty, even though it's still "the same tab" from the user's point of
-// view. localStorage survives that boundary. Safe from cross-tenant leakage
-// because the key itself is slug-scoped (getInstallPendingKey) and every
-// read still validates parsed.slug === the slug being asked about.
 const readInstallPending = (slug) => {
-  try {
-    const raw = localStorage.getItem(getInstallPendingKey(slug));
-    if (!raw) {
-      logInstallFlow('pending-read', { requestedSlug: slug, raw: null, result: false });
-      return false;
-    }
-    const parsed = JSON.parse(raw);
-    if (!parsed || parsed.slug !== slug || !parsed.ts) {
-      logInstallFlow('pending-read', { requestedSlug: slug, raw: parsed, result: false, reason: !parsed ? 'unparseable' : parsed.slug !== slug ? 'slug-mismatch' : 'no-ts' });
-      return false;
-    }
-    const ageMs = Date.now() - parsed.ts;
-    if (ageMs > INSTALL_PENDING_MAX_AGE_MS) {
-      logInstallFlow('pending-read', { requestedSlug: slug, raw: parsed, result: false, reason: 'stale', ageMs });
-      return false;
-    }
-    logInstallFlow('pending-read', { requestedSlug: slug, raw: parsed, result: true, ageMs });
-    return true;
-  } catch (err) {
-    logInstallFlow('pending-read', { requestedSlug: slug, result: false, reason: 'exception', err: err?.message });
-    return false;
-  }
+  const record = readPendingRecord(slug);
+  logInstallFlow('pending-read', { requestedSlug: slug, record, result: Boolean(record) });
+  return Boolean(record);
 };
 
-const writeInstallPending = (slug) => {
-  try {
-    const value = { slug, ts: Date.now() };
-    localStorage.setItem(getInstallPendingKey(slug), JSON.stringify(value));
+const readInstallConfirmed = (slug) => {
+  const confirmed = isInstallConfirmedRecord(slug);
+  logInstallFlow('confirmed-read', { requestedSlug: slug, confirmed });
+  return confirmed;
+};
+
+const readInstallVerified = (slug) => {
+  const verified = isInstallVerified(slug);
+  logInstallFlow('verified-read', { requestedSlug: slug, verified });
+  return verified;
+};
+
+const writeInstallPending = (slug, options) => {
+  const value = writePendingRecord(slug, options);
+  if (value) {
     logInstallFlow('pending-write', value);
-  } catch (err) {
+  } else {
     // Private-mode/quota failure — worst case the reload-resume fallback
     // below simply doesn't kick in; the rest of the flow is unaffected.
-    logInstallFlow('pending-write-failed', { slug, err: err?.message });
+    logInstallFlow('pending-write-failed', { slug });
   }
 };
 
 const clearInstallPending = (slug, reason) => {
-  try {
-    localStorage.removeItem(getInstallPendingKey(slug));
-    logInstallFlow('pending-clear', { slug, reason: reason || 'unspecified' });
-  } catch {
-    // ignore
-  }
+  clearPendingRecord(slug);
+  logInstallFlow('pending-clear', { slug, reason: reason || 'unspecified' });
+};
+
+const writeInstallVerified = (slug) => {
+  writeVerifiedRecord(slug);
+  logInstallFlow('verified-write', { slug });
+};
+
+const clearInstallVerified = (slug, reason) => {
+  clearVerifiedRecord(slug);
+  logInstallFlow('verified-clear', { slug, reason: reason || 'unspecified' });
 };
 
 // Module-scoped (not component state): survives TenantLanding unmount/remount
@@ -387,7 +406,13 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
   const location = useLocation();
   const { tenantTrust, tenantLoading, tenantError, resolveTenantFromSlug, installedSlug } = useTenant();
 
-  const normalizedAppSlug = normalizeText(appSlug).toLowerCase();
+  // Trailing slash stripped so /app/<slug> and /app/<slug>/ are always the
+  // same install identity (item 9) — react-router already treats them as
+  // the same route, but this also keeps every getInstalledRelatedApps
+  // id/manifest-path comparison below and every installPendingState.js
+  // storage key derived from this value consistent regardless of which
+  // variant a given navigation lands on.
+  const normalizedAppSlug = normalizeText(appSlug).toLowerCase().replace(/\/+$/, '');
   const forceInstallLanding = new URLSearchParams(location.search || '').get('install') === '1';
   // TenantProvider wraps the whole app and outlives TenantLanding, so a
   // matching tenantTrust here means this slug was already resolved earlier
@@ -408,7 +433,23 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
   // exactly that reload, wiping the pending flag and dropping back to the
   // Install App card even though the user had already accepted — see the
   // forceInstallLanding reset effect below, which has the matching guard.
-  const isResumingAcceptedInstall = readInstallPending(normalizedAppSlug);
+  // Highest-priority mount-time signal (item 6: installed -> pending ->
+  // idle) — a terminal, non-expiring record written the instant an earlier
+  // install was actually verified (see markInstalled). Checked BEFORE the
+  // pending flag below so a stale/absent pending record (e.g. it was
+  // already cleared by the same markInstalled call) can never make a
+  // genuinely-installed tenant look uninstalled again.
+  const isFullyVerifiedInstall = readInstallVerified(normalizedAppSlug);
+  const isResumingAcceptedInstall = !isFullyVerifiedInstall && readInstallPending(normalizedAppSlug);
+  // True only when the resumed record ALSO carries terminal `confirmed`
+  // proof (a real appinstalled event already fired before whatever reload
+  // brought us here) — lets the seed below skip straight to 'finalizing'
+  // (item 7: a pending record must always render a waiting screen, never
+  // Install App, and 'finalizing' is the more accurate of the two once
+  // appinstalled is already known to have fired) instead of the weaker
+  // 'unconfirmed' state reserved for "accepted, but appinstalled itself
+  // hasn't been confirmed on any page yet".
+  const isResumingConfirmedInstall = isResumingAcceptedInstall && readInstallConfirmed(normalizedAppSlug);
   // Computed once per mount (document.referrer doesn't change during a
   // page's lifetime) — see isLikelyInstallContinuation's own comment. Used
   // below to scope the mount grace window to the cases that actually need
@@ -416,11 +457,11 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
   const cameFromOwnInstallPage = isLikelyInstallContinuation(normalizedAppSlug);
 
   const [deferredPrompt, setDeferredPrompt] = useState(null);
-  const [installOutcome, setInstallOutcome] = useState('');
+  const [installOutcome, setInstallOutcome] = useState(() => (isFullyVerifiedInstall ? 'installed' : ''));
   // Only appinstalled (not the native prompt's 'accepted' outcome) actually
   // confirms the browser finished installing — see the appinstalled
   // listener below and handleInstallClick's comments.
-  const [isInstalled, setIsInstalled] = useState(false);
+  const [isInstalled, setIsInstalled] = useState(() => isFullyVerifiedInstall);
   // Drives the post-install experience: 'idle' is the normal marketing
   // card; 'prompting' is while the native browser install dialog is open;
   // 'launching' is the full-screen transition shown the instant the user
@@ -433,16 +474,26 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
   // no standard API to force-launch a newly installed PWA, so nothing in
   // this state machine auto-navigates — the success screen's "Open App"
   // button (handleOpenApp below) is the one reliable, user-initiated
-  // launch action. Seeded straight to 'unconfirmed' (skipping 'idle') when
-  // isResumingAcceptedInstall is true, so a reload that lands mid-install
-  // never flashes the Install App card again — see INSTALL_PENDING_KEY.
-  // Deliberately NOT 'finalizing': this page never saw its own appinstalled
+  // launch action. Seeded straight to 'installed' when isFullyVerifiedInstall
+  // is true (item 6 priority), else to 'finalizing' when resuming a record
+  // that already carries terminal `confirmed` proof (isResumingConfirmedInstall
+  // — appinstalled genuinely fired before whatever reload brought us here),
+  // else to plain 'unconfirmed' when merely resuming an accepted-but-not-yet-
+  // confirmed record, so a reload that lands mid-install never flashes the
+  // Install App card again — see the pending/confirmed/verified records
+  // above. 'unconfirmed' (rather than 'finalizing') is used for the last
+  // case specifically because this page never saw its own appinstalled
   // event, so it must not enter the trusted/eventually-marks-installed
-  // fallback path that phase implies — see runFinalizeVerification's
+  // fallback path 'finalizing' implies — see runFinalizeVerification's
   // trustFallback comment. It only ever reaches 'installed' from here via a
   // genuine getInstalledRelatedApps() match, or if a real (delayed)
   // appinstalled event still arrives on this page.
-  const [installPhase, setInstallPhase] = useState(() => (isResumingAcceptedInstall ? 'unconfirmed' : 'idle'));
+  const [installPhase, setInstallPhase] = useState(() => {
+    if (isFullyVerifiedInstall) return 'installed';
+    if (isResumingConfirmedInstall) return 'finalizing';
+    if (isResumingAcceptedInstall) return 'unconfirmed';
+    return 'idle';
+  });
   // MOUNT GRACE WINDOW — real-device captures showed Android/Chrome can, on
   // some devices, hand a just-accepted install off into a browsing context
   // that does NOT share sessionStorage OR localStorage with the tab the
@@ -466,7 +517,7 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
   // itself either way — only genuine signals do that.
   const MOUNT_INSTALL_CHECK_GRACE_MS = cameFromOwnInstallPage ? 20000 : 0;
   const [initialInstallCheckPending, setInitialInstallCheckPending] = useState(
-    () => !isResumingAcceptedInstall && cameFromOwnInstallPage
+    () => !isFullyVerifiedInstall && !isResumingAcceptedInstall && cameFromOwnInstallPage
   );
   // Not every Chromium build/version fires appinstalled reliably after an
   // 'accepted' outcome (browser bugs, unusual install flows, etc.) — a ref
@@ -568,10 +619,24 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
 
   useEffect(() => {
     if (!forceInstallLanding) return;
-    if (readInstallPending(normalizedAppSlug)) {
-      // A genuinely accepted install is still being resumed across a
-      // reload (see INSTALL_PENDING_KEY) and this URL happens to still
-      // carry the same ?install=1 the user originally opened — Android can
+    // THE PREMATURE CLEAR (see items 1/2/4/6 in the install-race fix):
+    // this used to check readInstallPending alone. That is false the
+    // instant markInstalled has already cleared it on some earlier page —
+    // including a page this exact component never saw, e.g. one destroyed
+    // by an Android tab discard/reload right as verification finished. A
+    // later remount that still carries ?install=1 (the install landing
+    // link legitimately reopened, or Android replaying that same URL) then
+    // read "no pending record" and treated that as "never installed",
+    // wiping isInstalled/installPhase back to false/'idle' and flashing the
+    // Install App card back up for an app that was already fully verified
+    // installed a moment earlier — the exact race this fix closes. Checking
+    // the terminal verified record FIRST (item 6's installed -> pending ->
+    // idle priority) means a genuinely completed install can never be
+    // un-done by this effect, no matter when/how often it re-runs.
+    if (readInstallVerified(normalizedAppSlug) || readInstallPending(normalizedAppSlug)) {
+      // A genuinely accepted (or already-verified) install is still being
+      // resumed across a reload and this URL happens to still carry the
+      // same ?install=1 the user originally opened — Android can
       // reload/discard this tab mid-WebAPK-install, landing back on that
       // exact URL. That reload must never be treated as a fresh "show the
       // Install App page" visit: doing so used to clear the pending flag
@@ -624,12 +689,49 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
   // bootstrap script — registered before any JS module loads, so an event
   // firing before this component (or even React) mounts is never lost. Pick
   // up one that already arrived, then subscribe for any that fire later.
+  // Deliberately NOT touching that capture mechanism itself here — only
+  // reacting to the event once it reaches this component.
   useEffect(() => {
-    const existingPrompt = getInstallPrompt();
-    if (existingPrompt) setDeferredPrompt(existingPrompt);
+    const handlePromptEvent = (event) => {
+      setDeferredPrompt(event);
+      // RECONCILE STALE "VERIFIED" STATE: the browser only ever fires
+      // beforeinstallprompt for an origin/app it currently considers
+      // installable — Chrome does not fire it for one it still believes is
+      // already installed. So a refire while this slug's persisted
+      // "verified installed" record is still set is itself strong evidence
+      // the user uninstalled the PWA since that record was written (the
+      // record is otherwise non-expiring — see installPendingState.js's own
+      // comment on exactly this). Without this, a device that later
+      // uninstalled would be stuck forever seeing the Installed/"Open App"
+      // card with no way back to a working Install button, even though the
+      // browser is right here handing us a fresh, promptable install event.
+      //
+      // Scoped entirely to normalizedAppSlug (every read/write below goes
+      // through installPendingState.js's slug-scoped keys), so this can
+      // never invalidate a DIFFERENT tenant's verified/pending state.
+      if (readInstallVerified(normalizedAppSlug) || readInstallPending(normalizedAppSlug)) {
+        logInstallFlow('reconcile-stale-verified', { slug: normalizedAppSlug });
+        clearInstallVerified(normalizedAppSlug, 'beforeinstallprompt-refired');
+        clearInstallPending(normalizedAppSlug, 'beforeinstallprompt-refired');
+        autoEnterAfterInstallRef.current = false;
+        setIsInstalled(false);
+        setInstallOutcome('');
+        // Only actually move the visible phase if it was showing the
+        // (now-stale) installed/finalizing/unconfirmed state — never stomp
+        // on 'prompting'/'launching', which would mean a fresh accept is
+        // active RIGHT NOW and this event is unrelated noise, not a signal
+        // to reset anything.
+        setInstallPhase((prev) => (
+          prev === 'prompting' || prev === 'launching' ? prev : 'idle'
+        ));
+      }
+    };
 
-    return subscribeInstallPrompt((event) => setDeferredPrompt(event));
-  }, []);
+    const existingPrompt = getInstallPrompt();
+    if (existingPrompt) handlePromptEvent(existingPrompt);
+
+    return subscribeInstallPrompt(handlePromptEvent);
+  }, [normalizedAppSlug]);
 
   // Detects a tenant PWA that was installed in an EARLIER browser session
   // (appinstalled below only ever sees installs completed during the
@@ -656,6 +758,7 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
     // Running standalone already means THIS exact tenant PWA is what
     // launched this window — no ambiguity, no API call needed.
     if (isStandaloneDisplay()) {
+      writeInstallVerified(normalizedAppSlug);
       setIsInstalled(true);
       setInstallOutcome('installed');
       setInstallPhase('installed');
@@ -714,6 +817,7 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
           });
           logInstallFlow('mount-getInstalledRelatedApps', { slug: normalizedAppSlug, relatedApps, matchesThisTenant, attempt });
           if (matchesThisTenant) {
+            writeInstallVerified(normalizedAppSlug);
             setIsInstalled(true);
             setInstallOutcome('installed');
             setInstallPhase('installed');
@@ -812,6 +916,8 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
       `auto=${autoEntering}`,
       `resuming=${isResumingAcceptedInstall}`,
       `pending=${readInstallPending(normalizedAppSlug)}`,
+      `confirmed=${readInstallConfirmed(normalizedAppSlug)}`,
+      `verified=${readInstallVerified(normalizedAppSlug)}`,
       `grace=${initialInstallCheckPending}`,
       `cameFromOwn=${cameFromOwnInstallPage}`,
       `referrer=${typeof document !== 'undefined' ? document.referrer : ''}`,
@@ -910,6 +1016,15 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
   const markInstalled = useCallback(() => {
     clearAllFinalizeTimers();
     stopInstallPendingHeartbeat();
+    // Item 5: write the terminal "verified" record BEFORE clearing the
+    // pending one below. A remount racing this exact instant (e.g. this
+    // very markInstalled call is what triggers the Android tab
+    // discard/reload to the app's canonical start_url) must always find at
+    // least one persisted signal that this slug's install happened — never
+    // a gap where the pending record was just removed but nothing durable
+    // has taken its place yet, which reads back exactly like "never
+    // installed" and is what let the Install App card flash back up.
+    writeInstallVerified(normalizedAppSlug);
     // The accepted install is now confirmed one way or another — this is
     // the ONLY normal exit from the pending-across-reload window, so this
     // is where the persisted flag is retired.
@@ -1009,7 +1124,10 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
           // different tenant PWA installed on the same device/browser
           // must never confirm this one as finalized.
           const matches = (Array.isArray(relatedApps) ? relatedApps : []).some((app) => {
-            const id = String(app?.id || '').toLowerCase();
+            // Trailing slash stripped from the reported id too (item 9) —
+            // the OS-reported related-app id can legitimately carry one
+            // (e.g. "/app/<slug>/") even though expectedId never does.
+            const id = String(app?.id || '').toLowerCase().replace(/\/+$/, '');
             const url = String(app?.url || '').toLowerCase();
             return id === expectedId || url.includes(manifestPath);
           });
@@ -1056,6 +1174,14 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
         clearTimeout(acceptedTimeoutRef.current);
         acceptedTimeoutRef.current = null;
       }
+      // Item 1: appinstalled is terminal confirmation for this slug —
+      // upgrade the persisted record to `confirmed: true` immediately,
+      // before starting verification or any timer. From this point on,
+      // readInstallPending/readInstallConfirmed for this slug stay true
+      // (see installPendingState.js) no matter how long verification takes
+      // or how many times this tab gets backgrounded/discarded/reloaded in
+      // between, until markInstalled itself retires the record.
+      writeInstallPending(normalizedAppSlug, { confirmed: true });
       // A genuine `appinstalled` firing on THIS page is, by itself, proof a
       // fresh install just completed right now — the browser only ever
       // dispatches it once, at the moment installation finishes, never on
@@ -1083,19 +1209,29 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
     window.addEventListener('appinstalled', handleAppInstalled);
 
     // RELOAD-RESUME PATH: this page never got its own 'appinstalled' event
-    // (it's a fresh document) but sessionStorage says the user already
-    // accepted install before whatever reload brought us here — installPhase
-    // was already seeded to 'unconfirmed' for this same reason (see its
-    // useState initializer above). trustFallback MUST be false here: an
-    // accepted outcome from a possibly-earlier page load, with no
-    // appinstalled event ever having fired on THIS page, is exactly the
-    // "not yet confirmed" case runFinalizeVerification's trustFallback
-    // param exists for — this must only ever reach 'installed' via a
-    // genuine getInstalledRelatedApps() match, or if a real appinstalled
-    // event still arrives (handleAppInstalled above, which does pass
-    // trustFallback: true, since THAT is a genuine confirmed signal).
+    // (it's a fresh document) but the persisted record says the user
+    // already accepted install before whatever reload brought us here —
+    // installPhase was already seeded to 'unconfirmed'/'finalizing' for
+    // this same reason (see its useState initializer above).
+    //
+    // trustFallback mirrors whichever phase was seeded: false (the
+    // existing, weaker behavior) when the resumed record has NOT itself
+    // been `confirmed` — an accepted outcome with no appinstalled event
+    // ever having fired on ANY page is exactly the "not yet confirmed" case
+    // runFinalizeVerification's trustFallback param exists for, and this
+    // must only ever reach 'installed' via a genuine
+    // getInstalledRelatedApps() match, or if a real appinstalled event
+    // still arrives (handleAppInstalled above, which does pass
+    // trustFallback: true).
+    //
+    // But true when the resumed record IS `confirmed` (item 1/7): a real
+    // appinstalled event already fired on some earlier page for this exact
+    // slug, which is just as strong a signal as this page seeing its own —
+    // there is no reason to make this page re-earn that confirmation from
+    // scratch, and treating it as unconfirmed here is exactly what used to
+    // leave the door open for the idle-regression race this fix closes.
     if (isResumingAcceptedInstall) {
-      runFinalizeVerification({ trustFallback: false });
+      runFinalizeVerification({ trustFallback: isResumingConfirmedInstall });
     }
 
     return () => {

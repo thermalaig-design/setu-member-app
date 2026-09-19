@@ -109,35 +109,53 @@ input, textarea, select {
   font-family: var(--font-family, 'Inter', ui-sans-serif, system-ui, sans-serif);
 }
 
+/* Normal document scrolling — deliberately NOT position:fixed/height:100%
+   here. That permanent lock turned the document itself unscrollable and
+   forced every page to scroll inside #root instead, which regressed plain
+   vertical scrolling on Android and silently broke every window.scrollY/
+   window.scrollTo(...)-based scroll-position feature elsewhere in the app
+   (they all assume the document scrolls). overscroll-behavior alone is
+   enough to stop pull-to-refresh/rubber-band bounce from leaking past the
+   page without taking away real scrolling.
+   Temporary scroll locking (a modal or sidebar open) is handled entirely by
+   the many per-component lock/unlock helpers already in this codebase
+   (e.g. AchievementDetail.jsx's lockPageScroll, or the plain
+   document.body.style.overflow = 'hidden' / restore pattern used across
+   Notices.jsx, Events.jsx, Cart.jsx, the sidebar, etc.) — those set and
+   clear body's overflow/position themselves for exactly as long as their
+   overlay is open, and must keep working against this normal baseline. */
 body {
   overscroll-behavior: contain;
   overscroll-behavior-y: contain;
-  position: fixed;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
 }
 
 #root {
   width: 100%;
-  height: 100%;
-  overflow: auto;
-  overflow-x: hidden;
   scrollbar-width: none;
   scrollbar-color: color-mix(in srgb, var(--brand-navy) 40%, transparent) color-mix(in srgb, var(--surface-color) 94%, var(--body-text-color));
   -ms-overflow-style: none;
 }
+
+/* Scrollbar cosmetics now target the real scrolling element (the document)
+   instead of #root, which no longer scrolls on its own. */
+html {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+html::-webkit-scrollbar,
 #root::-webkit-scrollbar {
   display: none;
 }
+html::-webkit-scrollbar-track,
 #root::-webkit-scrollbar-track {
   background: color-mix(in srgb, var(--surface-color) 94%, var(--body-text-color));
 }
+html::-webkit-scrollbar-thumb,
 #root::-webkit-scrollbar-thumb {
   background: color-mix(in srgb, var(--brand-navy) 40%, transparent);
   border-radius: 4px;
 }
+html::-webkit-scrollbar-thumb:hover,
 #root::-webkit-scrollbar-thumb:hover {
   background: color-mix(in srgb, var(--brand-navy) 60%, transparent);
 }
