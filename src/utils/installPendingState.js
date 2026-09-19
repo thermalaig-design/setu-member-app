@@ -8,36 +8,40 @@
 // React, no DOM beyond localStorage) so it can be unit tested directly
 // under plain `node --test`, the same way utils/tenantNavigation.js is.
 //
-// Two independent flags live here, deliberately not merged into one:
-// - the PENDING record: "the user accepted install; has it been confirmed
-//   yet?" — time-bounded (see INSTALL_PENDING_MAX_AGE_MS) UNLESS its
-//   `confirmed` field is set, in which case it never goes stale purely from
-//   elapsed wall-clock time. `confirmed` is set the moment a genuine
-//   `appinstalled` event fires — see isConfirmed's own comment for why a
-//   plain TTL alone cannot be trusted for that case.
-// - the INSTALLED record: "this install was, at some point, fully verified"
-//   — written only once, right when that verification succeeds, and does
-//   not expire on its own. Its job is to close the gap between
-//   "verification just succeeded in memory" and "the pending record has
-//   been cleared" so a remount racing that exact moment always has at
-//   least one persisted signal to read, never neither (see
-//   writeVerifiedRecord's own comment). It is NOT permanent proof the app
-//   is still installed, though — the browser itself is the source of truth
-//   for that. TenantLanding.jsx clears it (clearVerifiedRecord) the moment
-//   `beforeinstallprompt` fires again for this slug, since a browser only
-//   fires that event for an origin/app it currently considers installable,
-//   which it does not for one it still believes is installed — a refire is
-//   itself strong evidence the user uninstalled since this record was
-//   written. Every read/write here is scoped by normalizeSlugIdentity, so
-//   this reconciliation for tenant A's slug can never touch tenant B's.
+// Two independent records live here, deliberately not merged into one:
+// - the PENDING record: "the user accepted install; has the real
+//   `appinstalled` event fired yet?" — always time-bounded (see
+//   INSTALL_PENDING_MAX_AGE_MS): if it isn't refreshed by TenantLanding.jsx's
+//   heartbeat for that long, it's treated as abandoned rather than resuming
+//   a loader forever.
+// - the VERIFIED record: "a genuine `appinstalled` event fired for this
+//   slug" — written ONLY from that real event (see TenantLanding.jsx's
+//   markInstalled/handleAppInstalled), never from a timeout, a heartbeat, or
+//   an early getInstalledRelatedApps() match. It does not expire on its own
+//   once written. Its job is twofold:
+//   1. close the gap between "the appinstalled handler just ran" and "the
+//      pending record has been cleared" so a remount racing that exact
+//      moment always has at least one persisted signal to read, never
+//      neither (see writeVerifiedRecord's own comment);
+//   2. let a later remount go straight back to the success/Open-App screen
+//      (resolveInstallUiState below) without re-showing any loader.
+//   It is NOT permanent proof the app is still installed, though — the
+//   browser itself is the source of truth for that. TenantLanding.jsx
+//   clears it (clearVerifiedRecord) the moment `beforeinstallprompt` fires
+//   again for this slug, since a browser only fires that event for an
+//   origin/app it currently considers installable, which it does not for
+//   one it still believes is installed — a refire is itself strong evidence
+//   the user uninstalled since this record was written. Every read/write
+//   here is scoped by normalizeSlugIdentity, so this reconciliation for
+//   tenant A's slug can never touch tenant B's.
 const PENDING_KEY_PREFIX = 'tenant_install_pending_v1:';
 const INSTALLED_KEY_PREFIX = 'tenant_install_installed_v1:';
 
-// How long an UNCONFIRMED pending record can go without its timestamp being
-// refreshed before it's treated as stale/abandoned. Measured from the last
-// refresh, not the original accept — see TenantLanding.jsx's install-pending
+// How long the pending record can go without its timestamp being refreshed
+// before it's treated as stale/abandoned. Measured from the last refresh,
+// not the original accept — see TenantLanding.jsx's install-pending
 // heartbeat, which keeps sliding this forward for as long as an install is
-// actively being waited on/verified.
+// actively being waited on.
 export const INSTALL_PENDING_MAX_AGE_MS = 120000;
 
 // Strips a trailing slash (and normalizes case/whitespace) so `/app/<slug>`
@@ -59,11 +63,7 @@ export const readPendingRecord = (slug, { now = Date.now() } = {}) => {
     if (!raw) return null;
     const parsed = JSON.parse(raw);
     if (!parsed || parsed.slug !== normalizedSlug || !parsed.ts) return null;
-    // A confirmed record is terminal proof for this slug (a real
-    // `appinstalled` event already fired) — it must never be discarded just
-    // because a lot of wall-clock time passed while this tab was
-    // backgrounded/throttled/discarded and missed heartbeat writes.
-    if (!parsed.confirmed && now - parsed.ts > INSTALL_PENDING_MAX_AGE_MS) return null;
+    if (now - parsed.ts > INSTALL_PENDING_MAX_AGE_MS) return null;
     return parsed;
   } catch {
     return null;
@@ -71,18 +71,12 @@ export const readPendingRecord = (slug, { now = Date.now() } = {}) => {
 };
 
 export const isInstallPending = (slug, options) => Boolean(readPendingRecord(slug, options));
-export const isInstallConfirmed = (slug, options) => Boolean(readPendingRecord(slug, options)?.confirmed);
 
-// `confirmed: true` is a one-way upgrade — once a record is confirmed,
-// later calls (e.g. the periodic heartbeat, which never itself passes
-// `confirmed`) must not accidentally downgrade it back to unconfirmed by
-// overwriting the record without that field.
-export const writePendingRecord = (slug, { confirmed = false } = {}) => {
+export const writePendingRecord = (slug) => {
   const normalizedSlug = normalizeSlugIdentity(slug);
   if (!normalizedSlug) return null;
   try {
-    const existing = readPendingRecord(normalizedSlug);
-    const value = { slug: normalizedSlug, ts: Date.now(), confirmed: confirmed || Boolean(existing?.confirmed) };
+    const value = { slug: normalizedSlug, ts: Date.now() };
     localStorage.setItem(getPendingKey(normalizedSlug), JSON.stringify(value));
     return value;
   } catch {
@@ -110,9 +104,9 @@ export const isInstallVerified = (slug) => {
   }
 };
 
-// Written the instant verification succeeds (a genuine
-// getInstalledRelatedApps match, or the trusted appinstalled-fallback
-// timeout) — BEFORE the pending record is cleared, so a remount racing
+// Written the instant a genuine `appinstalled` event is handled — BEFORE
+// the pending record is cleared and BEFORE isInstalled/installPhase are set
+// in React state (see markInstalled's own comment) — so a remount racing
 // that exact instant sees the install record already in place rather than
 // a brief window with no persisted evidence of the install at all, which
 // would otherwise be indistinguishable from "never accepted".
@@ -130,9 +124,9 @@ export const writeVerifiedRecord = (slug) => {
 // why `beforeinstallprompt` firing again for the same slug is the signal
 // that triggers this (TenantLanding.jsx's deferredPrompt subscription).
 // Also clears any pending record for the same slug: if the browser is
-// reporting the app installable again, an old accepted/confirmed-but-never-
-// finished record for it is equally stale and must not keep seeding a
-// 'finalizing'/'unconfirmed' phase on the next mount either.
+// reporting the app installable again, an old accepted-but-never-finished
+// record for it is equally stale and must not keep seeding a loader on the
+// next mount either.
 export const clearVerifiedRecord = (slug) => {
   const normalizedSlug = normalizeSlugIdentity(slug);
   if (!normalizedSlug) return;
@@ -141,4 +135,28 @@ export const clearVerifiedRecord = (slug) => {
   } catch {
     // ignore
   }
+};
+
+// Resolves the mount-time install UI state purely from these two persisted
+// records, in the exact priority a fresh install's success UI must respect:
+// verified -> pending -> idle (a genuinely completed install always wins,
+// a merely-accepted-but-unconfirmed one always renders a loader, never
+// Install App or success, and only the total absence of either shows
+// Install App). Exported and unit-tested on its own here, separately from
+// TenantLanding.jsx, so this priority rule is verifiable without a
+// DOM/React harness. TenantLanding.jsx seeds its isInstalled/installPhase
+// state from this on every mount, and — critically — only ever moves OFF
+// this seed via a genuine `appinstalled` DOM event (markInstalled/
+// handleAppInstalled there); never from a timeout, a heartbeat tick, or an
+// early getInstalledRelatedApps() match.
+export const resolveInstallUiState = (slug, options) => {
+  const verified = isInstallVerified(slug);
+  const pending = !verified && isInstallPending(slug, options);
+  return {
+    isInstalled: verified,
+    isResumingAcceptedInstall: pending,
+    // 'unconfirmed': accepted, not yet verified — always a loader/fallback
+    // screen, never Install App and never the success screen.
+    phase: verified ? 'installed' : pending ? 'unconfirmed' : 'idle',
+  };
 };

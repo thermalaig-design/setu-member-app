@@ -26,76 +26,137 @@ const {
   normalizeSlugIdentity,
   readPendingRecord,
   isInstallPending,
-  isInstallConfirmed,
   writePendingRecord,
   clearPendingRecord,
   isInstallVerified,
   writeVerifiedRecord,
   clearVerifiedRecord,
+  resolveInstallUiState,
 } = await import('../src/utils/installPendingState.js');
 
-test('accept -> appinstalled -> many empty polls never looks abandoned (the install-state race this module fixes)', () => {
+// --- Fresh-install success UI must be gated by the real `appinstalled`
+// event, never by a timeout/heartbeat/early getInstalledRelatedApps match. ---
+
+test('accepted + no appinstalled => loader only, never success', () => {
   installLocalStorageStub();
   const slug = 'business-app';
 
-  // 1. user accepts the native prompt.
   writePendingRecord(slug);
-  assert.equal(isInstallPending(slug), true);
-  assert.equal(isInstallConfirmed(slug), false);
 
-  // 2. a real `appinstalled` event fires — terminal confirmation.
-  writePendingRecord(slug, { confirmed: true });
-  assert.equal(isInstallConfirmed(slug), true);
+  // No matter how long verification would have polled in the old design,
+  // or how many heartbeat writes happen, an accepted-but-unverified record
+  // must never resolve to the success phase.
+  const state = resolveInstallUiState(slug);
+  assert.equal(state.phase, 'unconfirmed');
+  assert.equal(state.isInstalled, false);
+  assert.equal(state.isResumingAcceptedInstall, true);
 
-  // 3. verification polls getInstalledRelatedApps repeatedly and keeps
-  // coming back empty (device hasn't caught up yet) for well past the old
-  // fixed TTL, while the tab is backgrounded/throttled and the heartbeat
-  // that used to refresh `ts` never runs. A confirmed record must survive
-  // this regardless of elapsed time.
-  const farFuture = Date.now() + INSTALL_PENDING_MAX_AGE_MS * 10;
-  assert.equal(isInstallPending(slug, { now: farFuture }), true);
-  assert.equal(isInstallConfirmed(slug, { now: farFuture }), true);
+  // Even a heartbeat rewrite (writePendingRecord called again, exactly what
+  // TenantLanding.jsx's startInstallPendingHeartbeat does) never verifies
+  // the install by itself.
+  writePendingRecord(slug);
+  assert.equal(isInstallVerified(slug), false);
+  assert.equal(resolveInstallUiState(slug).phase, 'unconfirmed');
+});
 
-  // 4. verification eventually gets two consecutive matches and the app
-  // marks the install fully verified, in the order the fix requires:
-  // write the terminal "verified" record before clearing "pending".
+test('accepted + appinstalled => success immediately', () => {
+  installLocalStorageStub();
+  const slug = 'business-app';
+
+  writePendingRecord(slug);
+  assert.equal(resolveInstallUiState(slug).phase, 'unconfirmed');
+
+  // Mirrors markInstalled's own required order: write verified FIRST, then
+  // (in the component) set isInstalled/installPhase, then clear pending.
+  writeVerifiedRecord(slug);
+  assert.equal(resolveInstallUiState(slug).phase, 'installed');
+  clearPendingRecord(slug);
+
+  const state = resolveInstallUiState(slug);
+  assert.equal(state.phase, 'installed');
+  assert.equal(state.isInstalled, true);
+});
+
+test('remount after persisted appinstalled => success', () => {
+  installLocalStorageStub();
+  const slug = 'business-app';
+
+  writePendingRecord(slug);
   writeVerifiedRecord(slug);
   clearPendingRecord(slug);
 
-  assert.equal(isInstallVerified(slug), true);
-  assert.equal(isInstallPending(slug), false);
+  // Simulates a brand new mount (a fresh TenantLanding render, or a real
+  // page reload) reading only from persisted storage.
+  const state = resolveInstallUiState(slug);
+  assert.equal(state.phase, 'installed');
+  assert.equal(state.isInstalled, true);
+  assert.equal(state.isResumingAcceptedInstall, false);
 });
 
-test('an unconfirmed pending record does go stale after INSTALL_PENDING_MAX_AGE_MS with no heartbeat', () => {
+test('pending without verified => loader', () => {
   installLocalStorageStub();
   const slug = 'business-app';
 
-  writePendingRecord(slug); // confirmed: false
+  writePendingRecord(slug);
+
+  const state = resolveInstallUiState(slug);
+  assert.equal(state.phase, 'unconfirmed');
+  assert.equal(state.isInstalled, false);
+});
+
+test('no pending and no verified => Install App', () => {
+  installLocalStorageStub();
+  const slug = 'never-installed-app';
+
+  const state = resolveInstallUiState(slug);
+  assert.equal(state.phase, 'idle');
+  assert.equal(state.isInstalled, false);
+  assert.equal(state.isResumingAcceptedInstall, false);
+});
+
+// The live "did the appinstalled handler promote state before Chrome's own
+// event fired" concern (the [install-flow:appinstalled-fired]
+// `alreadyInstalled: true` bug report) is a React-timing question that
+// needs a DOM/React harness this repo doesn't have to exercise directly.
+// What IS verifiable here, and is the actual fix, is the invariant that
+// made that bug possible in the first place: verified state must never
+// come from anything but an explicit writeVerifiedRecord call — never
+// implied by a pending record's age, a heartbeat write, or elapsed time.
+test('accepting alone (and any number of heartbeat rewrites) never implies verified, at any elapsed time', () => {
+  installLocalStorageStub();
+  const slug = 'business-app';
+
+  writePendingRecord(slug);
+  for (let i = 0; i < 5; i += 1) {
+    writePendingRecord(slug); // heartbeat-style rewrite
+  }
+  assert.equal(isInstallVerified(slug), false);
+
+  // Even once the pending record itself would be considered stale, that is
+  // still never treated as verified — it simply stops being "pending" too
+  // (see the staleness test below), it does not flip to "installed".
+  const farFuture = Date.now() + INSTALL_PENDING_MAX_AGE_MS * 10;
+  assert.equal(isInstallVerified(slug), false);
+  assert.equal(resolveInstallUiState(slug, { now: farFuture }).phase, 'idle');
+});
+
+test('a pending record goes stale after INSTALL_PENDING_MAX_AGE_MS with no heartbeat', () => {
+  installLocalStorageStub();
+  const slug = 'business-app';
+
+  writePendingRecord(slug);
   const justPastMaxAge = Date.now() + INSTALL_PENDING_MAX_AGE_MS + 1;
 
   assert.equal(isInstallPending(slug, { now: justPastMaxAge }), false);
   assert.equal(readPendingRecord(slug, { now: justPastMaxAge }), null);
 });
 
-test('the heartbeat rewriting the record without `confirmed` never downgrades an already-confirmed record', () => {
-  installLocalStorageStub();
-  const slug = 'business-app';
-
-  writePendingRecord(slug, { confirmed: true });
-  // Simulates startInstallPendingHeartbeat's periodic writeInstallPending(slug)
-  // call, which never itself passes `confirmed`.
-  writePendingRecord(slug);
-
-  assert.equal(isInstallConfirmed(slug), true);
-});
-
 test('/app/<slug> and /app/<slug>/ resolve to the same install identity', () => {
   installLocalStorageStub();
 
-  writePendingRecord('business-app/', { confirmed: true });
+  writePendingRecord('business-app/');
 
   assert.equal(isInstallPending('business-app'), true);
-  assert.equal(isInstallConfirmed('business-app'), true);
   assert.equal(normalizeSlugIdentity('Business-App/'), 'business-app');
 });
 
@@ -103,7 +164,7 @@ test('the verified record is independent of and outlives the pending record', ()
   installLocalStorageStub();
   const slug = 'business-app';
 
-  writePendingRecord(slug, { confirmed: true });
+  writePendingRecord(slug);
   writeVerifiedRecord(slug);
   clearPendingRecord(slug);
 
@@ -111,26 +172,28 @@ test('the verified record is independent of and outlives the pending record', ()
   assert.equal(isInstallVerified(slug), true);
 });
 
-test('an absent record reads as not-pending/not-confirmed/not-verified without throwing', () => {
+test('an absent record reads as not-pending/not-verified/idle without throwing', () => {
   installLocalStorageStub();
   const slug = 'never-installed-app';
 
   assert.equal(isInstallPending(slug), false);
-  assert.equal(isInstallConfirmed(slug), false);
   assert.equal(isInstallVerified(slug), false);
   assert.equal(readPendingRecord(slug), null);
+  assert.equal(resolveInstallUiState(slug).phase, 'idle');
 });
 
 test('a record written for one slug is never read back for a different slug', () => {
   installLocalStorageStub();
 
-  writePendingRecord('tenant-a', { confirmed: true });
+  writePendingRecord('tenant-a');
   writeVerifiedRecord('tenant-a');
 
   assert.equal(isInstallPending('tenant-b'), false);
-  assert.equal(isInstallConfirmed('tenant-b'), false);
   assert.equal(isInstallVerified('tenant-b'), false);
+  assert.equal(resolveInstallUiState('tenant-b').phase, 'idle');
 });
+
+// --- Non-expiring verified state must still be reversible on uninstall. ---
 
 // Regression test for: verified -> user uninstalls the PWA -> the browser
 // later reports it installable again (beforeinstallprompt refires) -> the
@@ -144,7 +207,7 @@ test('verified -> later browser becomes installable again -> reinstall UI can ap
   const slug = 'business-app';
 
   // Full happy-path install completed earlier.
-  writePendingRecord(slug, { confirmed: true });
+  writePendingRecord(slug);
   writeVerifiedRecord(slug);
   clearPendingRecord(slug);
   assert.equal(isInstallVerified(slug), true);
@@ -158,22 +221,22 @@ test('verified -> later browser becomes installable again -> reinstall UI can ap
 
   // Reinstall UI is safe to show again: neither record claims this slug is
   // installed or mid-install any more.
-  assert.equal(isInstallVerified(slug), false);
-  assert.equal(isInstallPending(slug), false);
-  assert.equal(isInstallConfirmed(slug), false);
+  const state = resolveInstallUiState(slug);
+  assert.equal(state.phase, 'idle');
+  assert.equal(state.isInstalled, false);
 
   // A fresh accept afterwards works exactly like a first-time install.
   writePendingRecord(slug);
-  assert.equal(isInstallPending(slug), true);
+  assert.equal(resolveInstallUiState(slug).phase, 'unconfirmed');
   assert.equal(isInstallVerified(slug), false);
 });
 
 test('clearVerifiedRecord for tenant A never affects tenant B\'s verified/pending state', () => {
   installLocalStorageStub();
 
-  writePendingRecord('tenant-a', { confirmed: true });
+  writePendingRecord('tenant-a');
   writeVerifiedRecord('tenant-a');
-  writePendingRecord('tenant-b', { confirmed: true });
+  writePendingRecord('tenant-b');
   writeVerifiedRecord('tenant-b');
 
   clearVerifiedRecord('tenant-a');
@@ -183,5 +246,4 @@ test('clearVerifiedRecord for tenant A never affects tenant B\'s verified/pendin
   assert.equal(isInstallPending('tenant-a'), false);
   assert.equal(isInstallVerified('tenant-b'), true);
   assert.equal(isInstallPending('tenant-b'), true);
-  assert.equal(isInstallConfirmed('tenant-b'), true);
 });
