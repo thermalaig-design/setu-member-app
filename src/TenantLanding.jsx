@@ -16,6 +16,21 @@ const PENDING_CREATED_APP_URL_KEY = 'pending_created_app_install_url';
 const PENDING_CREATED_APP_TS_KEY = 'pending_created_app_install_url_ts';
 const normalizeText = (value) => String(value || '').trim();
 
+// TEMPORARY DIAGNOSTICS — added to compare the install flow on
+// /app/business-app against a known-working tenant side by side on a real
+// device. Logs only, never changes behavior/state. Safe to delete entirely
+// once the tenant-specific cause is confirmed and fixed; every call site is
+// tagged `logInstallFlow(...)` so they're easy to find and strip.
+const INSTALL_FLOW_DEBUG = true;
+const logInstallFlow = (label, data) => {
+  if (!INSTALL_FLOW_DEBUG || typeof console === 'undefined') return;
+  try {
+    console.log(`[install-flow:${label}]`, data);
+  } catch {
+    // ignore
+  }
+};
+
 // ANDROID FRESH-INSTALL PATH: after the user accepts the native install
 // prompt, Android's WebAPK package install is a real OS-level operation that
 // can run long enough for Chrome to background/discard this tab's renderer
@@ -63,28 +78,44 @@ const UNCONFIRMED_POLL_MAX_MS = 20000;
 const readInstallPending = (slug) => {
   try {
     const raw = sessionStorage.getItem(INSTALL_PENDING_KEY);
-    if (!raw) return false;
+    if (!raw) {
+      logInstallFlow('pending-read', { requestedSlug: slug, raw: null, result: false });
+      return false;
+    }
     const parsed = JSON.parse(raw);
-    if (!parsed || parsed.slug !== slug || !parsed.ts) return false;
-    if (Date.now() - parsed.ts > INSTALL_PENDING_MAX_AGE_MS) return false;
+    if (!parsed || parsed.slug !== slug || !parsed.ts) {
+      logInstallFlow('pending-read', { requestedSlug: slug, raw: parsed, result: false, reason: !parsed ? 'unparseable' : parsed.slug !== slug ? 'slug-mismatch' : 'no-ts' });
+      return false;
+    }
+    const ageMs = Date.now() - parsed.ts;
+    if (ageMs > INSTALL_PENDING_MAX_AGE_MS) {
+      logInstallFlow('pending-read', { requestedSlug: slug, raw: parsed, result: false, reason: 'stale', ageMs });
+      return false;
+    }
+    logInstallFlow('pending-read', { requestedSlug: slug, raw: parsed, result: true, ageMs });
     return true;
-  } catch {
+  } catch (err) {
+    logInstallFlow('pending-read', { requestedSlug: slug, result: false, reason: 'exception', err: err?.message });
     return false;
   }
 };
 
 const writeInstallPending = (slug) => {
   try {
-    sessionStorage.setItem(INSTALL_PENDING_KEY, JSON.stringify({ slug, ts: Date.now() }));
-  } catch {
+    const value = { slug, ts: Date.now() };
+    sessionStorage.setItem(INSTALL_PENDING_KEY, JSON.stringify(value));
+    logInstallFlow('pending-write', value);
+  } catch (err) {
     // Private-mode/quota failure — worst case the reload-resume fallback
     // below simply doesn't kick in; the rest of the flow is unaffected.
+    logInstallFlow('pending-write-failed', { slug, err: err?.message });
   }
 };
 
-const clearInstallPending = () => {
+const clearInstallPending = (reason) => {
   try {
     sessionStorage.removeItem(INSTALL_PENDING_KEY);
+    logInstallFlow('pending-clear', { reason: reason || 'unspecified' });
   } catch {
     // ignore
   }
@@ -323,7 +354,17 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
   // Computed once per mount (sessionStorage doesn't change out from under a
   // live tab) and used only to seed initial state below — see
   // INSTALL_PENDING_KEY's own comment for why this exists.
-  const isResumingAcceptedInstall = !forceInstallLanding && readInstallPending(normalizedAppSlug);
+  //
+  // Deliberately NOT gated on `!forceInstallLanding`: the install landing
+  // link this component is opened from (see AddCommunity.jsx) always
+  // carries `?install=1`, so a reload that lands back on that exact same
+  // URL mid-WebAPK-install (Android can background/discard this tab while
+  // the OS finishes installing) still has forceInstallLanding === true.
+  // Gating this on it used to force isResumingAcceptedInstall to false on
+  // exactly that reload, wiping the pending flag and dropping back to the
+  // Install App card even though the user had already accepted — see the
+  // forceInstallLanding reset effect below, which has the matching guard.
+  const isResumingAcceptedInstall = readInstallPending(normalizedAppSlug);
 
   const [deferredPrompt, setDeferredPrompt] = useState(null);
   const [installOutcome, setInstallOutcome] = useState('');
@@ -453,6 +494,20 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
 
   useEffect(() => {
     if (!forceInstallLanding) return;
+    if (readInstallPending(normalizedAppSlug)) {
+      // A genuinely accepted install is still being resumed across a
+      // reload (see INSTALL_PENDING_KEY) and this URL happens to still
+      // carry the same ?install=1 the user originally opened — Android can
+      // reload/discard this tab mid-WebAPK-install, landing back on that
+      // exact URL. That reload must never be treated as a fresh "show the
+      // Install App page" visit: doing so used to clear the pending flag
+      // and drop installPhase back to 'idle', which is what made the
+      // Install App card flash back up moments after the user had already
+      // accepted the native prompt. Leave everything alone here — the
+      // resume-across-reload path (isResumingAcceptedInstall above, and the
+      // appinstalled/runFinalizeVerification effects below) owns this case.
+      return;
+    }
     try {
       sessionStorage.removeItem(PENDING_CREATED_APP_URL_KEY);
       sessionStorage.removeItem(PENDING_CREATED_APP_TS_KEY);
@@ -463,7 +518,7 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
     }
     // Explicit request for the install landing (?install=1) — never resume
     // a stale accepted-install flag into this deliberately-fresh view.
-    clearInstallPending();
+    clearInstallPending('force-install-landing');
     setShowTenantHome(false);
     setTenantAccessState(null);
     setTenantAccessPayload(null);
@@ -558,6 +613,7 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
           const id = String(app?.id || '').toLowerCase();
           return url.includes(manifestPath) || id.includes(normalizedAppSlug);
         });
+        logInstallFlow('mount-getInstalledRelatedApps', { slug: normalizedAppSlug, relatedApps, matchesThisTenant });
         if (matchesThisTenant) {
           setIsInstalled(true);
           setInstallOutcome('installed');
@@ -578,6 +634,38 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
   useEffect(() => {
     isInstalledRef.current = isInstalled;
   }, [isInstalled]);
+
+  // TEMPORARY DIAGNOSTICS — see INSTALL_FLOW_DEBUG at the top of this file.
+  // Logs the resolved tenant identity and the <link rel="manifest"> href
+  // actually present in <head> right now, so a side-by-side capture against
+  // a known-working tenant shows whether business-app's slug/manifest
+  // wiring resolves any differently at runtime than it does over plain
+  // curl. installPhase/isInstalled are included on their own line below so
+  // every phase transition is visible without re-logging tenant identity
+  // each time.
+  useEffect(() => {
+    const manifestLink = typeof document !== 'undefined' ? document.querySelector('link[rel="manifest"]') : null;
+    logInstallFlow('tenant-identity', {
+      rawAppSlug: appSlug,
+      normalizedAppSlug,
+      forceInstallLanding,
+      tenantTrustId: tenantTrust?.id || null,
+      tenantTrustName: tenantTrust?.name || null,
+      tenantTrustAppSlug: tenantTrust?.app_slug || null,
+      installedSlug,
+      manifestHref: manifestLink?.getAttribute('href') || null,
+      isResumingAcceptedInstall
+    });
+  }, [appSlug, normalizedAppSlug, forceInstallLanding, tenantTrust, installedSlug, isResumingAcceptedInstall]);
+
+  // TEMPORARY DIAGNOSTICS — logs every installPhase/isInstalled transition,
+  // so a captured console session shows the exact sequence of phases this
+  // tenant actually went through (idle -> prompting -> launching ->
+  // finalizing/unconfirmed -> installed), without needing to instrument
+  // every individual setInstallPhase call site.
+  useEffect(() => {
+    logInstallFlow('phase', { slug: normalizedAppSlug, installPhase, isInstalled, autoEntering });
+  }, [normalizedAppSlug, installPhase, isInstalled, autoEntering]);
 
   // See INSTALL_PENDING_KEY/INSTALL_PENDING_MAX_AGE_MS above: keeps the
   // pending flag's timestamp fresh for as long as this tab is actively
@@ -670,7 +758,7 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
     // The accepted install is now confirmed one way or another — this is
     // the ONLY normal exit from the pending-across-reload window, so this
     // is where the sessionStorage flag is retired.
-    clearInstallPending();
+    clearInstallPending('markInstalled');
     setIsInstalled(true);
     setInstallOutcome('installed');
     // For a fresh install accepted this session, flip autoEntering in
@@ -726,14 +814,18 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
     // this, a device that never confirms install would keep every future
     // reload trapped resuming into 'unconfirmed' indefinitely.
     const giveUpUnconfirmed = () => {
+      logInstallFlow('verification-give-up', { slug: normalizedAppSlug, trustFallback });
       stopInstallPendingHeartbeat();
     };
+
+    logInstallFlow('verification-start', { slug: normalizedAppSlug, trustFallback });
 
     if (trustFallback) {
       finalizeMaxTimeoutRef.current = setTimeout(markInstalled, MAX_FINALIZING_MS);
     }
 
     if (typeof navigator === 'undefined' || typeof navigator.getInstalledRelatedApps !== 'function') {
+      logInstallFlow('verification-unsupported', { slug: normalizedAppSlug, trustFallback });
       if (trustFallback) {
         postInstallGraceTimeoutRef.current = setTimeout(markInstalled, UNSUPPORTED_FALLBACK_DELAY_MS);
       } else {
@@ -767,6 +859,7 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
             return id === expectedId || url.includes(manifestPath);
           });
           consecutiveMatches = matches ? consecutiveMatches + 1 : 0;
+          logInstallFlow('verification-poll', { slug: normalizedAppSlug, trustFallback, relatedApps, matches, consecutiveMatches, expectedId, manifestPath });
           if (consecutiveMatches >= REQUIRED_CONSECUTIVE_MATCHES) {
             markInstalled();
             return;
@@ -777,8 +870,9 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
             giveUpUnconfirmed();
           }
         })
-        .catch(() => {
+        .catch((err) => {
           consecutiveMatches = 0;
+          logInstallFlow('verification-poll-error', { slug: normalizedAppSlug, trustFallback, err: err?.message });
           if (pollDeadline === null || Date.now() + CHECK_INTERVAL_MS <= pollDeadline) {
             finalizeCheckTimeoutRef.current = setTimeout(checkInstalled, CHECK_INTERVAL_MS);
           } else {
@@ -792,6 +886,7 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
 
   useEffect(() => {
     const handleAppInstalled = () => {
+      logInstallFlow('appinstalled-fired', { slug: normalizedAppSlug, at: Date.now() });
       if (acceptedTimeoutRef.current) {
         clearTimeout(acceptedTimeoutRef.current);
         acceptedTimeoutRef.current = null;
@@ -1147,9 +1242,10 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
   // SETU session saved on this device (from a different login, possibly for
   // a different Trust) must never be silently reused here without the user
   // being able to see/reject it. Clears only auth/session/selected-Trust
-  // keys — never the installed_app_trust_id/installed_app_slug identity
-  // TenantContext owns, so this device's tenant PWA context is untouched —
-  // then sends the user into this same tenant's login flow.
+  // keys — never the per-slug installed_app_trust_id:<slug> / per-window
+  // active_app_slug identity TenantContext/tenantNavigation own, so this
+  // device's tenant PWA context is untouched — then sends the user into
+  // this same tenant's login flow.
   const handleUseAnotherNumber = useCallback(() => {
     clearTenantUserSession();
     setTenantAccessState(null);
@@ -1438,6 +1534,7 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
       // here; the UI shows the full-screen launching transition below and
       // only the appinstalled listener flips isInstalled to true.
       const { outcome } = await deferredPrompt.userChoice;
+      logInstallFlow('userChoice', { slug: normalizedAppSlug, outcome });
       // Consumed — a BeforeInstallPromptEvent can only be prompted once, so
       // clear the shared store too, not just this component's own state.
       clearInstallPrompt();
@@ -1482,7 +1579,7 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
       } else {
         autoEnterAfterInstallRef.current = false;
         stopInstallPendingHeartbeat();
-        clearInstallPending();
+        clearInstallPending('dismissed');
         setInstallPhase('idle');
       }
       return;
