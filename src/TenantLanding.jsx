@@ -47,7 +47,10 @@ const logInstallFlow = (label, data) => {
 // again. It deliberately does NOT survive a genuinely new visit (a closed
 // tab / new tab clears sessionStorage), so it can never wrongly resume a
 // loader on an unrelated later visit.
-const INSTALL_PENDING_KEY = 'tenant_install_pending_v1';
+// Keyed per-slug (tenant_install_pending_v1:<slug>) rather than one shared
+// key, so two different tenant PWAs mid-install in two different tabs at
+// the same time can never clobber each other's pending flag.
+const getInstallPendingKey = (slug) => `tenant_install_pending_v1:${slug}`;
 // If the flag hasn't been refreshed (see the heartbeat below) by this age,
 // treat it as stale — either genuinely abandoned, or verification gave up a
 // while ago — rather than resuming a loader forever. This is deliberately
@@ -56,10 +59,12 @@ const INSTALL_PENDING_KEY = 'tenant_install_pending_v1';
 // window forward every INSTALL_PENDING_HEARTBEAT_MS, so a reload at any
 // point during a genuinely slow (but still in-progress) install still sees
 // a fresh flag and resumes straight into the loader instead of flashing
-// Install App. Only a tab that's been sitting untouched for a full 60s with
-// no heartbeat at all — because verification finished, gave up, or JS
-// itself stalled — goes stale.
-const INSTALL_PENDING_MAX_AGE_MS = 60000;
+// Install App. Real-device captures showed Android/Chrome can take 30+
+// seconds between the native prompt's 'accepted' outcome and completing the
+// WebAPK package install (and only THEN navigating this tab to its
+// canonical start_url) — 120s leaves comfortable headroom above that
+// before this is ever treated as abandoned.
+const INSTALL_PENDING_MAX_AGE_MS = 120000;
 // How often the flag's timestamp is refreshed while an install is actively
 // being waited on/verified (started in handleInstallClick's accepted branch
 // and on the reload-resume path; stopped once markInstalled runs, the
@@ -75,9 +80,17 @@ const INSTALL_PENDING_HEARTBEAT_MS = 5000;
 // trustFallback option and its own comment.
 const UNCONFIRMED_POLL_MAX_MS = 20000;
 
+// localStorage, not sessionStorage: real-device captures showed Chrome can
+// navigate this tab to its canonical start_url (e.g. adding a trailing
+// slash) once the WebAPK finishes installing — a genuine top-level
+// navigation that lands in a fresh browsing context whose sessionStorage is
+// empty, even though it's still "the same tab" from the user's point of
+// view. localStorage survives that boundary. Safe from cross-tenant leakage
+// because the key itself is slug-scoped (getInstallPendingKey) and every
+// read still validates parsed.slug === the slug being asked about.
 const readInstallPending = (slug) => {
   try {
-    const raw = sessionStorage.getItem(INSTALL_PENDING_KEY);
+    const raw = localStorage.getItem(getInstallPendingKey(slug));
     if (!raw) {
       logInstallFlow('pending-read', { requestedSlug: slug, raw: null, result: false });
       return false;
@@ -103,7 +116,7 @@ const readInstallPending = (slug) => {
 const writeInstallPending = (slug) => {
   try {
     const value = { slug, ts: Date.now() };
-    sessionStorage.setItem(INSTALL_PENDING_KEY, JSON.stringify(value));
+    localStorage.setItem(getInstallPendingKey(slug), JSON.stringify(value));
     logInstallFlow('pending-write', value);
   } catch (err) {
     // Private-mode/quota failure — worst case the reload-resume fallback
@@ -112,10 +125,10 @@ const writeInstallPending = (slug) => {
   }
 };
 
-const clearInstallPending = (reason) => {
+const clearInstallPending = (slug, reason) => {
   try {
-    sessionStorage.removeItem(INSTALL_PENDING_KEY);
-    logInstallFlow('pending-clear', { reason: reason || 'unspecified' });
+    localStorage.removeItem(getInstallPendingKey(slug));
+    logInstallFlow('pending-clear', { slug, reason: reason || 'unspecified' });
   } catch {
     // ignore
   }
@@ -518,7 +531,7 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
     }
     // Explicit request for the install landing (?install=1) — never resume
     // a stale accepted-install flag into this deliberately-fresh view.
-    clearInstallPending('force-install-landing');
+    clearInstallPending(normalizedAppSlug, 'force-install-landing');
     setShowTenantHome(false);
     setTenantAccessState(null);
     setTenantAccessPayload(null);
@@ -667,6 +680,38 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
     logInstallFlow('phase', { slug: normalizedAppSlug, installPhase, isInstalled, autoEntering });
   }, [normalizedAppSlug, installPhase, isInstalled, autoEntering]);
 
+  // TEMPORARY DIAGNOSTICS — on-screen readout of the same state
+  // logInstallFlow prints to the console, for reproducing this on a device
+  // where remote debugging (chrome://inspect) isn't available. Renders
+  // outside React's own tree (a fixed DOM node appended directly to
+  // <body>) so it stays visible across every branch of this component's
+  // render output (Install card, loaders, success screen, etc.) without
+  // needing to be threaded into each one individually. Safe to delete
+  // alongside INSTALL_FLOW_DEBUG/logInstallFlow once this is resolved.
+  useEffect(() => {
+    if (!INSTALL_FLOW_DEBUG || typeof document === 'undefined') return undefined;
+    let el = document.getElementById('setu-install-debug-badge');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'setu-install-debug-badge';
+      el.style.cssText = 'position:fixed;bottom:0;left:0;right:0;z-index:2147483647;background:rgba(0,0,0,0.85);color:#7CFC7C;font:10px/1.4 monospace;padding:6px 8px;white-space:pre-wrap;pointer-events:none;';
+      document.body.appendChild(el);
+    }
+    el.textContent = [
+      `slug=${normalizedAppSlug}`,
+      `install=1?${forceInstallLanding}`,
+      `phase=${installPhase}`,
+      `installed=${isInstalled}`,
+      `auto=${autoEntering}`,
+      `resuming=${isResumingAcceptedInstall}`,
+      `pending=${readInstallPending(normalizedAppSlug)}`,
+      `url=${typeof window !== 'undefined' ? window.location.href : ''}`
+    ].join('  ');
+    return () => {
+      if (el && el.parentNode) el.parentNode.removeChild(el);
+    };
+  }, [normalizedAppSlug, forceInstallLanding, installPhase, isInstalled, autoEntering, isResumingAcceptedInstall]);
+
   // See INSTALL_PENDING_KEY/INSTALL_PENDING_MAX_AGE_MS above: keeps the
   // pending flag's timestamp fresh for as long as this tab is actively
   // waiting on/verifying an accepted install, so a slow-but-still-in-
@@ -757,8 +802,8 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
     stopInstallPendingHeartbeat();
     // The accepted install is now confirmed one way or another — this is
     // the ONLY normal exit from the pending-across-reload window, so this
-    // is where the sessionStorage flag is retired.
-    clearInstallPending('markInstalled');
+    // is where the persisted flag is retired.
+    clearInstallPending(normalizedAppSlug, 'markInstalled');
     setIsInstalled(true);
     setInstallOutcome('installed');
     // For a fresh install accepted this session, flip autoEntering in
@@ -773,7 +818,7 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
       setAutoEntering(true);
     }
     setInstallPhase('installed');
-  }, [clearAllFinalizeTimers, stopInstallPendingHeartbeat]);
+  }, [clearAllFinalizeTimers, stopInstallPendingHeartbeat, normalizedAppSlug]);
 
   // Shared by handleAppInstalled below (a real appinstalled event) and
   // handleInstallClick's 20s safety timeout further down. NOTE: the
@@ -1579,7 +1624,7 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
       } else {
         autoEnterAfterInstallRef.current = false;
         stopInstallPendingHeartbeat();
-        clearInstallPending('dismissed');
+        clearInstallPending(normalizedAppSlug, 'dismissed');
         setInstallPhase('idle');
       }
       return;
