@@ -59,29 +59,38 @@ test('accepted + no appinstalled => loader only, never success', () => {
   assert.equal(resolveInstallUiState(slug).phase, 'unconfirmed');
 });
 
-test('accepted + appinstalled => success immediately', () => {
+test('accepted + appinstalled => settling loader immediately, success only once the settle window elapses', () => {
   installLocalStorageStub();
   const slug = 'business-app';
+  const t0 = Date.now();
 
   writePendingRecord(slug);
-  assert.equal(resolveInstallUiState(slug).phase, 'unconfirmed');
+  assert.equal(resolveInstallUiState(slug, { now: t0 }).phase, 'unconfirmed');
 
-  // Mirrors markInstalled's own required order: write verified FIRST, then
-  // (in the component) set isInstalled/installPhase, then clear pending.
-  writeVerifiedRecord(slug);
-  assert.equal(resolveInstallUiState(slug).phase, 'installed');
+  // Mirrors handleAppInstalled's own required order: write verified+readyAt
+  // FIRST (never itself proof of success — see the settle-window tests
+  // further down), then (in the component) keep installPhase off
+  // 'installed', then clear pending.
+  const readyAt = t0 + 20000;
+  writeVerifiedRecord(slug, { readyAt });
+  assert.equal(resolveInstallUiState(slug, { now: t0 }).phase, 'finalizing');
   clearPendingRecord(slug);
 
-  const state = resolveInstallUiState(slug);
-  assert.equal(state.phase, 'installed');
-  assert.equal(state.isInstalled, true);
+  const state = resolveInstallUiState(slug, { now: t0 });
+  assert.equal(state.phase, 'finalizing');
+  assert.equal(state.isInstalled, false);
 });
 
-test('remount after persisted appinstalled => success', () => {
+test('remount after a persisted, already-settled appinstalled => success', () => {
   installLocalStorageStub();
   const slug = 'business-app';
 
   writePendingRecord(slug);
+  // No explicit readyAt => already settled (see writeVerifiedRecord's own
+  // comment) — models the independent "already installed on an earlier
+  // visit" detection, which has nothing left to stabilize, as opposed to a
+  // just-fired appinstalled event (see the settle-window tests below for
+  // that case, which always passes an explicit future readyAt).
   writeVerifiedRecord(slug);
   clearPendingRecord(slug);
 
@@ -112,6 +121,124 @@ test('no pending and no verified => Install App', () => {
   assert.equal(state.phase, 'idle');
   assert.equal(state.isInstalled, false);
   assert.equal(state.isResumingAcceptedInstall, false);
+});
+
+// --- Post-appinstalled 20s stabilization window (mirrors TenantLanding.jsx's
+// POST_APPINSTALLED_SETTLE_MS) — a delay, never itself proof of success. ---
+const SETTLE_MS = 20000;
+
+test('appinstalled at T0 => settling loader, not success', () => {
+  installLocalStorageStub();
+  const slug = 'business-app';
+  const t0 = Date.now();
+
+  writePendingRecord(slug);
+  // Mirrors handleAppInstalled's exact order: verified+readyAt written
+  // first, phase kept off 'installed'.
+  writeVerifiedRecord(slug, { readyAt: t0 + SETTLE_MS });
+  clearPendingRecord(slug);
+
+  const state = resolveInstallUiState(slug, { now: t0 });
+  assert.equal(state.phase, 'finalizing');
+  assert.equal(state.isInstalled, false);
+  assert.equal(state.isSettling, true);
+  assert.equal(state.readyAt, t0 + SETTLE_MS);
+});
+
+test('T0 + 19,999ms => still the settling loader, not success', () => {
+  installLocalStorageStub();
+  const slug = 'business-app';
+  const t0 = Date.now();
+
+  writeVerifiedRecord(slug, { readyAt: t0 + SETTLE_MS });
+
+  const state = resolveInstallUiState(slug, { now: t0 + SETTLE_MS - 1 });
+  assert.equal(state.phase, 'finalizing');
+  assert.equal(state.isInstalled, false);
+});
+
+test('T0 + 20,000ms => installed/success', () => {
+  installLocalStorageStub();
+  const slug = 'business-app';
+  const t0 = Date.now();
+
+  writeVerifiedRecord(slug, { readyAt: t0 + SETTLE_MS });
+
+  const state = resolveInstallUiState(slug, { now: t0 + SETTLE_MS });
+  assert.equal(state.phase, 'installed');
+  assert.equal(state.isInstalled, true);
+});
+
+test('remount at T0 + 8s sees ~12s remaining, never a fresh 20s window', () => {
+  installLocalStorageStub();
+  const slug = 'business-app';
+  const t0 = Date.now();
+  const readyAt = t0 + SETTLE_MS;
+
+  writeVerifiedRecord(slug, { readyAt });
+
+  // Simulates a remount (tab discard/reload) 8s into the settle window —
+  // the persisted readyAt does not move, so only ~12s remain, not 20s.
+  const remountNow = t0 + 8000;
+  const state = resolveInstallUiState(slug, { now: remountNow });
+  assert.equal(state.phase, 'finalizing');
+  assert.equal(state.readyAt, readyAt);
+  const remainingMs = state.readyAt - remountNow;
+  assert.equal(remainingMs, 12000);
+});
+
+test('remount after T0 + 20s => success immediately, no loader replay', () => {
+  installLocalStorageStub();
+  const slug = 'business-app';
+  const t0 = Date.now();
+  const readyAt = t0 + SETTLE_MS;
+
+  writeVerifiedRecord(slug, { readyAt });
+
+  // Remount well past the deadline (e.g. the tab was discarded for a
+  // minute and only reopened afterwards).
+  const state = resolveInstallUiState(slug, { now: readyAt + 5000 });
+  assert.equal(state.phase, 'installed');
+  assert.equal(state.isInstalled, true);
+});
+
+test('beforeinstallprompt refire clears both verified and the settle deadline', () => {
+  installLocalStorageStub();
+  const slug = 'business-app';
+  const t0 = Date.now();
+
+  writeVerifiedRecord(slug, { readyAt: t0 + SETTLE_MS });
+  assert.equal(resolveInstallUiState(slug, { now: t0 }).phase, 'finalizing');
+
+  // Browser reports installable again for this slug (uninstalled) —
+  // TenantLanding.jsx's beforeinstallprompt subscription reconciles by
+  // clearing the verified record, which carries readyAt as part of the
+  // same blob, so the settle deadline is gone too — nothing survives to
+  // still claim "settling" or "installed" afterwards.
+  clearVerifiedRecord(slug);
+
+  const state = resolveInstallUiState(slug, { now: t0 + 1 });
+  assert.equal(state.phase, 'idle');
+  assert.equal(state.isInstalled, false);
+  assert.equal(state.isSettling, false);
+  assert.equal(state.readyAt, null);
+});
+
+test('tenant A\'s settle deadline never affects tenant B, even mid-window', () => {
+  installLocalStorageStub();
+  const t0 = Date.now();
+
+  // Tenant A is 8s into its settle window (12s remaining).
+  writeVerifiedRecord('tenant-a', { readyAt: t0 + SETTLE_MS });
+  // Tenant B has never even accepted an install.
+  const now = t0 + 8000;
+
+  const stateA = resolveInstallUiState('tenant-a', { now });
+  const stateB = resolveInstallUiState('tenant-b', { now });
+
+  assert.equal(stateA.phase, 'finalizing');
+  assert.equal(stateB.phase, 'idle');
+  assert.equal(stateB.readyAt, null);
 });
 
 // The live "did the appinstalled handler promote state before Chrome's own
