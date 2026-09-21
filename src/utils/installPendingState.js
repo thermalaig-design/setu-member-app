@@ -193,6 +193,67 @@ export const clearVerifiedRecord = (slug) => {
 // deadline it wrote (see handleAppInstalled there); never from a timeout
 // unrelated to that deadline, a heartbeat tick, or an early
 // getInstalledRelatedApps() match.
+// --- 60-second install countdown deadline -----------------------------
+// A SEPARATE, purely presentational record from the pending/verified ones
+// above — it never gates isInstalled/installPhase and resolveInstallUiState
+// never reads it. It exists only so TenantLanding.jsx's full-screen 60s
+// countdown ring shows the correct REMAINING time (not a fresh 60s) across
+// a mid-install reload/tab-discard, the same "persist the deadline, not a
+// counter" approach as the verified record's readyAt above. Scoped by
+// normalizeSlugIdentity exactly like every other record here, so it can
+// never bleed between two tenants' installs on the same device.
+const COUNTDOWN_KEY_PREFIX = 'tenant_install_countdown_v1:';
+
+export const INSTALL_COUNTDOWN_DURATION_MS = 60000;
+
+const getCountdownKey = (slug) => `${COUNTDOWN_KEY_PREFIX}${slug}`;
+
+// Returns the persisted deadline (a plain epoch-ms timestamp) or `null` if
+// none exists / storage is unavailable. Deliberately has no separate
+// max-age check of its own — the deadline itself already encodes whether
+// it's expired (a caller comparing it against Date.now() gets 0 remaining
+// for a long-past one), so there is nothing extra to validate here.
+export const readCountdownDeadline = (slug) => {
+  const normalizedSlug = normalizeSlugIdentity(slug);
+  if (!normalizedSlug) return null;
+  try {
+    const raw = localStorage.getItem(getCountdownKey(normalizedSlug));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || parsed.slug !== normalizedSlug || typeof parsed.endsAt !== 'number') return null;
+    return parsed.endsAt;
+  } catch {
+    return null;
+  }
+};
+
+// Called ONLY the instant the user accepts the native install prompt (or,
+// on a mid-install reload, when resuming an accepted install that somehow
+// has no persisted deadline yet — see TenantLanding.jsx). Never called on
+// every render/tick, which is what would silently keep resetting the ring
+// back to 60s instead of counting down.
+export const writeCountdownDeadline = (slug, { durationMs = INSTALL_COUNTDOWN_DURATION_MS } = {}) => {
+  const normalizedSlug = normalizeSlugIdentity(slug);
+  if (!normalizedSlug) return null;
+  try {
+    const endsAt = Date.now() + durationMs;
+    localStorage.setItem(getCountdownKey(normalizedSlug), JSON.stringify({ slug: normalizedSlug, endsAt }));
+    return endsAt;
+  } catch {
+    return null;
+  }
+};
+
+export const clearCountdownDeadline = (slug) => {
+  const normalizedSlug = normalizeSlugIdentity(slug);
+  if (!normalizedSlug) return;
+  try {
+    localStorage.removeItem(getCountdownKey(normalizedSlug));
+  } catch {
+    // ignore
+  }
+};
+
 export const resolveInstallUiState = (slug, options) => {
   const verifiedRecord = readVerifiedRecord(slug);
   if (verifiedRecord) {

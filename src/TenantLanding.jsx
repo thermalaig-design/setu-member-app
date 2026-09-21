@@ -14,7 +14,11 @@ import {
   isInstallVerified,
   writeVerifiedRecord,
   clearVerifiedRecord,
-  resolveInstallUiState
+  resolveInstallUiState,
+  readCountdownDeadline,
+  writeCountdownDeadline,
+  clearCountdownDeadline,
+  INSTALL_COUNTDOWN_DURATION_MS
 } from './utils/installPendingState';
 import Home from './Home';
 
@@ -170,6 +174,246 @@ const clearInstallVerified = (slug, reason) => {
   clearVerifiedRecord(slug);
   logInstallFlow('verified-clear', { slug, reason: reason || 'unspecified' });
 };
+
+// Thin wrappers (same pattern/diagnostics as the pending/verified ones
+// above) around the countdown-deadline helpers in installPendingState.js.
+// Purely presentational bookkeeping — see that module's own comment: this
+// never feeds resolveInstallUiState and never gates isInstalled/installPhase.
+const readInstallCountdown = (slug) => {
+  const deadline = readCountdownDeadline(slug);
+  logInstallFlow('countdown-read', { slug, deadline });
+  return deadline;
+};
+
+const writeInstallCountdown = (slug) => {
+  const deadline = writeCountdownDeadline(slug);
+  logInstallFlow('countdown-write', { slug, deadline });
+  return deadline;
+};
+
+const clearInstallCountdown = (slug, reason) => {
+  clearCountdownDeadline(slug);
+  logInstallFlow('countdown-clear', { slug, reason: reason || 'unspecified' });
+};
+
+// Ticks every 300ms while `active`, always recomputing the remaining time
+// from the persisted `deadline` timestamp rather than decrementing a
+// counter each tick — mobile browsers throttle/suspend timers in a
+// backgrounded tab, so a plain `count--` would drift or stall. Reading
+// Date.now() against a fixed deadline on every tick self-corrects
+// regardless of how many ticks actually fired while backgrounded.
+const useRemainingMs = (deadline, active) => {
+  const [remainingMs, setRemainingMs] = useState(() => (
+    typeof deadline === 'number' ? Math.max(0, deadline - Date.now()) : 0
+  ));
+  useEffect(() => {
+    if (!active || typeof deadline !== 'number') return undefined;
+    const tick = () => setRemainingMs(Math.max(0, deadline - Date.now()));
+    tick();
+    const id = setInterval(tick, 300);
+    return () => clearInterval(id);
+  }, [deadline, active]);
+  return remainingMs;
+};
+
+const usePrefersReducedMotion = () => {
+  const query = '(prefers-reduced-motion: reduce)';
+  const [reduced, setReduced] = useState(() => (
+    typeof window !== 'undefined' && window.matchMedia ? window.matchMedia(query).matches : false
+  ));
+  useEffect(() => {
+    if (typeof window === 'undefined' || !window.matchMedia) return undefined;
+    const mql = window.matchMedia(query);
+    const handleChange = () => setReduced(mql.matches);
+    if (mql.addEventListener) mql.addEventListener('change', handleChange);
+    else mql.addListener(handleChange);
+    return () => {
+      if (mql.removeEventListener) mql.removeEventListener('change', handleChange);
+      else mql.removeListener(handleChange);
+    };
+  }, []);
+  return reduced;
+};
+
+const INSTALL_COUNTDOWN_RING_SIZE = 124;
+const INSTALL_COUNTDOWN_RING_STROKE = 8;
+
+// Pure presentational ring: an SVG circle whose stroke-dashoffset is driven
+// directly by `progress` (0 = just started, 1 = time's up or confirmed
+// installed), animated via CSS transition (skipped under prefers-reduced-
+// motion) rather than a JS animation loop.
+function InstallCountdownRing({ progress, confirmed, reducedMotion, accentFrom, accentTo, trackColor, children }) {
+  const radius = (INSTALL_COUNTDOWN_RING_SIZE - INSTALL_COUNTDOWN_RING_STROKE) / 2;
+  const circumference = 2 * Math.PI * radius;
+  const clampedProgress = confirmed ? 1 : Math.min(1, Math.max(0, progress));
+  const dashOffset = circumference * (1 - clampedProgress);
+  const gradientId = 'tenant-install-ring-gradient';
+
+  return (
+    <div style={{ position: 'relative', width: `${INSTALL_COUNTDOWN_RING_SIZE}px`, height: `${INSTALL_COUNTDOWN_RING_SIZE}px` }}>
+      <svg
+        width={INSTALL_COUNTDOWN_RING_SIZE}
+        height={INSTALL_COUNTDOWN_RING_SIZE}
+        viewBox={`0 0 ${INSTALL_COUNTDOWN_RING_SIZE} ${INSTALL_COUNTDOWN_RING_SIZE}`}
+        style={{ transform: 'rotate(-90deg)' }}
+      >
+        <defs>
+          <linearGradient id={gradientId} x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stopColor={accentFrom} />
+            <stop offset="100%" stopColor={accentTo} />
+          </linearGradient>
+        </defs>
+        <circle
+          cx={INSTALL_COUNTDOWN_RING_SIZE / 2}
+          cy={INSTALL_COUNTDOWN_RING_SIZE / 2}
+          r={radius}
+          fill="none"
+          stroke={trackColor}
+          strokeWidth={INSTALL_COUNTDOWN_RING_STROKE}
+        />
+        <circle
+          cx={INSTALL_COUNTDOWN_RING_SIZE / 2}
+          cy={INSTALL_COUNTDOWN_RING_SIZE / 2}
+          r={radius}
+          fill="none"
+          stroke={`url(#${gradientId})`}
+          strokeWidth={INSTALL_COUNTDOWN_RING_STROKE}
+          strokeLinecap="round"
+          strokeDasharray={circumference}
+          strokeDashoffset={dashOffset}
+          style={reducedMotion ? undefined : { transition: 'stroke-dashoffset 0.3s linear' }}
+        />
+      </svg>
+      <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function InstallCheckmark({ color, reducedMotion }) {
+  return (
+    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path
+        d="M5 13l4 4L19 7"
+        stroke={color}
+        strokeWidth="2.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        className="tenant-install-checkmark-path"
+        style={{ animation: reducedMotion ? 'none' : 'tenantInstallCheckmarkDraw 0.5s ease-out' }}
+      />
+    </svg>
+  );
+}
+
+// The single full-screen surface for the ENTIRE fresh-install wait — see
+// its render-site comment in TenantLanding for exactly which installPhase
+// values map to it. This component OWNS NONE of the install state: it only
+// reads `confirmed` (mirrors the one existing "installed" definition,
+// installPhase === 'installed' && isInstalled) and a persisted countdown
+// deadline, and purely as DISPLAY — reaching 0 here never marks anything
+// installed; only a genuine `appinstalled` event (handled entirely outside
+// this component) ever does that.
+function InstallCountdownScreen({
+  trustName,
+  logoUrl,
+  backgroundColor,
+  palette,
+  accent,
+  accentGradient,
+  accentGlow,
+  countdownEndsAt,
+  confirmed,
+  onOpenApp,
+}) {
+  const reducedMotion = usePrefersReducedMotion();
+  // Stop ticking once confirmed — the ring snaps straight to full/checkmark
+  // and there is nothing left to count down to.
+  const remainingMs = useRemainingMs(countdownEndsAt, !confirmed);
+  const remainingSeconds = Math.max(0, Math.ceil(remainingMs / 1000));
+  const progress = confirmed
+    ? 1
+    : Math.min(1, Math.max(0, (INSTALL_COUNTDOWN_DURATION_MS - remainingMs) / INSTALL_COUNTDOWN_DURATION_MS));
+  const timedOut = !confirmed && remainingMs <= 0;
+  const almostReady = !confirmed && !timedOut && remainingSeconds <= 10;
+
+  let heading = `Installing ${trustName}…`;
+  let subtext = 'We’re adding your app to this device. Please keep this screen open.';
+  let statusLine = `About ${remainingSeconds}s remaining`;
+
+  if (confirmed) {
+    heading = `${trustName} is ready`;
+    subtext = 'Your app has been added to your device. Open it from your Home Screen / Apps.';
+    statusLine = '';
+  } else if (timedOut) {
+    heading = 'Installation is taking a little longer';
+    subtext = 'Please check your Home Screen. The app icon may appear in a few moments.';
+    statusLine = '';
+  } else if (almostReady) {
+    subtext = 'Almost ready…';
+  }
+
+  return (
+    <div style={{ ...styles.page, background: backgroundColor }}>
+      {logoUrl ? <img src={logoUrl} alt="" style={styles.countdownLogo} /> : null}
+      <InstallCountdownRing
+        progress={progress}
+        confirmed={confirmed}
+        reducedMotion={reducedMotion}
+        accentFrom={accent.from}
+        accentTo={accent.to}
+        trackColor={palette.cardBorder}
+      >
+        {confirmed
+          ? <InstallCheckmark color={accent.from} reducedMotion={reducedMotion} />
+          : <span style={{ ...styles.countdownNumber, color: palette.textPrimary }}>{remainingSeconds}s</span>}
+      </InstallCountdownRing>
+
+      <h2 style={{ ...styles.loadingText, color: palette.textPrimary, fontSize: '19px', fontWeight: 800, marginTop: '22px', maxWidth: '320px' }}>
+        {heading}
+      </h2>
+      <p style={{ ...styles.loadingText, color: palette.textSecondary, marginTop: '6px', maxWidth: '300px' }}>
+        {subtext}
+      </p>
+      {statusLine ? (
+        <p style={{ ...styles.loadingText, color: palette.textMuted, marginTop: '10px', fontSize: '12px' }}>
+          {statusLine}
+        </p>
+      ) : null}
+
+      {(confirmed || timedOut) && typeof onOpenApp === 'function' ? (
+        <>
+          <button
+            type="button"
+            className="tenant-install-btn"
+            style={{ ...styles.installBtn, width: 'auto', padding: '13px 30px', marginTop: '22px', background: accentGradient, color: accent.text, boxShadow: `0 10px 26px ${accentGlow(0.4)}` }}
+            onClick={onOpenApp}
+          >
+            <span>Open App</span>
+            <span className="tenant-install-btn-arrow" aria-hidden="true">→</span>
+          </button>
+          <p style={{ ...styles.loadingText, color: palette.textMuted, marginTop: '10px', fontSize: '12px', maxWidth: '280px' }}>
+            {confirmed
+              ? `If it doesn’t open automatically, tap the ${trustName} icon on your Home Screen.`
+              : 'You can try opening the app now, or check your Home Screen / Apps in a moment.'}
+          </p>
+        </>
+      ) : (
+        <p style={{ ...styles.loadingText, color: palette.textMuted, marginTop: '18px', fontSize: '12px' }}>
+          Please keep this screen open.
+        </p>
+      )}
+
+      <style>{`
+        @keyframes tenantInstallCheckmarkDraw {
+          from { stroke-dasharray: 32; stroke-dashoffset: 32; }
+          to { stroke-dasharray: 32; stroke-dashoffset: 0; }
+        }
+      `}</style>
+    </div>
+  );
+}
 
 // Module-scoped (not component state): survives TenantLanding unmount/remount
 // caused by in-app SPA navigation (e.g. open Notices, then go back to
@@ -505,6 +749,20 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
   // it's actually earned. See handleInstallClick/handleAppInstalled below
   // for the state transitions and the safety-timeout fallback.
   const [installPhase, setInstallPhase] = useState(() => installUiSeed.phase);
+  // Deadline (epoch ms) for the full-screen 60s install countdown ring —
+  // written ONLY the instant the user accepts the native install prompt
+  // (see handleInstallClick below), never reset on every render/tick. On a
+  // mid-install reload that resumes a still-valid pending or still-settling
+  // record (isResumingAcceptedInstall / isResumingSettlingInstall), seed
+  // from whatever deadline was persisted for THIS slug so the ring resumes
+  // the actual remaining time instead of restarting at 60 — falling back to
+  // a fresh 60s only if that resume path somehow has no persisted deadline
+  // at all (e.g. storage was cleared between tabs).
+  const [countdownEndsAt, setCountdownEndsAt] = useState(() => {
+    if (!(isResumingAcceptedInstall || isResumingSettlingInstall)) return null;
+    const persisted = readInstallCountdown(normalizedAppSlug);
+    return typeof persisted === 'number' ? persisted : writeInstallCountdown(normalizedAppSlug);
+  });
   // MOUNT GRACE WINDOW — real-device captures showed Android/Chrome can, on
   // some devices, hand a just-accepted install off into a browsing context
   // that does NOT share sessionStorage OR localStorage with the tab the
@@ -657,12 +915,14 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
     // Explicit request for the install landing (?install=1) — never resume
     // a stale accepted-install flag into this deliberately-fresh view.
     clearInstallPending(normalizedAppSlug, 'force-install-landing');
+    clearInstallCountdown(normalizedAppSlug, 'force-install-landing');
     setShowTenantHome(false);
     setTenantAccessState(null);
     setTenantAccessPayload(null);
     setIsInstalled(false);
     setInstallOutcome('');
     setInstallPhase('idle');
+    setCountdownEndsAt(null);
     setAutoEntering(false);
     setFreshInstallHandoffBlocked(false);
     if (androidHandoffFallbackTimeoutRef.current) {
@@ -962,6 +1222,11 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
   const completeSettle = useCallback(() => {
     clearSettleTimeout();
     logInstallFlow('settle-complete', { slug: normalizedAppSlug });
+    // Purely presentational cleanup — the countdown deadline has already
+    // served its purpose (the ring shows confirmed/checkmark from here on
+    // regardless of this record), this just avoids leaving a stale
+    // completed deadline sitting in storage for the slug.
+    clearInstallCountdown(normalizedAppSlug, 'settled');
     setIsInstalled(true);
     setInstallOutcome('installed');
     // For a fresh install accepted this session, flip autoEntering in
@@ -1530,159 +1795,75 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
     );
   }
 
-  // Full-screen transition covering the ENTIRE install flow from the
-  // moment the user taps Install (replacing the tenant card entirely — no
-  // card, no "Powered by Setu", no install instructions, no Open App, no
-  // success checkmark) through to verified-installed:
-  // - 'prompting': deferredPrompt.prompt() is awaiting the user's choice
-  //   in the native browser dialog. This must render too, not just
-  //   'launching' — otherwise the Install App card is still what's
-  //   sitting underneath/behind that dialog, and can flash back into view
-  //   the instant it closes but before 'launching' is set.
-  // - 'launching': the user accepted; waiting on the real `appinstalled`
-  //   event.
-  // - 'finalizing': appinstalled fired, but Android's WebAPK/home-screen
-  //   app can still take a few more seconds to become reliably launchable
-  //   — this is the POST_APPINSTALLED_SETTLE_MS stabilization window
-  //   (scheduleSettle/completeSettle above), a fixed delay, NOT a wait for
-  //   any further confirmation signal. It is never itself treated as proof
-  //   of success — if appinstalled had never fired, this phase is never
-  //   reached at all, no matter how long the tab stays open.
-  // - autoEntering (fresh-install path only, see the effect declared after
-  //   enterTenantTrust above): installPhase has already reached 'installed'
-  //   but enterTenantTrust()'s own async membership check is still in
-  //   flight — this keeps the SAME loader up instead of letting the
-  //   Installed/Open App card render for that gap, so a fresh install
-  //   never shows that card at all before continuing into the tenant app.
-  // Both get the same active-looking UI (indeterminate progress bar) since
-  // either can legitimately run long enough on a slow Android device that a
-  // plain spinner would read as "stuck"/"failed" to the user.
-  // See handleInstallClick/handleAppInstalled above for the state
-  // transitions and the safety-timeout fallback. ('idle' — e.g. the user
-  // dismissed the dialog — correctly falls through to the normal card
-  // below; only a genuine dismissal should ever bring it back.)
-  if (installPhase === 'finalizing' || autoEntering) {
-    return (
-      <div style={{ ...styles.page, background: backgroundColor }}>
-        <div style={{ ...styles.spinner, borderTopColor: accent.from }} />
-        <h2 style={{ ...styles.loadingText, color: palette.textPrimary, fontSize: '18px', fontWeight: 800, marginTop: '18px' }}>
-          Installing on your device…
-        </h2>
-        <p style={{ ...styles.loadingText, color: palette.textSecondary, marginTop: '6px' }}>
-          Almost ready — this can take a few extra seconds.
-        </p>
-        <div style={{ width: '220px', maxWidth: '72vw', height: '6px', borderRadius: '999px', overflow: 'hidden', marginTop: '22px', background: palette.cardBorder }}>
-          {/* Indeterminate only — Chrome exposes no real WebAPK install
-              byte progress, so this must never show a fake percentage. */}
-          <div
-            className="tenant-install-progress-bar"
-            style={{ width: '40%', height: '100%', borderRadius: '999px', background: accentGradient }}
-          />
-        </div>
-        <p style={{ ...styles.loadingText, color: palette.textMuted, marginTop: '12px', fontSize: '12px' }}>
-          Please keep this screen open.
-        </p>
-        <style>{`
-          @keyframes spin { to { transform: rotate(360deg); } }
-          @keyframes tenantInstallProgress {
-            0% { transform: translateX(-140%); }
-            50% { transform: translateX(120%); }
-            100% { transform: translateX(340%); }
-          }
-          .tenant-install-progress-bar {
-            animation: tenantInstallProgress 1.4s ease-in-out infinite;
-          }
-        `}</style>
-      </div>
-    );
-  }
-
-  // ANDROID FRESH-INSTALL PATH ONLY. Only reached once the grace-period
-  // timer above has confirmed the page is still visible — i.e. Android
-  // did not switch to the installed PWA. Deliberately its own minimal
-  // screen — not the Install App / Installed card, not tenant Home — with
-  // a single Open App button driven by a real tap, which Android is far
-  // more likely to honor than the earlier non-gesture attempt.
-  if (freshInstallHandoffBlocked) {
-    return (
-      <div style={{ ...styles.page, background: backgroundColor }}>
-        <p style={{ ...styles.loadingText, color: palette.textPrimary, fontSize: '16px', fontWeight: 700 }}>
-          {tenantTrust.name} is installed
-        </p>
-        <p style={{ ...styles.loadingText, color: palette.textSecondary, marginTop: '4px', marginBottom: '22px' }}>
-          Tap below to open it.
-        </p>
-        <button
-          type="button"
-          className="tenant-install-btn"
-          style={{ ...styles.installBtn, background: accentGradient, color: accent.text, boxShadow: `0 10px 26px ${accentGlow(0.4)}` }}
-          onClick={() => {
-            const tenantUrl = buildTenantUrl(normalizedAppSlug);
-            if (!tenantUrl) return;
-            const intentUrl = isAndroid() ? buildAndroidIntentUrl(tenantUrl, { includeFallback: false }) : tenantUrl;
-            window.location.href = intentUrl || tenantUrl;
-          }}
-        >
-          <span>Open App</span>
-          <span className="tenant-install-btn-arrow" aria-hidden="true">→</span>
-        </button>
-      </div>
-    );
-  }
-
-  if (installPhase === 'prompting' || installPhase === 'launching') {
-    const isPrompting = installPhase === 'prompting';
+  // 'prompting': deferredPrompt.prompt() is awaiting the user's choice in
+  // the native browser dialog. This must render too, not just 'launching'
+  // — otherwise the Install App card is still what's sitting underneath/
+  // behind that dialog, and can flash back into view the instant it closes
+  // but before 'launching' is set. No countdown yet — that only starts once
+  // the user actually accepts (see handleInstallClick below).
+  if (installPhase === 'prompting') {
     return (
       <div style={{ ...styles.page, background: backgroundColor }}>
         <div style={{ ...styles.spinner, borderTopColor: accent.from }} />
         <p style={{ ...styles.loadingText, color: palette.textPrimary, fontSize: '15px', fontWeight: 700, marginTop: '18px' }}>
-          {isPrompting ? 'Preparing installation…' : 'Launching your app…'}
+          Preparing installation…
         </p>
         <p style={{ ...styles.loadingText, color: palette.textSecondary, marginTop: '4px' }}>
-          {isPrompting ? 'Complete the install prompt to continue.' : 'Please wait while we finish setting things up.'}
+          Complete the install prompt to continue.
         </p>
         <style>{'@keyframes spin { to { transform: rotate(360deg); } }'}</style>
       </div>
     );
   }
 
-  // Reached from two places, both sharing the same "accepted, but
-  // appinstalled has NOT actually fired on this page" evidence level —
-  // handleInstallClick's 20s safety timeout, and isResumingAcceptedInstall
-  // seeding this as the initial phase after a mid-install reload. That's
-  // the weakest signal this component ever acts on, so unlike 'launching'
-  // this one deliberately does NOT show the success checkmark or claim
-  // confirmed install. It still must never fall back to the Install App
-  // card though — the user already told the OS to install this app. A
-  // manual, real-tap-driven Open App attempt is offered instead; the only
-  // way out of this screen into real success is a genuine (even if
-  // delayed) `appinstalled` event still arriving — see handleAppInstalled,
-  // whose listener stays registered regardless of how this phase was
-  // reached.
-  if (installPhase === 'unconfirmed') {
+  // FULL-SCREEN 60-SECOND INSTALL COUNTDOWN — the single surface covering
+  // the ENTIRE post-accept wait (replacing the tenant card entirely — no
+  // card, no "Powered by Setu", no install instructions) across every phase
+  // that can follow accepting the native prompt:
+  // - 'launching': accepted; waiting on the real `appinstalled` event.
+  // - 'unconfirmed': handleInstallClick's 20s safety timeout elapsed with
+  //   no appinstalled yet (or a reload resumed straight into this phase) —
+  //   still not confirmed installed, still never falls back to Install App.
+  // - 'finalizing': appinstalled fired, waiting out the
+  //   POST_APPINSTALLED_SETTLE_MS stabilization window (scheduleSettle/
+  //   completeSettle above) — a fixed delay, never itself proof of success.
+  // - autoEntering: settle complete, the existing Android hand-off effect
+  //   (declared after enterTenantTrust above) is making its ONE best-effort
+  //   attempt — same context, no new tab/window, no retry loop; this
+  //   component does not drive that attempt, only displays through it.
+  // - freshInstallHandoffBlocked: that hand-off attempt finished without the
+  //   page going hidden — Android didn't visibly switch apps. Always
+  //   reached with isInstalled already true (see that effect's own guard),
+  //   so `confirmed` below is always true here too.
+  // `confirmed` mirrors the ONE existing definition of "installed" used
+  // everywhere else in this file (installPhase === 'installed' &&
+  // isInstalled) — this screen never marks anything installed itself,
+  // including when its own ring reaches 0; see InstallCountdownScreen.
+  if (
+    installPhase === 'launching' ||
+    installPhase === 'unconfirmed' ||
+    installPhase === 'finalizing' ||
+    autoEntering ||
+    freshInstallHandoffBlocked
+  ) {
     return (
-      <div style={{ ...styles.page, background: backgroundColor }}>
-        <p style={{ ...styles.loadingText, color: palette.textPrimary, fontSize: '16px', fontWeight: 700 }}>
-          Still finishing installation…
-        </p>
-        <p style={{ ...styles.loadingText, color: palette.textSecondary, marginTop: '4px', marginBottom: '22px' }}>
-          This is taking a little longer than usual. You can try opening the app now, or check your Home Screen / Apps in a moment.
-        </p>
-        <button
-          type="button"
-          className="tenant-install-btn"
-          style={{ ...styles.installBtn, background: accentGradient, color: accent.text, boxShadow: `0 10px 26px ${accentGlow(0.4)}` }}
-          onClick={() => {
-            const tenantUrl = buildTenantUrl(normalizedAppSlug);
-            if (!tenantUrl) return;
-            const intentUrl = isAndroid() ? buildAndroidIntentUrl(tenantUrl, { includeFallback: false }) : tenantUrl;
-            window.location.href = intentUrl || tenantUrl;
-          }}
-        >
-          <span>Open App</span>
-          <span className="tenant-install-btn-arrow" aria-hidden="true">→</span>
-        </button>
-      </div>
+      <InstallCountdownScreen
+        trustName={tenantTrust.name}
+        logoUrl={logoUrl}
+        backgroundColor={backgroundColor}
+        palette={palette}
+        accent={accent}
+        accentGradient={accentGradient}
+        accentGlow={accentGlow}
+        countdownEndsAt={countdownEndsAt}
+        confirmed={installPhase === 'installed' && isInstalled}
+        onOpenApp={() => {
+          const tenantUrl = buildTenantUrl(normalizedAppSlug);
+          if (!tenantUrl) return;
+          const intentUrl = isAndroid() ? buildAndroidIntentUrl(tenantUrl, { includeFallback: false }) : tenantUrl;
+          window.location.href = intentUrl || tenantUrl;
+        }}
+      />
     );
   }
 
@@ -1715,6 +1896,10 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
         autoEnterAfterInstallRef.current = true;
         writeInstallPending(normalizedAppSlug);
         startInstallPendingHeartbeat(normalizedAppSlug);
+        // Starts the 60s countdown ring's deadline — see countdownEndsAt's
+        // own comment: this is the ONLY place a fresh (non-resumed) deadline
+        // is ever written, exactly at the moment the user accepted.
+        setCountdownEndsAt(writeInstallCountdown(normalizedAppSlug));
         setInstallPhase('launching');
         // Safety net for browser/version inconsistencies where appinstalled
         // never fires after 'accepted' at all. The user has already
@@ -1737,9 +1922,15 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
           }
         }, 20000);
       } else {
+        // CANCELLED INSTALL: the user dismissed the native prompt — stop and
+        // reset the countdown state entirely (never leave a stale deadline
+        // that could resume a countdown that never actually started) and
+        // fall straight back through to the normal Install App card below.
         autoEnterAfterInstallRef.current = false;
         stopInstallPendingHeartbeat();
         clearInstallPending(normalizedAppSlug, 'dismissed');
+        clearInstallCountdown(normalizedAppSlug, 'dismissed');
+        setCountdownEndsAt(null);
         setInstallPhase('idle');
       }
       return;
@@ -2079,6 +2270,18 @@ const styles = {
     color: '#a0a0a0',
     marginTop: '12px',
     fontSize: '13px',
+  },
+  countdownLogo: {
+    width: '64px',
+    height: '64px',
+    borderRadius: '16px',
+    objectFit: 'cover',
+    marginBottom: '6px',
+  },
+  countdownNumber: {
+    fontSize: '30px',
+    fontWeight: 800,
+    fontVariantNumeric: 'tabular-nums',
   },
   notAvailableCard: {
     background: '#222',
