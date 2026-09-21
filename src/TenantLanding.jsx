@@ -238,24 +238,43 @@ const usePrefersReducedMotion = () => {
 const INSTALL_COUNTDOWN_RING_SIZE = 124;
 const INSTALL_COUNTDOWN_RING_STROKE = 8;
 
-// Pure presentational ring: an SVG circle whose stroke-dashoffset is driven
-// directly by `progress` (0 = just started, 1 = time's up or confirmed
-// installed), animated via CSS transition (skipped under prefers-reduced-
-// motion) rather than a JS animation loop.
-function InstallCountdownRing({ progress, confirmed, reducedMotion, accentFrom, accentTo, trackColor, children }) {
-  const radius = (INSTALL_COUNTDOWN_RING_SIZE - INSTALL_COUNTDOWN_RING_STROKE) / 2;
+// Clock-face ring: a glowing gradient progress arc over a 12-tick dial (the
+// ticks are pure decoration — a plain <circle> track underneath still
+// carries the actual progress via stroke-dashoffset, animated with CSS
+// (skipped under prefers-reduced-motion) rather than a JS animation loop. A
+// soft blurred halo behind it (also skipped under reduced motion) is what
+// gives it the "alive"/premium feel instead of a flat ring.
+function InstallCountdownRing({ progress, confirmed, reducedMotion, accentFrom, accentTo, trackColor, glowColor, children }) {
+  const size = INSTALL_COUNTDOWN_RING_SIZE;
+  const center = size / 2;
+  const radius = (size - INSTALL_COUNTDOWN_RING_STROKE) / 2;
   const circumference = 2 * Math.PI * radius;
   const clampedProgress = confirmed ? 1 : Math.min(1, Math.max(0, progress));
   const dashOffset = circumference * (1 - clampedProgress);
   const gradientId = 'tenant-install-ring-gradient';
+  const tickOuter = radius - INSTALL_COUNTDOWN_RING_STROKE / 2 - 3;
+  const tickInner = tickOuter - 6;
+  const wrapSize = size + 36;
 
   return (
-    <div style={{ position: 'relative', width: `${INSTALL_COUNTDOWN_RING_SIZE}px`, height: `${INSTALL_COUNTDOWN_RING_SIZE}px` }}>
+    <div style={{ position: 'relative', width: `${wrapSize}px`, height: `${wrapSize}px`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <div
+        aria-hidden="true"
+        className={reducedMotion ? undefined : 'tenant-install-ring-glow'}
+        style={{
+          position: 'absolute',
+          width: `${size + 20}px`,
+          height: `${size + 20}px`,
+          borderRadius: '50%',
+          background: `radial-gradient(circle, ${glowColor} 0%, transparent 72%)`,
+          filter: 'blur(18px)',
+        }}
+      />
       <svg
-        width={INSTALL_COUNTDOWN_RING_SIZE}
-        height={INSTALL_COUNTDOWN_RING_SIZE}
-        viewBox={`0 0 ${INSTALL_COUNTDOWN_RING_SIZE} ${INSTALL_COUNTDOWN_RING_SIZE}`}
-        style={{ transform: 'rotate(-90deg)' }}
+        width={size}
+        height={size}
+        viewBox={`0 0 ${size} ${size}`}
+        style={{ position: 'relative', filter: 'drop-shadow(0 6px 20px rgba(0,0,0,0.25))' }}
       >
         <defs>
           <linearGradient id={gradientId} x1="0%" y1="0%" x2="100%" y2="100%">
@@ -263,17 +282,30 @@ function InstallCountdownRing({ progress, confirmed, reducedMotion, accentFrom, 
             <stop offset="100%" stopColor={accentTo} />
           </linearGradient>
         </defs>
+        <g stroke={trackColor} strokeWidth="2" strokeLinecap="round" opacity="0.9">
+          {Array.from({ length: 12 }).map((_, i) => (
+            <line
+              key={i}
+              x1={center}
+              y1={center - tickOuter}
+              x2={center}
+              y2={center - tickInner}
+              transform={`rotate(${i * 30} ${center} ${center})`}
+            />
+          ))}
+        </g>
         <circle
-          cx={INSTALL_COUNTDOWN_RING_SIZE / 2}
-          cy={INSTALL_COUNTDOWN_RING_SIZE / 2}
+          cx={center}
+          cy={center}
           r={radius}
           fill="none"
           stroke={trackColor}
           strokeWidth={INSTALL_COUNTDOWN_RING_STROKE}
+          opacity="0.55"
         />
         <circle
-          cx={INSTALL_COUNTDOWN_RING_SIZE / 2}
-          cy={INSTALL_COUNTDOWN_RING_SIZE / 2}
+          cx={center}
+          cy={center}
           r={radius}
           fill="none"
           stroke={`url(#${gradientId})`}
@@ -281,19 +313,29 @@ function InstallCountdownRing({ progress, confirmed, reducedMotion, accentFrom, 
           strokeLinecap="round"
           strokeDasharray={circumference}
           strokeDashoffset={dashOffset}
+          transform={`rotate(-90 ${center} ${center})`}
           style={reducedMotion ? undefined : { transition: 'stroke-dashoffset 0.3s linear' }}
         />
       </svg>
       <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
         {children}
       </div>
+      <style>{`
+        @keyframes tenantInstallRingPulse {
+          0%, 100% { transform: scale(1); opacity: 0.65; }
+          50% { transform: scale(1.1); opacity: 0.95; }
+        }
+        .tenant-install-ring-glow {
+          animation: tenantInstallRingPulse 2.2s ease-in-out infinite;
+        }
+      `}</style>
     </div>
   );
 }
 
 function InstallCheckmark({ color, reducedMotion }) {
   return (
-    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+    <svg width="52" height="52" viewBox="0 0 24 24" fill="none" aria-hidden="true">
       <path
         d="M5 13l4 4L19 7"
         stroke={color}
@@ -337,6 +379,10 @@ function InstallCountdownScreen({
     : Math.min(1, Math.max(0, (INSTALL_COUNTDOWN_DURATION_MS - remainingMs) / INSTALL_COUNTDOWN_DURATION_MS));
   const timedOut = !confirmed && remainingMs <= 0;
   const almostReady = !confirmed && !timedOut && remainingSeconds <= 10;
+  // Same colorful ambient background (radial glow + two soft orbs) as the
+  // main Install App card, instead of a flat single color — purely visual,
+  // no effect on the state this screen reads.
+  const pageBackground = `radial-gradient(circle at 50% 12%, ${accentGlow(0.24)}, transparent 55%), ${backgroundColor}`;
 
   let heading = `Installing ${trustName}…`;
   let subtext = 'We’re adding your app to this device. Please keep this screen open.';
@@ -355,29 +401,54 @@ function InstallCountdownScreen({
   }
 
   return (
-    <div style={{ ...styles.page, background: backgroundColor }}>
-      {logoUrl ? <img src={logoUrl} alt="" style={styles.countdownLogo} /> : null}
-      <InstallCountdownRing
-        progress={progress}
-        confirmed={confirmed}
-        reducedMotion={reducedMotion}
-        accentFrom={accent.from}
-        accentTo={accent.to}
-        trackColor={palette.cardBorder}
-      >
-        {confirmed
-          ? <InstallCheckmark color={accent.from} reducedMotion={reducedMotion} />
-          : <span style={{ ...styles.countdownNumber, color: palette.textPrimary }}>{remainingSeconds}s</span>}
-      </InstallCountdownRing>
+    <div style={{ ...styles.page, background: pageBackground, paddingTop: 'calc(env(safe-area-inset-top, 0px) + 40px)', justifyContent: 'flex-start' }}>
+      <div style={{ ...styles.glowOrb, top: '-70px', left: '-60px', background: accentGlow(0.4) }} />
+      <div style={{ ...styles.glowOrb, bottom: '-70px', right: '-60px', background: accentGlow(0.28) }} />
 
-      <h2 style={{ ...styles.loadingText, color: palette.textPrimary, fontSize: '19px', fontWeight: 800, marginTop: '22px', maxWidth: '320px' }}>
+      <p style={{ ...styles.eyebrow, color: palette.textMuted, marginBottom: '18px' }}>
+        {confirmed ? 'Almost there' : 'Installing App'}
+      </p>
+
+      {logoUrl ? (
+        <div
+          style={{
+            ...styles.countdownLogoWrap,
+            background: accentGradient,
+            boxShadow: `0 12px 30px ${accentGlow(0.35)}`,
+          }}
+        >
+          <img src={logoUrl} alt="" style={styles.countdownLogo} />
+        </div>
+      ) : null}
+
+      <div style={{ marginTop: logoUrl ? '26px' : '8px' }}>
+        <InstallCountdownRing
+          progress={progress}
+          confirmed={confirmed}
+          reducedMotion={reducedMotion}
+          accentFrom={accent.from}
+          accentTo={accent.to}
+          trackColor={palette.cardBorder}
+          glowColor={accentGlow(0.5)}
+        >
+          {confirmed
+            ? <InstallCheckmark color={accent.from} reducedMotion={reducedMotion} />
+            : (
+              <span key={remainingSeconds} className={reducedMotion ? undefined : 'tenant-install-countdown-number'} style={{ ...styles.countdownNumber, color: palette.textPrimary }}>
+                {remainingSeconds}s
+              </span>
+            )}
+        </InstallCountdownRing>
+      </div>
+
+      <h2 style={{ ...styles.loadingText, color: palette.textPrimary, fontSize: '19px', fontWeight: 800, marginTop: '26px', maxWidth: '320px' }}>
         {heading}
       </h2>
       <p style={{ ...styles.loadingText, color: palette.textSecondary, marginTop: '6px', maxWidth: '300px' }}>
         {subtext}
       </p>
       {statusLine ? (
-        <p style={{ ...styles.loadingText, color: palette.textMuted, marginTop: '10px', fontSize: '12px' }}>
+        <p style={{ ...styles.loadingText, color: accent.from, marginTop: '10px', fontSize: '12px', fontWeight: 700, letterSpacing: '0.3px' }}>
           {statusLine}
         </p>
       ) : null}
@@ -409,6 +480,14 @@ function InstallCountdownScreen({
         @keyframes tenantInstallCheckmarkDraw {
           from { stroke-dasharray: 32; stroke-dashoffset: 32; }
           to { stroke-dasharray: 32; stroke-dashoffset: 0; }
+        }
+        @keyframes tenantInstallNumberTick {
+          0% { transform: scale(1.14); opacity: 0.7; }
+          100% { transform: scale(1); opacity: 1; }
+        }
+        .tenant-install-countdown-number {
+          display: inline-block;
+          animation: tenantInstallNumberTick 0.35s ease-out;
         }
       `}</style>
     </div>
@@ -2271,17 +2350,27 @@ const styles = {
     marginTop: '12px',
     fontSize: '13px',
   },
+  countdownLogoWrap: {
+    width: '76px',
+    height: '76px',
+    borderRadius: '20px',
+    padding: '3px',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   countdownLogo: {
-    width: '64px',
-    height: '64px',
-    borderRadius: '16px',
+    width: '100%',
+    height: '100%',
+    borderRadius: '17px',
     objectFit: 'cover',
-    marginBottom: '6px',
+    display: 'block',
   },
   countdownNumber: {
-    fontSize: '30px',
+    fontSize: '32px',
     fontWeight: 800,
     fontVariantNumeric: 'tabular-nums',
+    letterSpacing: '-0.5px',
   },
   notAvailableCard: {
     background: '#222',
