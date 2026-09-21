@@ -18,10 +18,7 @@ import {
   readCountdownDeadline,
   writeCountdownDeadline,
   clearCountdownDeadline,
-  INSTALL_COUNTDOWN_DURATION_MS,
-  isAutoOpenPending,
-  writeAutoOpenPending,
-  clearAutoOpenPending
+  INSTALL_COUNTDOWN_DURATION_MS
 } from './utils/installPendingState';
 import Home from './Home';
 
@@ -197,28 +194,6 @@ const writeInstallCountdown = (slug) => {
 const clearInstallCountdown = (slug, reason) => {
   clearCountdownDeadline(slug);
   logInstallFlow('countdown-clear', { slug, reason: reason || 'unspecified' });
-};
-
-// Thin wrappers around the auto-open marker (see its own comment in
-// installPendingState.js for why this exists — it's what lets
-// autoEnterAfterInstallRef's "this is a fresh install, attempt the Android
-// hand-off" signal survive a tab discard/reload that happens AFTER
-// appinstalled + the settle window have already fully completed, not just
-// mid-way through it).
-const readInstallAutoOpen = (slug) => {
-  const pending = isAutoOpenPending(slug);
-  logInstallFlow('autoopen-read', { slug, pending });
-  return pending;
-};
-
-const writeInstallAutoOpen = (slug) => {
-  writeAutoOpenPending(slug);
-  logInstallFlow('autoopen-write', { slug });
-};
-
-const clearInstallAutoOpen = (slug, reason) => {
-  clearAutoOpenPending(slug);
-  logInstallFlow('autoopen-clear', { slug, reason: reason || 'unspecified' });
 };
 
 // Ticks every 300ms while `active`, always recomputing the remaining time
@@ -815,18 +790,6 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
   // scheduling scheduleSettle below).
   const isResumingSettlingInstall = installUiSeed.phase === 'finalizing';
   const resumingSettleReadyAt = installUiSeed.readyAt;
-  // Answers "is a fresh-install auto-open still owed for this slug" across
-  // a reload that lands AFTER the verified record is already fully settled
-  // — the one case isResumingAcceptedInstall/isResumingSettlingInstall
-  // above do NOT cover, since both are false once installPhase has already
-  // reached 'installed'. Without this, a tab Android discards/reloads
-  // after appinstalled + the settle window have already finished loses all
-  // memory of "this was this session's own accepted install" and falls
-  // back to the plain Installed/Open App card with no hand-off attempt —
-  // see isAutoOpenPending's own comment in installPendingState.js. Time-
-  // bounded (INSTALL_AUTOOPEN_MAX_AGE_MS) so it can never affect an
-  // unrelated, ordinary revisit to an app that's simply already installed.
-  const isFreshInstallAutoOpenPending = isFullyVerifiedInstall && readInstallAutoOpen(normalizedAppSlug);
   // Computed once per mount (document.referrer doesn't change during a
   // page's lifetime) — see isLikelyInstallContinuation's own comment. Used
   // below to scope the mount grace window to the cases that actually need
@@ -933,26 +896,18 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
   // is confirmed hidden/unloading (hand-off worked) or on unmount.
   const androidHandoffFallbackTimeoutRef = useRef(null);
   // Set true when the user accepts the native install prompt during THIS
-  // session (see handleInstallClick), when resuming an accepted-but-not-
+  // session (see handleInstallClick), or when resuming an accepted-but-not-
   // yet-verified OR verified-but-still-settling install across a reload
-  // (isResumingAcceptedInstall / isResumingSettlingInstall), OR when
-  // resuming an install that had ALREADY reached fully verified+settled
-  // before this exact reload (isFreshInstallAutoOpenPending — see its own
-  // comment above and isAutoOpenPending's in installPendingState.js). That
-  // third case is what a plain in-memory ref could never cover on its own:
-  // without the persisted auto-open marker, a tab Android discards/reloads
-  // AFTER settle has already finished loses this signal entirely and falls
-  // back to the plain Installed/Open App card with no hand-off attempted.
-  // Read/cleared by the auto-entry effect declared after enterTenantTrust
-  // below. This is what scopes "automatically continue into the tenant
-  // app" to the fresh-install journey specifically — the separate "already
-  // installed before this session" detection effect above never touches
-  // this ref, so an ordinary revisit keeps showing the existing
+  // (isResumingAcceptedInstall / isResumingSettlingInstall — the persisted
+  // record is what makes this survive the reload; the ref itself is still
+  // plain in-memory state). Read/cleared by the auto-entry effect declared
+  // after enterTenantTrust below. This is what scopes "automatically
+  // continue into the tenant app" to the fresh-install journey specifically
+  // — the separate "already installed before this session" detection
+  // effect above never touches this ref, so it keeps showing the existing
   // Installed/Open App card exactly as before, with no auto-navigation and
   // no loop risk.
-  const autoEnterAfterInstallRef = useRef(
-    isResumingAcceptedInstall || isResumingSettlingInstall || isFreshInstallAutoOpenPending
-  );
+  const autoEnterAfterInstallRef = useRef(isResumingAcceptedInstall || isResumingSettlingInstall);
   // True from the moment a fresh (this-session) install's settle window
   // completes through to enterTenantTrust()'s async membership check
   // resolving — set by completeSettle() itself (in the same batch as
@@ -963,14 +918,8 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
   // the auto-entry effect below); on success, enterTenantTrust's own state
   // changes (showTenantHome / tenantAccessState) take over rendering
   // before this is ever consulted again, so no explicit "done" reset is
-  // needed there. Seeded true (rather than the usual false) specifically
-  // for isFreshInstallAutoOpenPending: that case's installPhase/isInstalled
-  // are ALREADY seeded 'installed'/true (see installUiSeed above), so
-  // completeSettle — the only other place this is set true — is never
-  // going to run on this mount to do it; without seeding it here directly,
-  // the very first paint would flash the plain Installed/Open App card
-  // before the auto-entry effect below got a chance to run.
-  const [autoEntering, setAutoEntering] = useState(() => isFreshInstallAutoOpenPending);
+  // needed there.
+  const [autoEntering, setAutoEntering] = useState(false);
   // ANDROID FRESH-INSTALL PATH ONLY: true only once the post-intent grace
   // timer (see androidHandoffFallbackTimeoutRef) expires while this page is
   // STILL VISIBLE — i.e. Android did not visibly switch away to the
@@ -1046,7 +995,6 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
     // a stale accepted-install flag into this deliberately-fresh view.
     clearInstallPending(normalizedAppSlug, 'force-install-landing');
     clearInstallCountdown(normalizedAppSlug, 'force-install-landing');
-    clearInstallAutoOpen(normalizedAppSlug, 'force-install-landing');
     setShowTenantHome(false);
     setTenantAccessState(null);
     setTenantAccessPayload(null);
@@ -1103,7 +1051,6 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
         logInstallFlow('reconcile-stale-verified', { slug: normalizedAppSlug });
         clearInstallVerified(normalizedAppSlug, 'beforeinstallprompt-refired');
         clearInstallPending(normalizedAppSlug, 'beforeinstallprompt-refired');
-        clearInstallAutoOpen(normalizedAppSlug, 'beforeinstallprompt-refired');
         autoEnterAfterInstallRef.current = false;
         setIsInstalled(false);
         setInstallOutcome('');
@@ -2032,12 +1979,6 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
         // own comment: this is the ONLY place a fresh (non-resumed) deadline
         // is ever written, exactly at the moment the user accepted.
         setCountdownEndsAt(writeInstallCountdown(normalizedAppSlug));
-        // Marks the auto-open hand-off as owed for this slug — see
-        // isFreshInstallAutoOpenPending's own comment above: this is what
-        // lets a reload landing AFTER settle has already finished (not just
-        // mid-way through) still know to attempt the hand-off instead of
-        // silently falling back to the plain Installed/Open App card.
-        writeInstallAutoOpen(normalizedAppSlug);
         setInstallPhase('launching');
         // Safety net for browser/version inconsistencies where appinstalled
         // never fires after 'accepted' at all. The user has already
@@ -2068,7 +2009,6 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
         stopInstallPendingHeartbeat();
         clearInstallPending(normalizedAppSlug, 'dismissed');
         clearInstallCountdown(normalizedAppSlug, 'dismissed');
-        clearInstallAutoOpen(normalizedAppSlug, 'dismissed');
         setCountdownEndsAt(null);
         setInstallPhase('idle');
       }
