@@ -1,6 +1,8 @@
-import React, { useState } from 'react';
-import { ArrowLeft, Home as HomeIcon } from 'lucide-react';
+import React, { useEffect, useRef, useState } from 'react';
+import { ArrowLeft, ExternalLink, Home as HomeIcon } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import { Capacitor } from '@capacitor/core';
+import { Browser } from '@capacitor/browser';
 import { useAppTheme } from '../context/ThemeContext';
 import { getNavbarThemeStyles } from '../utils/themeUtils';
 import { getAppHomePath } from '../utils/tenantNavigation';
@@ -9,43 +11,77 @@ import BottomNav from './BottomNav';
 const USER_PANEL_URL = 'https://user-test.teiltd.in/auth/login';
 const USER_PANEL_ORIGIN = new URL(USER_PANEL_URL).origin;
 
-// The user-panel iframe is nested inside this app's own WebView (Capacitor
-// on Android). Android's WebView often never invokes shouldOverrideUrlLoading
-// for navigations started inside a sub-frame/iframe, so Capacitor's built-in
-// "launch external links as an intent" handling — which relies on that
-// callback — never fires there. A window.open()/redirect to play.google.com
-// from inside the iframe therefore tries to load Play Store's page as a
-// framed document, which Google's frame-busting headers refuse outright.
-// The user-panel app posts a message instead of navigating directly; this
-// listener (registered once, at module load, since the iframe can be
-// mounted before any component-level effect would run) does the actual
-// window.open() from the top-level frame, where shouldOverrideUrlLoading
-// reliably fires and Capacitor opens it externally.
-window.addEventListener('message', (event) => {
-  if (event.origin !== USER_PANEL_ORIGIN) return;
-  if (event.data?.type !== 'OPEN_EXTERNAL_LINK' || !event.data.url) return;
-  window.open(event.data.url, '_blank', 'noopener,noreferrer');
-});
+// On native (Capacitor), the user-panel app is never loaded in an in-app
+// iframe. Android's WebView often never invokes shouldOverrideUrlLoading for
+// navigations started inside a sub-frame/iframe, so any internal link the
+// user-panel app renders (not just external ones) can get misrouted to the
+// system browser, hitting that app's server directly with no client-side
+// router in front of it — which then 404s on any route beyond its root.
+// Opening it with @capacitor/browser instead avoids the sub-frame entirely:
+// the whole thing runs as one top-level navigation, where
+// shouldOverrideUrlLoading reliably fires and only genuinely external links
+// leave the in-app browser.
+const isNative = Capacitor.isNativePlatform();
 
-export const UserPanelContent = () => (
-  <section
-    className="overflow-hidden rounded-3xl border"
-    style={{
-      background: 'var(--advertisement-card-bg)',
-      borderColor: 'var(--advertisement-card-border)',
-      boxShadow: '0 10px 28px color-mix(in srgb, var(--advertisement-card-shadow) 24%, transparent)'
-    }}
-  >
-    <div className="h-[3px]" style={{ background: 'var(--app-button-bg)' }} />
-    <iframe
-      title="App Gallery"
-      src={USER_PANEL_URL}
-      allow="clipboard-write; web-share"
-      className="w-full border-0"
-      style={{ height: 'min(620px, calc(100vh - 210px))', minHeight: 460 }}
-    />
-  </section>
-);
+// Only relevant on web, where the user-panel app is still embedded via
+// iframe: it posts a message instead of navigating directly for links that
+// must open externally (e.g. Play Store), since a plain redirect inside an
+// iframe would just load as a framed document and get refused by the
+// target's frame-busting headers. Registered once, at module load, since
+// the iframe can mount before any component-level effect would run.
+if (!isNative) {
+  window.addEventListener('message', (event) => {
+    if (event.origin !== USER_PANEL_ORIGIN) return;
+    if (event.data?.type !== 'OPEN_EXTERNAL_LINK' || !event.data.url) return;
+    window.open(event.data.url, '_blank', 'noopener,noreferrer');
+  });
+}
+
+export const UserPanelContent = () => {
+  if (isNative) {
+    return (
+      <section
+        className="overflow-hidden rounded-3xl border"
+        style={{
+          background: 'var(--advertisement-card-bg)',
+          borderColor: 'var(--advertisement-card-border)',
+          boxShadow: '0 10px 28px color-mix(in srgb, var(--advertisement-card-shadow) 24%, transparent)'
+        }}
+      >
+        <div className="h-[3px]" style={{ background: 'var(--app-button-bg)' }} />
+        <button
+          type="button"
+          onClick={() => Browser.open({ url: USER_PANEL_URL })}
+          className="w-full flex flex-col items-center justify-center gap-2 p-8"
+          style={{ background: 'transparent', border: 'none' }}
+        >
+          <ExternalLink className="h-6 w-6" style={{ color: 'var(--app-button-bg)' }} />
+          <span className="text-sm font-bold" style={{ color: 'var(--advertisement-title)' }}>Open App Gallery</span>
+        </button>
+      </section>
+    );
+  }
+
+  return (
+    <section
+      className="overflow-hidden rounded-3xl border"
+      style={{
+        background: 'var(--advertisement-card-bg)',
+        borderColor: 'var(--advertisement-card-border)',
+        boxShadow: '0 10px 28px color-mix(in srgb, var(--advertisement-card-shadow) 24%, transparent)'
+      }}
+    >
+      <div className="h-[3px]" style={{ background: 'var(--app-button-bg)' }} />
+      <iframe
+        title="App Gallery"
+        src={USER_PANEL_URL}
+        allow="clipboard-write; web-share"
+        className="w-full border-0"
+        style={{ height: 'min(620px, calc(100vh - 210px))', minHeight: 460 }}
+      />
+    </section>
+  );
+};
 
 // Rendered once, outside <Routes>, so the /user-panel iframe survives
 // navigating to Home and back via the bottom nav's "+" button. A <Route>
@@ -53,6 +89,10 @@ export const UserPanelContent = () => (
 // iframe from USER_PANEL_URL and throws away whatever trust/login state the
 // user set up inside it. Keeping it mounted and only toggling visibility
 // (display:none) avoids the reload — the iframe itself is untouched by CSS.
+//
+// On native this renders nothing: /user-panel instead opens the user-panel
+// app with @capacitor/browser (see the isNative block above for why), which
+// presents as its own native overlay outside this component's DOM.
 const PersistentUserPanel = ({ isActive, onNavigate }) => {
   const theme = useAppTheme();
   const navigate = useNavigate();
@@ -68,6 +108,33 @@ const PersistentUserPanel = ({ isActive, onNavigate }) => {
   // `allowed` first turns true, same as a derived-state pattern.
   const [mounted, setMounted] = useState(false);
   if (allowed && !mounted) setMounted(true);
+
+  // Tracks whether the native browser is already open for this activation,
+  // so re-renders (e.g. from isLoggedIn checks) don't reopen it, and so it
+  // opens again the next time the user navigates back to /user-panel.
+  const openedRef = useRef(false);
+
+  useEffect(() => {
+    if (!isNative) return undefined;
+    if (!allowed) {
+      openedRef.current = false;
+      return undefined;
+    }
+    if (openedRef.current) return undefined;
+    openedRef.current = true;
+
+    Browser.open({ url: USER_PANEL_URL });
+    const listener = Browser.addListener('browserFinished', () => {
+      openedRef.current = false;
+      navigate(-1);
+    });
+
+    return () => {
+      listener.then((handle) => handle.remove());
+    };
+  }, [allowed, navigate]);
+
+  if (isNative) return null;
 
   if (!mounted) return null;
 
