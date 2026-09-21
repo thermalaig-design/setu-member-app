@@ -11,25 +11,55 @@ import BottomNav from './BottomNav';
 const USER_PANEL_URL = 'https://user-test.teiltd.in/auth/login';
 const USER_PANEL_ORIGIN = new URL(USER_PANEL_URL).origin;
 
-// On native (Capacitor), the user-panel app is never loaded in an in-app
-// iframe. Android's WebView often never invokes shouldOverrideUrlLoading for
-// navigations started inside a sub-frame/iframe, so any internal link the
-// user-panel app renders (not just external ones) can get misrouted to the
-// system browser, hitting that app's server directly with no client-side
-// router in front of it — which then 404s on any route beyond its root.
-// Opening it with @capacitor/browser instead avoids the sub-frame entirely:
-// the whole thing runs as one top-level navigation, where
-// shouldOverrideUrlLoading reliably fires and only genuinely external links
-// leave the in-app browser.
+// On native (Capacitor) and on an installed PWA (standalone display mode),
+// the user-panel app is never loaded in an in-app iframe. Android's WebView
+// — and the same WebView-based renderer an installed PWA runs its content
+// in — often never invokes shouldOverrideUrlLoading for navigations started
+// inside a sub-frame/iframe, so any internal link the user-panel app renders
+// (not just external ones) can get misrouted into a system Custom Tab,
+// hitting that app's server directly with no client-side router in front of
+// it — which then 404s on any route beyond its root (this has been seen
+// landing on both user-test.teiltd.in and its parent teiltd.in). Opening it
+// as its own top-level navigation instead of an iframe avoids the sub-frame
+// entirely: shouldOverrideUrlLoading reliably fires there, so only links
+// meant to leave the app actually do.
 const isNative = Capacitor.isNativePlatform();
+const isStandalonePwa = (() => {
+  try {
+    return window.matchMedia?.('(display-mode: standalone)')?.matches || window.navigator?.standalone === true;
+  } catch {
+    return false;
+  }
+})();
+const skipIframe = isNative || isStandalonePwa;
 
-// Only relevant on web, where the user-panel app is still embedded via
-// iframe: it posts a message instead of navigating directly for links that
-// must open externally (e.g. Play Store), since a plain redirect inside an
-// iframe would just load as a framed document and get refused by the
-// target's frame-busting headers. Registered once, at module load, since
-// the iframe can mount before any component-level effect would run.
-if (!isNative) {
+const openUserPanelExternally = (url = USER_PANEL_URL, onClosed) => {
+  if (isNative) {
+    Browser.open({ url });
+    if (onClosed) {
+      Browser.addListener('browserFinished', () => onClosed());
+    }
+    return;
+  }
+
+  const win = window.open(url, '_blank', 'noopener,noreferrer');
+  if (onClosed && win) {
+    const pollId = window.setInterval(() => {
+      if (win.closed) {
+        window.clearInterval(pollId);
+        onClosed();
+      }
+    }, 500);
+  }
+};
+
+// Only relevant when the user-panel app is still embedded via iframe: it
+// posts a message instead of navigating directly for links that must open
+// externally (e.g. Play Store), since a plain redirect inside an iframe
+// would just load as a framed document and get refused by the target's
+// frame-busting headers. Registered once, at module load, since the iframe
+// can mount before any component-level effect would run.
+if (!skipIframe) {
   window.addEventListener('message', (event) => {
     if (event.origin !== USER_PANEL_ORIGIN) return;
     if (event.data?.type !== 'OPEN_EXTERNAL_LINK' || !event.data.url) return;
@@ -38,7 +68,7 @@ if (!isNative) {
 }
 
 export const UserPanelContent = () => {
-  if (isNative) {
+  if (skipIframe) {
     return (
       <section
         className="overflow-hidden rounded-3xl border"
@@ -51,7 +81,7 @@ export const UserPanelContent = () => {
         <div className="h-[3px]" style={{ background: 'var(--app-button-bg)' }} />
         <button
           type="button"
-          onClick={() => Browser.open({ url: USER_PANEL_URL })}
+          onClick={() => openUserPanelExternally()}
           className="w-full flex flex-col items-center justify-center gap-2 p-8"
           style={{ background: 'transparent', border: 'none' }}
         >
@@ -90,9 +120,9 @@ export const UserPanelContent = () => {
 // user set up inside it. Keeping it mounted and only toggling visibility
 // (display:none) avoids the reload — the iframe itself is untouched by CSS.
 //
-// On native this renders nothing: /user-panel instead opens the user-panel
-// app with @capacitor/browser (see the isNative block above for why), which
-// presents as its own native overlay outside this component's DOM.
+// On native, or an installed PWA, this renders nothing: /user-panel instead
+// opens the user-panel app as its own top-level navigation (see the
+// skipIframe block above for why), outside this component's DOM.
 const PersistentUserPanel = ({ isActive, onNavigate }) => {
   const theme = useAppTheme();
   const navigate = useNavigate();
@@ -109,13 +139,13 @@ const PersistentUserPanel = ({ isActive, onNavigate }) => {
   const [mounted, setMounted] = useState(false);
   if (allowed && !mounted) setMounted(true);
 
-  // Tracks whether the native browser is already open for this activation,
-  // so re-renders (e.g. from isLoggedIn checks) don't reopen it, and so it
-  // opens again the next time the user navigates back to /user-panel.
+  // Tracks whether the external browser/tab is already open for this
+  // activation, so re-renders (e.g. from isLoggedIn checks) don't reopen it,
+  // and so it opens again the next time the user navigates back to /user-panel.
   const openedRef = useRef(false);
 
   useEffect(() => {
-    if (!isNative) return undefined;
+    if (!skipIframe) return undefined;
     if (!allowed) {
       openedRef.current = false;
       return undefined;
@@ -123,18 +153,13 @@ const PersistentUserPanel = ({ isActive, onNavigate }) => {
     if (openedRef.current) return undefined;
     openedRef.current = true;
 
-    Browser.open({ url: USER_PANEL_URL });
-    const listener = Browser.addListener('browserFinished', () => {
+    openUserPanelExternally(USER_PANEL_URL, () => {
       openedRef.current = false;
       navigate(-1);
     });
-
-    return () => {
-      listener.then((handle) => handle.remove());
-    };
   }, [allowed, navigate]);
 
-  if (isNative) return null;
+  if (skipIframe) return null;
 
   if (!mounted) return null;
 
