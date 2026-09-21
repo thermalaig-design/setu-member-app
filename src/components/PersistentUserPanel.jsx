@@ -11,27 +11,25 @@ import BottomNav from './BottomNav';
 const USER_PANEL_URL = 'https://user-test.teiltd.in/auth/login';
 const USER_PANEL_ORIGIN = new URL(USER_PANEL_URL).origin;
 
-// On native (Capacitor) and on an installed PWA (standalone display mode),
-// the user-panel app is never loaded in an in-app iframe. Android's WebView
-// — and the same WebView-based renderer an installed PWA runs its content
-// in — often never invokes shouldOverrideUrlLoading for navigations started
-// inside a sub-frame/iframe, so any internal link the user-panel app renders
-// (not just external ones) can get misrouted into a system Custom Tab,
-// hitting that app's server directly with no client-side router in front of
-// it — which then 404s on any route beyond its root (this has been seen
-// landing on both user-test.teiltd.in and its parent teiltd.in). Opening it
-// as its own top-level navigation instead of an iframe avoids the sub-frame
-// entirely: shouldOverrideUrlLoading reliably fires there, so only links
-// meant to leave the app actually do.
+// On native (Capacitor) only, the user-panel app is never loaded in an
+// in-app iframe. Android's native WebView often never invokes
+// shouldOverrideUrlLoading for navigations started inside a sub-frame/
+// iframe, so any internal link the user-panel app renders (not just
+// external ones) can get misrouted into a system Custom Tab, hitting that
+// app's server directly with no client-side router in front of it — which
+// then 404s on any route beyond its root. Opening it as its own top-level
+// navigation instead of an iframe avoids the sub-frame entirely:
+// shouldOverrideUrlLoading reliably fires there, so only links meant to
+// leave the app actually do.
+//
+// On the web/PWA, the user-panel app stays embedded in an iframe as before:
+// an occasional 404 seen there (e.g. landing on the parent teiltd.in domain)
+// comes from that app itself breaking out to a top-level redirect at some
+// broken/missing link — that happens the same way whether it's embedded or
+// opened externally, so it's a bug on that app's side, not something the
+// embedding method here can prevent.
 const isNative = Capacitor.isNativePlatform();
-const isStandalonePwa = (() => {
-  try {
-    return window.matchMedia?.('(display-mode: standalone)')?.matches || window.navigator?.standalone === true;
-  } catch {
-    return false;
-  }
-})();
-const skipIframe = isNative || isStandalonePwa;
+const skipIframe = isNative;
 
 const openUserPanelExternally = (url = USER_PANEL_URL, onClosed) => {
   if (isNative) {
