@@ -1,0 +1,300 @@
+﻿--------- beginning of main
+09-19 17:07:10.138  6962  6962 I com.Setu.app: Late-enabling -Xcheck:jni
+09-19 17:07:10.172  6962  6962 E com.Setu.app: Unknown bits set in runtime_flags: 0x40000000
+09-19 17:07:10.172  6962  6962 I com.Setu.app: Using generational CollectorTypeCMC GC.
+09-19 17:07:10.182  6962  6962 D nativeloader: Load libframework-connectivity-tiramisu-jni.so using APEX ns com_android_tethering for caller /apex/com.android.tethering/javalib/framework-connectivity-t.jar: ok
+09-19 17:07:10.191  6962  6962 D OplusActivityThreadExtImpl: java.lang.NoSuchMethodException: dalvik.system.VMRuntime.SupressionGC [int, int]
+09-19 17:07:10.193  6962  6962 W libc    : Access denied finding property "persist.vendor.sys.activitylog"
+09-19 17:07:10.195  6962  6962 I OneTrace: Mark active for pid=6962? true
+09-19 17:07:10.195  6962  6962 D cutils-dev: otrace_set_tracing_enabled? true tag:0
+09-19 17:07:10.197  6962  6969 D cutils-dev: properties changed in otrace_seq_number_changed!
+09-19 17:07:10.232  6962  6977 D OplusActivityManager: get AMS extension: android.os.BinderProxy@ce3c02a
+09-19 17:07:10.233  6962  6977 D OplusAppHeapManager: java.lang.NoSuchMethodException: dalvik.system.VMRuntime.updateProcessValue [int, int, int]
+09-19 17:07:10.235  6962  6977 D SurfaceSyncGroup: preCreateSurfaceSyncGroupTimerThread
+09-19 17:07:10.239  6962  6977 D ColorModeChangeItem: preExecute mColorMode=0
+09-19 17:07:10.253  6962  6962 W re-initialized>: type=1400 audit(0.0:18248): avc:  granted  { execute } for  path="/data/data/com.Setu.app/code_cache/startup_agents/caf3f227-agent.so" dev="dm-77" ino=812219 scontext=u:r:untrusted_app:s0:c171,c257,c512,c768 tcontext=u:object_r:app_data_file:s0:c171,c257,c512,c768 tclass=file app=com.Setu.app
+09-19 17:07:10.259  6962  6962 D nativeloader: Load /data/user/0/com.Setu.app/code_cache/startup_agents/caf3f227-agent.so using system ns (caller=<unknown>): ok
+09-19 17:07:10.260  6962  6962 V studio.deploy: Startup agent attached to VM
+09-19 17:07:10.260  6962  6962 V studio.deploy: No existing instrumentation found. Loading instrumentation from instruments-83583b27.jar
+09-19 17:07:10.264  6962  6962 W com.Setu.app: hiddenapi: DexFile /data/data/com.Setu.app/code_cache/.studio/instruments-83583b27.jar is in boot class path but is not in a known location
+09-19 17:07:10.266  6962  6962 V studio.deploy: Applying transforms with cached classes
+09-19 17:07:10.515  6962  6962 W com.Setu.app: Redefining intrinsic method java.lang.Thread java.lang.Thread.currentThread(). This may cause the unexpected use of the original definition of java.lang.Thread java.lang.Thread.currentThread()in methods that have already been compiled.
+09-19 17:07:10.515  6962  6962 W com.Setu.app: Redefining intrinsic method boolean java.lang.Thread.interrupted(). This may cause the unexpected use of the original definition of boolean java.lang.Thread.interrupted()in methods that have already been compiled.
+09-19 17:07:10.517  6962  6962 I studio.deploy: Registering DispatchJNI
+09-19 17:07:10.517  6962  6962 I studio.deploy: Found com/android/tools/deploy/interpreter/JNI
+09-19 17:07:10.520  6962  6962 D CompactWindowAppManager: initCompactApplicationInfo CompactMode: , NormalMode: 
+09-19 17:07:10.521  6962  6962 E studio.deploy: Exception
+09-19 17:07:10.521  6962  6962 E studio.deploy: java.lang.NullPointerException: Attempt to invoke virtual method 'java.lang.String java.lang.Object.toString()' on a null object reference
+09-19 17:07:10.521  6962  6962 E studio.deploy: 	at com.android.tools.deploy.instrument.ResourceOverlays.getPackageName(ResourceOverlays.java:94)
+09-19 17:07:10.521  6962  6962 E studio.deploy: 	at com.android.tools.deploy.instrument.ResourceOverlays.updateLoader(ResourceOverlays.java:65)
+09-19 17:07:10.521  6962  6962 E studio.deploy: 	at com.android.tools.deploy.instrument.ResourceOverlays.addResourceOverlays(ResourceOverlays.java:37)
+09-19 17:07:10.521  6962  6962 E studio.deploy: 	at com.android.tools.deploy.instrument.InstrumentationHooks.addResourceOverlays(InstrumentationHooks.java:112)
+09-19 17:07:10.521  6962  6962 E studio.deploy: 	at android.app.LoadedApk.getResources(LoadedApk.java:1473)
+09-19 17:07:10.521  6962  6962 E studio.deploy: 	at android.app.ContextImpl.createSystemContext(ContextImpl.java:3535)
+09-19 17:07:10.521  6962  6962 E studio.deploy: 	at android.app.ActivityThread.getSystemContext(ActivityThread.java:3561)
+09-19 17:07:10.521  6962  6962 E studio.deploy: 	at android.app.ActivityThread.handleBindApplication(ActivityThread.java:8329)
+09-19 17:07:10.521  6962  6962 E studio.deploy: 	at android.app.ActivityThread.-$$Nest$mhandleBindApplication(ActivityThread.java:0)
+09-19 17:07:10.521  6962  6962 E studio.deploy: 	at android.app.ActivityThread$H.handleMessage(ActivityThread.java:2813)
+09-19 17:07:10.521  6962  6962 E studio.deploy: 	at android.os.Handler.dispatchMessage(Handler.java:115)
+09-19 17:07:10.521  6962  6962 E studio.deploy: 	at android.os.Looper.loopOnce(Looper.java:302)
+09-19 17:07:10.521  6962  6962 E studio.deploy: 	at android.os.Looper.loop(Looper.java:412)
+09-19 17:07:10.521  6962  6962 E studio.deploy: 	at android.app.ActivityThread.main(ActivityThread.java:9992)
+09-19 17:07:10.521  6962  6962 E studio.deploy: 	at java.lang.reflect.Method.invoke(Native Method)
+09-19 17:07:10.521  6962  6962 E studio.deploy: 	at com.android.internal.os.RuntimeInit$MethodAndArgsCaller.run(RuntimeInit.java:613)
+09-19 17:07:10.521  6962  6962 E studio.deploy: 	at com.android.internal.os.ZygoteInit.main(ZygoteInit.java:1074)
+--------- beginning of system
+09-19 17:07:10.525  6962  6962 V Configuration: Updating configuration, locales updated from [] to [en_GB]
+09-19 17:07:10.535  6962  6962 D OplusScrollToTopManager: setIsInWhiteList false
+09-19 17:07:10.537  6962  6962 D OplusViewDebugManager: OplusViewDebugManager Constructor android.view.debug.OplusViewDebugManager@66530f7 [mHasViewDebugProperty true] [mHasMsgDebugProperty false] [DEBUG false] [EXTRAINFOENABLE false] [LIGHT_OS false]
+09-19 17:07:10.541  6962  6962 W libc    : Access denied finding property "ro.odm.prev.product.name"
+09-19 17:07:10.637  6962  6962 D nativeloader: Configuring clns-9 for other apk /data/app/~~CEDM2kg0INX2OjxfxomXbw==/com.Setu.app-N0YB439NNVHHafxrcKFxGQ==/base.apk. target_sdk_version=36, uses_libraries=, library_path=/data/app/~~CEDM2kg0INX2OjxfxomXbw==/com.Setu.app-N0YB439NNVHHafxrcKFxGQ==/lib/arm64:/data/app/~~CEDM2kg0INX2OjxfxomXbw==/com.Setu.app-N0YB439NNVHHafxrcKFxGQ==/base.apk!/lib/arm64-v8a, permitted_path=/data:/mnt/expand:/data/user/0/com.Setu.app
+09-19 17:07:10.639  6962  6962 I com.Setu.app: AssetManager2(0xb4000078815f4728) locale list changing from [] to [en-GB]
+09-19 17:07:10.641  6962  6962 I com.Setu.app: AssetManager2(0xb400007826155028) locale list changing from [] to [en-GB]
+09-19 17:07:10.645  6962  6962 V GraphicsEnvironment: Currently set values for:
+09-19 17:07:10.645  6962  6962 V GraphicsEnvironment:   angle_gl_driver_selection_pkgs=[]
+09-19 17:07:10.645  6962  6962 V GraphicsEnvironment:   angle_gl_driver_selection_values=[]
+09-19 17:07:10.645  6962  6962 V GraphicsEnvironment: com.Setu.app is not listed in per-application setting
+09-19 17:07:10.645  6962  6962 V GraphicsEnvironment: ANGLE allowlist from config: 
+09-19 17:07:10.645  6962  6962 V GraphicsEnvironment: com.Setu.app is not listed in ANGLE allowlist or settings, returning default
+09-19 17:07:10.646  6962  6962 V GraphicsEnvironment: Updatable production driver is not supported on the device.
+09-19 17:07:10.648  6962  6962 D ResourcesManagerExtImpl: applyConfigurationToAppResourcesLocked app.getDisplayId() return callback.displayId:-1
+09-19 17:07:10.660  6962  6962 I FirebaseApp: Device unlocked: initializing all Firebase APIs for app [DEFAULT]
+09-19 17:07:10.667  6962  6962 I FirebaseInitProvider: FirebaseApp initialization successful
+09-19 17:07:10.673  6962  6962 D OplusGraphicsEvent: OplusGraphicsEventListener create now!
+09-19 17:07:10.674  6962  6962 D OplusGraphicsEvent: addEventListener success!
+09-19 17:07:10.677  6962  6962 E [UAH_CLIENT]: uahInit enter
+09-19 17:07:10.678  6962  6962 W com.Setu.app: AIBinder_linkToDeath is being called with a non-null cookie and no onUnlink callback set. This might not be intended. AIBinder_DeathRecipient_setOnUnlinked should be called first.
+09-19 17:07:10.678  6962  6962 I [UAH_CLIENT]: UahGetFeatureStatus enter
+09-19 17:07:10.689  6962  6962 I FacebookInitProvider: Failed to auto initialize the Facebook SDK
+09-19 17:07:10.689  6962  6962 I FacebookInitProvider: A valid Facebook app id must be set in the AndroidManifest.xml or set by calling FacebookSdk.setApplicationId before initializing the sdk.
+09-19 17:07:10.689  6962  6962 I FacebookInitProvider: 	at com.facebook.FacebookSdk.sdkInitialize(FacebookSdk.kt:452)
+09-19 17:07:10.689  6962  6962 I FacebookInitProvider: 	at com.facebook.FacebookSdk.sdkInitialize(FacebookSdk.kt:412)
+09-19 17:07:10.689  6962  6962 I FacebookInitProvider: 	at com.facebook.internal.FacebookInitProvider.onCreate(FacebookInitProvider.kt:28)
+09-19 17:07:10.689  6962  6962 I FacebookInitProvider: 	at android.content.ContentProvider.attachInfo(ContentProvider.java:2707)
+09-19 17:07:10.689  6962  6962 I FacebookInitProvider: 	at android.content.ContentProvider.attachInfo(ContentProvider.java:2676)
+09-19 17:07:10.689  6962  6962 I FacebookInitProvider: 	at android.app.ActivityThread.installProvider(ActivityThread.java:9508)
+09-19 17:07:10.689  6962  6962 I FacebookInitProvider: 	at android.app.ActivityThread.installContentProviders(ActivityThread.java:9017)
+09-19 17:07:10.689  6962  6962 I FacebookInitProvider: 	at android.app.ActivityThread.handleBindApplication(ActivityThread.java:8645)
+09-19 17:07:10.689  6962  6962 I FacebookInitProvider: 	at android.app.ActivityThread.-$$Nest$mhandleBindApplication(ActivityThread.java:0)
+09-19 17:07:10.689  6962  6962 I FacebookInitProvider: 	at android.app.ActivityThread$H.handleMessage(ActivityThread.java:2813)
+09-19 17:07:10.689  6962  6962 I FacebookInitProvider: 	at android.os.Handler.dispatchMessage(Handler.java:115)
+09-19 17:07:10.689  6962  6962 I FacebookInitProvider: 	at android.os.Looper.loopOnce(Looper.java:302)
+09-19 17:07:10.689  6962  6962 I FacebookInitProvider: 	at android.os.Looper.loop(Looper.java:412)
+09-19 17:07:10.689  6962  6962 I FacebookInitProvider: 	at android.app.ActivityThread.main(ActivityThread.java:9992)
+09-19 17:07:10.689  6962  6962 I FacebookInitProvider: 	at java.lang.reflect.Method.invoke(Native Method)
+09-19 17:07:10.689  6962  6962 I FacebookInitProvider: 	at com.android.internal.os.RuntimeInit$MethodAndArgsCaller.run(RuntimeInit.java:613)
+09-19 17:07:10.689  6962  6962 I FacebookInitProvider: 	at com.android.internal.os.ZygoteInit.main(ZygoteInit.java:1074)
+09-19 17:07:10.693  6962  6962 I HWUI    : SupportApps size 0
+09-19 17:07:10.694  6962  6962 D ExtensionsLoader: createInstance(64bit) : createExtendedFactory
+09-19 17:07:10.694  6962  6962 D ExtensionsLoader: Opened libSchedAssistExtImpl.so
+09-19 17:07:10.694  6962  6962 E SchedAssist: open sharedFd failed with error=Permission denied
+09-19 17:07:10.694  6962  6962 E SchedAssist: open sharedFd failed with error=Permission denied
+09-19 17:07:10.694  6962  6962 E SchedAssist: open sharedFd failed with error=Permission denied
+09-19 17:07:10.696  6962  7047 D ExtensionsLoader: createInstance(64bit) : createExtendedFactory
+09-19 17:07:10.696  6962  7047 D ExtensionsLoader: Opened libSchedAssistExtImpl.so
+09-19 17:07:10.697  6962  7047 I DisplayManager: Choreographer implicitly registered for the refresh rate.
+09-19 17:07:10.698  6962  6962 I com.Setu.app: AssetManager2(0xb4000078815f4a28) locale list changing from [] to [en-GB]
+09-19 17:07:10.699  6962  7047 I AdrenoGLES-0: QUALCOMM build                   : f6b5df5188, I29aebc4401
+09-19 17:07:10.699  6962  7047 I AdrenoGLES-0: Build Date                       : 09/19/25
+09-19 17:07:10.699  6962  7047 I AdrenoGLES-0: OpenGL ES Shader Compiler Version: E031.45.02.26
+09-19 17:07:10.699  6962  7047 I AdrenoGLES-0: Local Branch                     : 
+09-19 17:07:10.699  6962  7047 I AdrenoGLES-0: Remote Branch                    : refs/tags/AU_LINUX_ANDROID_LA.VENDOR.14.3.0.11.00.00.974.010
+09-19 17:07:10.699  6962  7047 I AdrenoGLES-0: Remote Branch                    : NONE
+09-19 17:07:10.699  6962  7047 I AdrenoGLES-0: Reconstruct Branch               : NOTHING
+09-19 17:07:10.699  6962  7047 I AdrenoGLES-0: Build Config                     : S P 16.1.2 AArch64
+09-19 17:07:10.699  6962  7047 I AdrenoGLES-0: Driver Path                      : /vendor/lib64/egl/libGLESv2_adreno.so
+09-19 17:07:10.699  6962  7047 I AdrenoGLES-0: Driver Version                   : 0762.41
+09-19 17:07:10.699  6962  7047 I AdrenoGLES-0: Process Name                     : com.Setu.app
+09-19 17:07:10.699  6962  6962 D ResourcesManagerExtImpl: applyConfigurationToAppResourcesLocked app.getDisplayId() return callback.displayId:0
+09-19 17:07:10.710  6962  7047 I AdrenoGLES-0: PFP: 0x01310181, ME: 0x00000000
+09-19 17:07:10.712  6962  6962 D AppCompatDelegate: Checking for metadata for AppLocalesMetadataHolderService : Service not found
+09-19 17:07:10.712  6962  6962 I com.Setu.app: AssetManager2(0xb400007826155628) locale list changing from [] to [en-GB]
+09-19 17:07:10.715  6962  7047 I AdrenoUtils: <ReadGpuID:357>: Reading chip ID through GSL
+09-19 17:07:10.716  6962  6962 E ashmem  : Pinning is deprecated since Android Q. Please use trim or other methods.
+09-19 17:07:10.720  6962  7047 D ExtensionsLoader: createInstance(64bit) : createExtendedFactory
+09-19 17:07:10.721  6962  7047 D ExtensionsLoader: Opened libeglextimpl.so
+09-19 17:07:10.721  6962  7047 D PreCache: [IPreCacheRus]loadRUSConfigs#102 failed to transact: -22 prc:com.Setu.app
+09-19 17:07:10.725  6962  6962 E OplusPredictiveBackController:  NoSuchMethodException 
+09-19 17:07:10.725  6962  6962 E OplusPredictiveBackController:  NoSuchMethodException 
+09-19 17:07:10.725  6962  6962 E OplusPredictiveBackController:  NoSuchMethodException 
+09-19 17:07:10.725  6962  6962 E OplusPredictiveBackController:  NoSuchMethodException 
+09-19 17:07:10.725  6962  6962 D OplusPredictiveBackController: should not HookOnBackInvokedCallbackEnabled for application com.Setu.app.MainActivity@aa6b46a hasOnBackInvokedCallBackEnabled
+09-19 17:07:10.725  6962  6962 D OplusPredictiveBackController: initPredictiveBackConfig for com.Setu.app.MainActivity@aa6b46a initPredictiveBackConfig mShouldInterceptKeyEvent false
+09-19 17:07:10.725  6962  6962 D WindowOnBackDispatcher:  predictive settings is disabled for com.Setu.app
+09-19 17:07:10.728  6962  6962 I oplus.android.OplusFrameworkFactoryImpl: Unknow feature:IOplusTextViewRTLUtilForUG
+09-19 17:07:10.735  6962  6962 D CompatChangeReporter: Compat change id reported: 377864165; UID 10427; state: ENABLED
+09-19 17:07:10.737  6962  6962 D DesktopModeFlags: Toggle override initialized to: OVERRIDE_UNSET
+09-19 17:07:10.747  6962  6962 I com.Setu.app: hiddenapi: Accessing hidden method Landroid/view/ViewGroup;->makeOptionalFitsSystemWindows()V (runtime_flags=0, domain=platform, api=unsupported) from Landroidx/appcompat/widget/ViewUtils; (domain=app, TargetSdkVersion=36) using reflection: allowed
+09-19 17:07:10.752  6962  6962 I com.Setu.app: AssetManager2(0xb400007826155328) locale list changing from [] to [en-GB]
+09-19 17:07:10.753  6962  6962 I WebViewFactory: Loading com.google.android.webview version 152.0.7977.88 (code 797708803)
+09-19 17:07:10.755  6962  6962 D ApplicationLoaders: Returning zygote-cached class loader: /system/framework/android.test.base.jar
+09-19 17:07:10.755  6962  6962 D ApplicationLoaders: Returning zygote-cached class loader: /system_ext/framework/androidx.window.extensions.jar
+09-19 17:07:10.757  6962  6962 W com.Setu.app: Loading /data/app/~~NzwOjjNcoDKxe3ZTHNRSCg==/com.google.android.webview-3toDebKsTJ03p8xeoGobBg==/oat/arm64/base.odex non-executable as it requires an image which we failed to load
+09-19 17:07:10.757  6962  6962 D nativeloader: Configuring clns-10 for other apk /data/app/~~NzwOjjNcoDKxe3ZTHNRSCg==/com.google.android.webview-3toDebKsTJ03p8xeoGobBg==/base.apk. target_sdk_version=36, uses_libraries=, library_path=/data/app/~~NzwOjjNcoDKxe3ZTHNRSCg==/com.google.android.webview-3toDebKsTJ03p8xeoGobBg==/lib/arm64:/data/app/~~NzwOjjNcoDKxe3ZTHNRSCg==/com.google.android.webview-3toDebKsTJ03p8xeoGobBg==/base.apk!/lib/arm64-v8a, permitted_path=/data:/mnt/expand
+09-19 17:07:10.770  6962  6962 I cr_WVCFactoryProvider: version=152.0.7977.88 (797708803) minSdkVersion=29 multiprocess=true packageId=2 splits=<none>
+09-19 17:07:10.782  6962  6962 D nativeloader: Load /data/app/~~NzwOjjNcoDKxe3ZTHNRSCg==/com.google.android.webview-3toDebKsTJ03p8xeoGobBg==/base.apk!/lib/arm64-v8a/libwebviewchromium.so using class loader ns clns-10 (caller=/data/app/~~NzwOjjNcoDKxe3ZTHNRSCg==/com.google.android.webview-3toDebKsTJ03p8xeoGobBg==/base.apk): ok
+09-19 17:07:10.784  6962  6962 D nativeloader: Load /system/lib64/libwebviewchromium_plat_support.so using class loader ns clns-10 (caller=/data/app/~~NzwOjjNcoDKxe3ZTHNRSCg==/com.google.android.webview-3toDebKsTJ03p8xeoGobBg==/base.apk): ok
+09-19 17:07:10.785  6962  7057 I chromium: [0919/170710.785612:INFO:android_webview/browser/variations/variations_seed_loader.cc:67] Failed to open file for reading.: No such file or directory (2)
+09-19 17:07:10.790  6962  6962 I com.Setu.app: AssetManager2(0xb400007826155928) locale list changing from [] to [en-GB]
+09-19 17:07:10.791  6962  6962 I com.Setu.app: AssetManager2(0xb400007826155c28) locale list changing from [] to [en-GB]
+09-19 17:07:10.793  6962  6962 I com.Setu.app: AssetManager2(0xb400007826155f28) locale list changing from [] to [en-GB]
+09-19 17:07:10.793  6962  6962 I com.Setu.app: AssetManager2(0xb400007826156228) locale list changing from [] to [en-GB]
+09-19 17:07:10.798  6962  6962 I cr_LibraryLoader: Successfully loaded native library
+09-19 17:07:10.798  6962  6962 I cr_CachingUmaRecorder: Flushed 45 samples from 22 histograms, 0 samples were dropped.
+09-19 17:07:10.799  6962  6962 I cr_ChildProcLH: ScopedServiceBindingBatch.tryActivate: false
+09-19 17:07:10.800  6962  6962 I cr_CombinedPProvider: #registerProvider() provider:WV.cj@15c9f7a isPolicyCacheEnabled:false policyProvidersSize:0
+09-19 17:07:10.800  6962  6962 I cr_PolicyProvider: #setManagerAndSource() 0
+09-19 17:07:10.802  6962  7055 I cr_policy: registerReceiver succeeded after 1ms
+09-19 17:07:10.803  6962  6962 I cr_DisplayManager: Is Display Topology available: false
+09-19 17:07:10.804  6962  6962 I com.Setu.app: AssetManager2(0xb400007826156528) locale list changing from [] to [en-GB]
+09-19 17:07:10.804  6962  6962 D WindowContextController: attachToDisplayArea  type = 2 ,displayId = 0 ,options = null ,mToken = android.window.WindowTokenClient@f730e5d
+09-19 17:07:10.806  6962  6962 I com.Setu.app: AssetManager2(0xb400007826156828) locale list changing from [] to [en-GB]
+09-19 17:07:10.821  6962  6962 I cr_CombinedPProvider: #linkNativeInternal() 1
+09-19 17:07:10.822  6962  6962 I cr_AppResProvider: #getApplicationRestrictionsFromUserManager() Bundle[EMPTY_PARCEL]
+09-19 17:07:10.822  6962  6962 I cr_PolicyProvider: #notifySettingsAvailable() 0
+09-19 17:07:10.822  6962  6962 I cr_CombinedPProvider: #onSettingsAvailable() 0
+09-19 17:07:10.822  6962  6962 I cr_CombinedPProvider: #flushPolicies()
+09-19 17:07:10.897  6962  6962 I Quality : InflateViewInfo:149425938,androidx.coordinatorlayout.widget.CoordinatorLayout
+09-19 17:07:10.903  6962  6962 D Capacitor: Starting BridgeActivity
+09-19 17:07:10.915  6962  6962 D Capacitor: Registering plugin instance: CapacitorCookies
+09-19 17:07:10.916  6962  7068 D OplusInputMethodUtil: init sDebug to false, init sDebugIme to false, init sAlwaysOn to false
+09-19 17:07:10.916  6962  7068 D OplusInputMethodUtil: updateDebugToClass InputMethodManager.DEBUG = false
+09-19 17:07:10.916  6962  7068 D OplusInputMethodUtil: updateDebugToClass ImeFocusController.DEBUG = false
+09-19 17:07:10.916  6962  7068 D OplusInputMethodUtil: updateDebugToClass OnBackInvokedDispatcher.DEBUG = false
+09-19 17:07:10.916  6962  7068 D OplusInputMethodUtil: updateDebugToClass InsetsController.DEBUG = false
+09-19 17:07:10.916  6962  7068 D OplusInputMethodUtil: updateDebugToClass BaseInputConnection.DEBUG = false
+09-19 17:07:10.917  6962  6962 D Capacitor: Registering plugin instance: WebView
+09-19 17:07:10.918  6962  6962 D Capacitor: Registering plugin instance: CapacitorHttp
+09-19 17:07:10.919  6962  6962 D Capacitor: Registering plugin instance: SystemBars
+09-19 17:07:10.920  6962  6962 D Capacitor: Registering plugin instance: SecureScreen
+09-19 17:07:10.921  6962  6962 D Capacitor: Registering plugin instance: FacebookLogin
+09-19 17:07:10.921  6962  6962 D Capacitor/FacebookLogin: Entering load()
+09-19 17:07:10.923  6962  6962 E Capacitor: NativePlugin com.getcapacitor.community.facebooklogin.FacebookLogin failed to load
+09-19 17:07:10.923  6962  6962 E Capacitor: com.getcapacitor.PluginLoadException: Unable to load plugin instance. Ensure plugin is publicly accessible
+09-19 17:07:10.923  6962  6962 E Capacitor: 	at com.getcapacitor.PluginHandle.load(PluginHandle.java:107)
+09-19 17:07:10.923  6962  6962 E Capacitor: 	at com.getcapacitor.PluginHandle.<init>(PluginHandle.java:65)
+09-19 17:07:10.923  6962  6962 E Capacitor: 	at com.getcapacitor.Bridge.registerPlugin(Bridge.java:705)
+09-19 17:07:10.923  6962  6962 E Capacitor: 	at com.getcapacitor.Bridge.registerAllPlugins(Bridge.java:661)
+09-19 17:07:10.923  6962  6962 E Capacitor: 	at com.getcapacitor.Bridge.<init>(Bridge.java:231)
+09-19 17:07:10.923  6962  6962 E Capacitor: 	at com.getcapacitor.Bridge.<init>(Bridge.java:0)
+09-19 17:07:10.923  6962  6962 E Capacitor: 	at com.getcapacitor.Bridge$Builder.create(Bridge.java:1599)
+09-19 17:07:10.923  6962  6962 E Capacitor: 	at com.getcapacitor.BridgeActivity.load(BridgeActivity.java:48)
+09-19 17:07:10.923  6962  6962 E Capacitor: 	at com.getcapacitor.BridgeActivity.onCreate(BridgeActivity.java:42)
+09-19 17:07:10.923  6962  6962 E Capacitor: 	at com.Setu.app.MainActivity.onCreate(MainActivity.java:10)
+09-19 17:07:10.923  6962  6962 E Capacitor: 	at android.app.Activity.performCreate(Activity.java:9400)
+09-19 17:07:10.923  6962  6962 E Capacitor: 	at android.app.Activity.performCreate(Activity.java:9372)
+09-19 17:07:10.923  6962  6962 E Capacitor: 	at android.app.Instrumentation.callActivityOnCreate(Instrumentation.java:1541)
+09-19 17:07:10.923  6962  6962 E Capacitor: 	at android.app.ActivityThread.performLaunchActivity(ActivityThread.java:4628)
+09-19 17:07:10.923  6962  6962 E Capacitor: 	at android.app.ActivityThread.handleLaunchActivity(ActivityThread.java:4851)
+09-19 17:07:10.923  6962  6962 E Capacitor: 	at android.app.servertransaction.LaunchActivityItem.execute(LaunchActivityItem.java:242)
+09-19 17:07:10.923  6962  6962 E Capacitor: 	at android.app.servertransaction.TransactionExecutor.executeNonLifecycleItem(TransactionExecutor.java:138)
+09-19 17:07:10.923  6962  6962 E Capacitor: 	at android.app.servertransaction.TransactionExecutor.executeTransactionItems(TransactionExecutor.java:108)
+09-19 17:07:10.923  6962  6962 E Capacitor: 	at android.app.servertransaction.TransactionExecutor.execute(TransactionExecutor.java:85)
+09-19 17:07:10.923  6962  6962 E Capacitor: 	at android.app.ActivityThread$H.handleMessage(ActivityThread.java:3131)
+09-19 17:07:10.923  6962  6962 E Capacitor: 	at android.os.Handler.dispatchMessage(Handler.java:115)
+09-19 17:07:10.923  6962  6962 E Capacitor: 	at android.os.Looper.loopOnce(Looper.java:302)
+09-19 17:07:10.923  6962  6962 E Capacitor: 	at android.os.Looper.loop(Looper.java:412)
+09-19 17:07:10.923  6962  6962 E Capacitor: 	at android.app.ActivityThread.main(ActivityThread.java:9992)
+09-19 17:07:10.923  6962  6962 E Capacitor: 	at java.lang.reflect.Method.invoke(Native Method)
+09-19 17:07:10.923  6962  6962 E Capacitor: 	at com.android.internal.os.RuntimeInit$MethodAndArgsCaller.run(RuntimeInit.java:613)
+09-19 17:07:10.923  6962  6962 E Capacitor: 	at com.android.internal.os.ZygoteInit.main(ZygoteInit.java:1074)
+09-19 17:07:10.923  6962  6962 D Capacitor: Registering plugin instance: App
+09-19 17:07:10.923  6962  6962 D Capacitor: Registering plugin instance: Filesystem
+09-19 17:07:10.925  6962  6962 D Capacitor: Registering plugin instance: Haptics
+09-19 17:07:10.926  6962  6962 D Vibrator: SystemVibrator Created
+09-19 17:07:10.926  6962  6962 D Capacitor: Registering plugin instance: LocalNotifications
+09-19 17:07:10.929  6962  6962 D Capacitor: Registering plugin instance: PushNotifications
+09-19 17:07:10.930  6962  6962 D Capacitor: Registering plugin instance: Share
+09-19 17:07:10.931  6962  6962 D Capacitor: Registering plugin instance: SplashScreen
+09-19 17:07:10.933  6962  6962 D Capacitor: Registering plugin instance: StatusBar
+09-19 17:07:10.935  6962  6962 V Capacitor/StatusBarPlugin: Notifying listeners for event statusBarOverlayChanged
+09-19 17:07:10.935  6962  6962 D Capacitor/StatusBarPlugin: No listeners found for event statusBarOverlayChanged
+09-19 17:07:10.936  6962  6962 V Capacitor/StatusBarPlugin: Notifying listeners for event statusBarOverlayChanged
+09-19 17:07:10.936  6962  6962 D Capacitor/StatusBarPlugin: No listeners found for event statusBarOverlayChanged
+09-19 17:07:10.936  6962  6962 D Capacitor: Registering plugin instance: Toast
+09-19 17:07:10.937  6962  6962 D Capacitor: Registering plugin instance: AppUpdate
+09-19 17:07:10.961  6962  6962 W Capacitor: Unable to read file at path public/plugins
+09-19 17:07:10.963  6962  6962 D Capacitor: Loading app at https://localhost
+09-19 17:07:10.977  6962  7072 W cr_media: BLUETOOTH_CONNECT permission is missing.
+09-19 17:07:10.979  6962  7072 W cr_media: getBluetoothAdapter() requires BLUETOOTH permission
+09-19 17:07:10.979  6962  7072 W cr_media: registerBluetoothIntentsIfNeeded: Requires BLUETOOTH permission
+09-19 17:07:10.980  6962  7101 D colorx  : VulkanExtImpl Init
+09-19 17:07:10.981  6962  7101 D vulkan  : searching for layers in '/data/app/~~CEDM2kg0INX2OjxfxomXbw==/com.Setu.app-N0YB439NNVHHafxrcKFxGQ==/lib/arm64'
+09-19 17:07:10.981  6962  7101 D vulkan  : searching for layers in '/data/app/~~CEDM2kg0INX2OjxfxomXbw==/com.Setu.app-N0YB439NNVHHafxrcKFxGQ==/base.apk!/lib/arm64-v8a'
+09-19 17:07:10.981  6962  7101 D colorx  : I can't find colorx layer , let's enumerate colorx layers first.
+09-19 17:07:10.981  6962  7072 D AudioSystem: onNewService: media.audio_policy service obtained 0xb4000077ce61da40
+09-19 17:07:10.982  6962  7072 D AudioSystem: getService: IAudioPolicyService retrieved: 0xb4000077ce61da40  cached: 0xb4000077ce61da40
+09-19 17:07:10.982  6962  6962 D Capacitor: App started
+09-19 17:07:10.983  6962  6962 D WindowOnBackDispatcher:  predictive settings is disabled for com.Setu.app
+09-19 17:07:10.983  6962  6962 W WindowOnBackDispatcher: OnBackInvokedCallback is not enabled for the application.
+09-19 17:07:10.983  6962  6962 W WindowOnBackDispatcher: Set 'android:enableOnBackInvokedCallback="true"' in the application manifest.
+09-19 17:07:10.984  6962  7101 I AdrenoVK-0: ===== BEGIN DUMP OF OVERRIDDEN SETTINGS =====
+09-19 17:07:10.984  6962  7101 I AdrenoVK-0: ===== END DUMP OF OVERRIDDEN SETTINGS =====
+09-19 17:07:10.984  6962  6962 D ActivityThread: ComponentInfo{com.Setu.app/com.Setu.app.MainActivity} checkFinished=false 2
+09-19 17:07:10.985  6962  6962 D ResourcesManagerExtImpl: applyConfigurationToAppResourcesLocked app.getDisplayId() return callback.displayId:0
+09-19 17:07:10.985  6962  6962 D Capacitor/AppPlugin: Firing change: true
+09-19 17:07:10.985  6962  6962 V Capacitor/AppPlugin: Notifying listeners for event appStateChange
+09-19 17:07:10.985  6962  6962 D Capacitor/AppPlugin: No listeners found for event appStateChange
+09-19 17:07:10.985  6962  6962 D Capacitor: App resumed
+09-19 17:07:10.987  6962  7101 I AdrenoVK-0: QUALCOMM build          : f6b5df5188, I29aebc4401
+09-19 17:07:10.987  6962  7101 I AdrenoVK-0: Build Date              : 09/19/25
+09-19 17:07:10.987  6962  7101 I AdrenoVK-0: Shader Compiler Version : E031.45.02.26
+09-19 17:07:10.987  6962  7101 I AdrenoVK-0: Local Branch            : 
+09-19 17:07:10.987  6962  7101 I AdrenoVK-0: Remote Branch           : refs/tags/AU_LINUX_ANDROID_LA.VENDOR.14.3.0.11.00.00.974.010
+09-19 17:07:10.987  6962  7101 I AdrenoVK-0: Remote Branch           : NONE
+09-19 17:07:10.987  6962  7101 I AdrenoVK-0: Reconstruct Branch      : NOTHING
+09-19 17:07:10.987  6962  7101 I AdrenoVK-0: Build Config            : S P 16.1.2 AArch64
+09-19 17:07:10.987  6962  7101 I AdrenoVK-0: Driver Path             : /vendor/lib64/hw/vulkan.adreno.so
+09-19 17:07:10.987  6962  7101 I AdrenoVK-0: Driver Version          : 0762.41
+09-19 17:07:10.987  6962  7101 I AdrenoVK-0: PFP                     : 0x01310181
+09-19 17:07:10.987  6962  7101 I AdrenoVK-0: ME                      : 0x00000000
+09-19 17:07:10.987  6962  7101 I AdrenoVK-0: Application Name    : 
+09-19 17:07:10.987  6962  7101 I AdrenoVK-0: Application Version : 0x00000001
+09-19 17:07:10.987  6962  7101 I AdrenoVK-0: Engine Name         : 
+09-19 17:07:10.987  6962  7101 I AdrenoVK-0: Engine Version      : 0x00000001
+09-19 17:07:10.987  6962  7101 I AdrenoVK-0: Api Version         : 0x00403000
+09-19 17:07:10.990  6962  7072 D AudioManagerExtImpl: mLastUnFakeScoUid 10427 mFakeScoUid -1
+09-19 17:07:10.991  6962  6962 D WindowManager: Add to mViews: com.android.internal.policy.DecorView{6939d00 I.E...... R.....ID 0,0-0,0 alpha=1.0 viewInfo = }[MainActivity],pkg= com.Setu.app
+09-19 17:07:10.992  6962  7047 D ExtensionsLoader: createInstance(64bit) : createExtendedFactory
+09-19 17:07:10.993  6962  7047 D ExtensionsLoader: Opened libhwuiextimpl.so
+09-19 17:07:10.994  6962  7047 D skia    : setRusSupported enable 1
+09-19 17:07:11.004  6962  6962 D ViewRootImplExtImpl: onDisplayChanged -1 for VRI android.view.ViewRootImpl@ffefff5
+09-19 17:07:11.008  6962  7068 D Capacitor: Handling local request: https://localhost/
+09-19 17:07:11.010  6962  6962 I cr_AppResProvider: #getApplicationRestrictionsFromUserManager() Bundle[EMPTY_PARCEL]
+09-19 17:07:11.010  6962  6962 I cr_PolicyProvider: #notifySettingsAvailable() 0
+09-19 17:07:11.010  6962  6962 I cr_CombinedPProvider: #onSettingsAvailable() 0
+09-19 17:07:11.010  6962  6962 I cr_CombinedPProvider: #flushPolicies()
+09-19 17:07:11.012  6962  6962 D ResourcesManagerExtImpl: applyConfigurationToAppResourcesLocked app.getDisplayId() return callback.displayId:0
+09-19 17:07:11.014  6962  7115 I CameraManagerExtImpl: packagename is com.Setu.app
+09-19 17:07:11.014  6962  7115 I OplusCameraManager: saveOpPackageName, mOpPackageName: com.Setu.app
+09-19 17:07:11.016  6962  6962 I Choreographer: Skipped 30 frames!  The application may be doing too much work on its main thread.
+09-19 17:07:11.019  6962  6962 E OplusBracketLog: [OplusViewMirrorManager] updateHostViewRootIfNeeded, not support android.view.ViewRootImpl@ffefff5
+09-19 17:07:11.020  6962  7115 I OplusCameraManagerGlobal: setClientInfo, packageName: com.Setu.app, uid: 10427, pid: 6962
+09-19 17:07:11.020  6962  7115 I OplusCameraManagerGlobal: Connecting to camera service
+09-19 17:07:11.026  6962  6962 D WindowOnBackDispatcher:  predictive settings is disabled for com.Setu.app
+09-19 17:07:11.026  6962  6962 D WindowOnBackDispatcher:  predictive settings is disabled for com.Setu.app
+09-19 17:07:11.029  6962  6962 D ViewRootImplExtImpl: wrapConfigInfoIntoFlags rotation=0, smallestScreenWidthDp=0, residentWS=false, scenario=0, bounds=Rect(0, 0 - 1272, 2800), relayoutAsync=false, flags=0, newFlags=1468006400, title=com.Setu.app/com.Setu.app.MainActivity
+09-19 17:07:11.036  6962  7084 W AudioCapabilities: Unsupported mediaType audio/alac
+09-19 17:07:11.036  6962  7084 W AudioCapabilities: Unsupported mediaType audio/x-ape
+09-19 17:07:11.036  6962  7084 W AudioCapabilities: Unsupported mediaType audio/dsd
+09-19 17:07:11.037  6962  7084 W AudioCapabilities: Unsupported mediaType audio/amr-wb-plus
+09-19 17:07:11.037  6962  7084 W AudioCapabilities: Unsupported mediaType audio/amr-wb+
+09-19 17:07:11.037  6962  7084 W AudioCapabilities: Unsupported mediaType audio/x-ms-wma
+09-19 17:07:11.037  6962  7084 W AudioCapabilities: Unsupported mediaType audio/alac
+09-19 17:07:11.037  6962  7084 W AudioCapabilities: Unsupported mediaType audio/x-ape
+09-19 17:07:11.038  6962  6962 D VRI[MainActivity]: relayoutWindow result, sizeChanged:true, surfaceControlChanged:true, transformHintChanged:false, mSurfaceSize:Point(1272, 2800), mLastSurfaceSize:Point(0, 0), mWidth:-1, mHeight:-1, requestedWidth:1272, requestedHeight:2800, transformHint:0, installOrientation:0, displayRotation:0, isSurfaceValid:true, attr.flag:-2122252032, tmpFrames:ClientWindowFrames{frame=[0,0][1272,2800] display=[0,0][1272,2800] parentFrame=[0,0][0,0]}, relayoutAsync:false, mSyncSeqId:0
+09-19 17:07:11.038  6962  6962 W VRI[MainActivity]: updateBlastSurfaceIfNeeded, surfaceSize:Point(1272, 2800), lastSurfaceSize:Point(0, 0), format:-1, blastBufferQueue:null
+09-19 17:07:11.038  6962  6962 D BufferQueueConsumer: [](id:1b3200000000,api:0,p:-1,c:6962) connect: controlledByApp=false
+09-19 17:07:11.038  6962  7115 I CameraManagerGlobal: Connecting to camera service
+09-19 17:07:11.038  6962  6962 D BufferQueueConsumer: [VRI[MainActivity]#0(BLAST Consumer)0](id:1b3200000000,api:0,p:-1,c:6962) setMaxAcquiredBufferCount: 2
+09-19 17:07:11.040  6962  7047 D HWUI    : createSurface new attribs array
+09-19 17:07:11.041  6962  7047 D libEGL  : this is from skia gles
+09-19 17:07:11.041  6962  7047 D BufferQueueProducer: [VRI[MainActivity]#0(BLAST Consumer)0](id:1b3200000000,api:1,p:6962,c:6962) connect: api=1 producerControlledByApp=true
+09-19 17:07:11.044  6962  6962 W VRI[MainActivity]: performTraversals: cancelAndRedraw, mLastPerformTraversalsSkipDrawReasonpredraw_com.capacitorjs.plugins.splashscreen.SplashScreen$2
+09-19 17:07:11.046  6962  7084 W VideoCapabilities: Unrecognized profile 8 for video/hevc
+09-19 17:07:11.047  6962  7084 W VideoCapabilities: Unrecognized profile 8 for video/hevc
+09-19 17:07:11.047  6962  7084 W VideoCapabilities: Unrecognized profile 8 for video/hevc
+09-19 17:07:11.052  6962  7084 W VideoCapabilities: Unrecognized profile 8 for video/hevc
+09-19 17:07:11.054  6962  7084 W VideoCapabilities: Unrecognized profile 8 for video/hevc
+09-19 17:07:11.055  6962  7084 W VideoCapabilities: Unrecognized profile 8 for video/hevc
+09-19 17:07:11.055  6962  7084 W VideoCapabilities: Unsupported mime image/vnd.android.heic
