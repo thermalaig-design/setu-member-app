@@ -175,6 +175,73 @@ export const clearVerifiedRecord = (slug) => {
   }
 };
 
+// --- Fresh-install auto-open marker ------------------------------------
+// A THIRD, narrowly-scoped persisted flag — separate from the pending and
+// verified records above, and separate from the countdown deadline too. It
+// answers one specific question a remount can't otherwise answer once an
+// install has already reached the fully verified+settled state: "was THIS
+// verified record the result of an install accepted during the CURRENT
+// fresh-install journey (so the one-shot Android auto-open hand-off is
+// still owed, and the confirmed/ready screen should keep showing across a
+// mid-flow tab discard/reload), or is this an ordinary revisit to an app
+// that just happens to already be installed (which must never auto-attempt
+// any hand-off or show anything but the plain Installed/Open App card)?"
+// Without this, TenantLanding.jsx's autoEnterAfterInstallRef — a plain
+// in-memory ref — silently resets to false on exactly that kind of reload
+// (Android can discard/reload this tab even AFTER appinstalled + the
+// settle window have already fully completed, not just mid-way through),
+// which is what let the plain Installed/Open App card flash back in place
+// of the confirmed screen with no attempted hand-off at all.
+// Time-bounded (INSTALL_AUTOOPEN_MAX_AGE_MS) for the same reason the
+// pending record is: Android can discard/reload this tab more than once in
+// quick succession while finishing a fresh install, and each such reload
+// must still resume the auto-open flow — but an unrelated revisit days
+// later (a bookmark, a fresh tab) must never be mistaken for one.
+const AUTOOPEN_KEY_PREFIX = 'tenant_install_autoopen_v1:';
+
+export const INSTALL_AUTOOPEN_MAX_AGE_MS = 120000;
+
+const getAutoOpenKey = (slug) => `${AUTOOPEN_KEY_PREFIX}${slug}`;
+
+export const isAutoOpenPending = (slug, { now = Date.now() } = {}) => {
+  const normalizedSlug = normalizeSlugIdentity(slug);
+  if (!normalizedSlug) return false;
+  try {
+    const raw = localStorage.getItem(getAutoOpenKey(normalizedSlug));
+    if (!raw) return false;
+    const parsed = JSON.parse(raw);
+    if (!parsed || parsed.slug !== normalizedSlug || !parsed.ts) return false;
+    return now - parsed.ts <= INSTALL_AUTOOPEN_MAX_AGE_MS;
+  } catch {
+    return false;
+  }
+};
+
+// Written once, the same instant the user accepts the native install
+// prompt (alongside the pending record and countdown deadline) — never
+// refreshed/re-armed afterward, so it expires on its own
+// INSTALL_AUTOOPEN_MAX_AGE_MS after that single accept regardless of how
+// many reloads happen in between.
+export const writeAutoOpenPending = (slug) => {
+  const normalizedSlug = normalizeSlugIdentity(slug);
+  if (!normalizedSlug) return;
+  try {
+    localStorage.setItem(getAutoOpenKey(normalizedSlug), JSON.stringify({ slug: normalizedSlug, ts: Date.now() }));
+  } catch {
+    // ignore
+  }
+};
+
+export const clearAutoOpenPending = (slug) => {
+  const normalizedSlug = normalizeSlugIdentity(slug);
+  if (!normalizedSlug) return;
+  try {
+    localStorage.removeItem(getAutoOpenKey(normalizedSlug));
+  } catch {
+    // ignore
+  }
+};
+
 // Resolves the mount-time install UI state purely from these two persisted
 // records, in the exact priority a fresh install's success UI must respect:
 //   verified + settled (now >= readyAt)   => 'installed' (success screen)
