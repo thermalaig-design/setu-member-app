@@ -5,3 +5,7 @@ backend/.env
 
 backend/node_modules/
 .vite/
+
+app_logcat.txt
+full_app_log*.txt
+setu_*.png
