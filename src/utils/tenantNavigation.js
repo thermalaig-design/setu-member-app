@@ -10,12 +10,15 @@
 //
 // Which slug is THIS window's, though, cannot come from localStorage:
 // every tenant PWA on this origin shares it, so opening another tenant's
-// link in Chrome overwrites `installed_app_slug` and every later "Home"
-// tap inside an already-open tenant app would jump to that other tenant.
+// link in Chrome would overwrite a shared key and every later "Home" tap
+// inside an already-open tenant app would jump to that other tenant.
 // sessionStorage is per browsing context — each installed PWA window (and
 // each browser tab) gets its own — so the slug this window actually
-// launched with is remembered there instead.
-const INSTALLED_SLUG_KEY = 'installed_app_slug';
+// launched with is remembered there instead, and is the ONLY fallback used
+// once the URL itself no longer carries the slug (in-app SPA routes drop
+// it). There is deliberately no further fallback to any shared/global
+// storage key — that would risk resolving to whichever tenant was most
+// recently opened anywhere on this device, not this window's tenant.
 const WINDOW_SLUG_KEY = 'active_app_slug';
 const SLUG_PATTERN = /^[a-z0-9-]+$/;
 
@@ -45,7 +48,10 @@ export const rememberWindowTenantSlug = (value) => {
   return slug;
 };
 
-const readWindowTenantSlug = () => {
+// Exported so TenantContext's rehydrate-on-boot logic can use the same
+// per-window (never cross-tenant) source instead of a shared localStorage
+// key when a deeper in-app route (no slug in the URL) is opened directly.
+export const readWindowTenantSlug = () => {
   try {
     return sanitizeSlug(window.sessionStorage.getItem(WINDOW_SLUG_KEY));
   } catch {
@@ -67,14 +73,6 @@ const readUrlTenantSlug = () => {
   }
 };
 
-const readInstalledTenantSlug = () => {
-  try {
-    return sanitizeSlug(localStorage.getItem(INSTALLED_SLUG_KEY));
-  } catch {
-    return '';
-  }
-};
-
 // getAppHomePath(): the path any "go Home" navigation should use.
 // - Installed/standalone PWA -> '/app/<slug>' for THIS window's tenant
 // - Everything else (normal browser tab, no slug, invalid slug) -> '/'
@@ -89,9 +87,6 @@ export const getAppHomePath = () => {
     return `/app/${urlSlug}`;
   }
 
-  // Legacy shared key is the last resort only: it is correct for a device
-  // that has ever only opened one tenant, and wrong the moment a second
-  // tenant's link is opened anywhere on this origin.
-  const slug = readWindowTenantSlug() || readInstalledTenantSlug();
+  const slug = readWindowTenantSlug();
   return slug ? `/app/${slug}` : '/';
 };

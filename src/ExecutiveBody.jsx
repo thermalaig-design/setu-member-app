@@ -392,7 +392,7 @@ export const ExecutiveBodyContent = ({ onNavigate, variant = 'page' }) => {
             </button>
           </div>
         </div>
-      )}
+      </div>
 
       {isPageVariant && isMenuOpen && (
         <div

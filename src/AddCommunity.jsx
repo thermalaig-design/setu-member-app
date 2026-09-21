@@ -33,17 +33,7 @@ const getFriendlySubmitError = (error, trustName) => {
   return message || 'Failed to create trust. Please try again.';
 };
 
-// Friendlier labels for known sample_app.name values (DB rows are keyed by
-// this raw "keyword" — see apply_sample_app_theme()/create_trust_via_whatsapp
-// in Supabase, which clone that sample app's template/features onto the new
-// Trust). Any sample app added later without an entry here just falls back
-// to its raw name, so the picker never breaks for new rows.
-const SAMPLE_APP_LABELS = {
-  default: 'Standard (General Trust App)',
-  digital_directory_app: 'Digital Directory (Member Directory Only)',
-};
-const getSampleAppLabel = (sampleApp) =>
-  SAMPLE_APP_LABELS[sampleApp?.name] || sampleApp?.name || 'Untitled';
+const getSampleAppLabel = (sampleApp) => sampleApp?.name || 'Untitled';
 
 // Minimum time the launch overlay stays up before navigating, so the
 // animation has room to play out even when generate-webApp-link resolves
@@ -721,7 +711,7 @@ const AddCommunity = ({ onNavigateBack, variant = 'page' }) => {
                   }}
                 >
                   {sampleApps.length === 0 ? (
-                    <option value="">Standard (General Trust App)</option>
+                    <option value="">Loading...</option>
                   ) : (
                     sampleApps.map((app) => (
                       <option key={app.id} value={app.id}>

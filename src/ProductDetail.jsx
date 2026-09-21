@@ -824,11 +824,6 @@ const isVisibleProduct = (product) => {
   return status === 'active';
 };
 
-const isActiveImage = (image) => {
-  const status = pickText(image?.status).toLowerCase();
-  return !status || status === 'active';
-};
-
 const getProductDisplayName = (product) =>
   pickText(product?.product_name, product?.alias_name, `Product ${pickText(product?.id)}`);
 

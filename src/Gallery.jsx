@@ -430,30 +430,10 @@ export function GalleryContent({ onNavigate, variant = 'page' }) {
           </span>
         </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            {selectedAlbumId && (
-              <button
-                onClick={() => {
-                  setSelectedAlbumId(null);
-                  setAlbumPageImages([]);
-                  setAlbumTotalPages(0);
-                  setCurrentPage(1);
-                }}
-                style={{ ...nb.iconBtn, width: 34, height: 34, background: 'color-mix(in srgb, var(--surface-color) 18%, transparent)', marginRight: 2 }}
-              >
-                <ArrowLeft style={{ width: 18, height: 18, color: 'var(--app-button-text, var(--surface-color))' }} />
-              </button>
-            )}
-            <span style={{ color: 'var(--app-button-text, var(--surface-color))', fontWeight: 800, fontSize: 17, letterSpacing: '-0.3px' }}>
-              {selectedAlbumId ? (selectedAlbum?.name || 'Album') : 'Gallery'}
-            </span>
-          </div>
-
-          <button onClick={() => navigate(getAppHomePath())} style={nb.iconBtn}>
-            <HomeIcon style={{ width: 22, height: 22, color: 'var(--app-button-text, var(--surface-color))' }} />
-          </button>
-        </div>
-      )}
+        <button onClick={() => navigate(getAppHomePath())} style={nb.iconBtn}>
+          <HomeIcon style={{ width: 22, height: 22, color: 'var(--app-button-text, var(--surface-color))' }} />
+        </button>
+      </div>
 
       <div className="gallery-content" style={{ padding: '16px 14px 40px', maxWidth: 520, margin: '0 auto' }}>
         {isLoading && !showLoadingFallback && !hasSettledInitialAlbums && (

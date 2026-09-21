@@ -3227,45 +3227,42 @@ const Home = ({ onNavigate, onLogout }) => {
                   )}
                 </div>
               </div>
-              )
             ) : null,
 
             quickActions: enabledQuickActions.length > 0 ? (
               <div className="home-section home-section-full home-section-quick-actions px-4 mt-5 mb-4" style={{ animation: resolveAnimation('quickActions', 'cards') }} key="quickActions">
-                <div className="grid grid-cols-2 gap-3">
-                  {enabledQuickActions.map((action) => {
-                    return (
-                      <button
-                        key={action.id}
-                        onClick={() => onNavigate(action.route)}
-                        className="rounded-2xl text-left transition-all active:scale-[0.97] duration-150"
+                {(() => {
+                  const renderTile = (action) => (
+                    <button
+                      key={action.id}
+                      onClick={() => onNavigate(action.route)}
+                      className="rounded-2xl text-left transition-all active:scale-[0.97] duration-150"
+                      style={{
+                        background: quickActionsBg,
+                        border: `1px solid color-mix(in srgb, ${quickActionsText} 22%, transparent)`,
+                        boxShadow: `0 4px 16px color-mix(in srgb, ${quickActionsText} 14%, transparent), 0 1px 4px color-mix(in srgb, ${quickActionsText} 10%, transparent)`,
+                        overflow: 'hidden',
+                      }}
+                    >
+                      <div
+                        className="w-10 h-10 rounded-xl flex items-center justify-center mb-2.5"
                         style={{
-                          background: quickActionsBg,
-                          border: `1px solid color-mix(in srgb, ${quickActionsText} 22%, transparent)`,
-                          boxShadow: `0 4px 16px color-mix(in srgb, ${quickActionsText} 14%, transparent), 0 1px 4px color-mix(in srgb, ${quickActionsText} 10%, transparent)`,
-                          overflow: 'hidden',
+                          background: quickActionsIconBg,
+                          border: `1px solid color-mix(in srgb, ${quickActionsText} 20%, transparent)`,
                         }}
                       >
-                        <div
-                          className="w-10 h-10 rounded-xl flex items-center justify-center mb-2.5"
-                          style={{
-                            background: quickActionsIconBg,
-                            border: `1px solid color-mix(in srgb, ${quickActionsText} 20%, transparent)`,
-                          }}
-                        >
-                          <QuickActionIcon src={action.icon_url} alt={action.displayName} />
+                        <QuickActionIcon src={action.icon_url} alt={action.displayName} />
+                      </div>
+                      <div className="flex items-start justify-between gap-1">
+                        <div className="min-w-0 flex-1">
+                          <h3 className="text-[12px] font-extrabold leading-snug" style={{ color: quickActionsText }}>
+                            {action.displayName}
+                          </h3>
+                          <p className="text-[10px] font-medium mt-0.5 leading-snug" style={{ color: `color-mix(in srgb, ${quickActionsText} 80%, var(--surface-color))` }}>
+                            {action.tagline}
+                          </p>
                         </div>
-                        <div className="flex items-start justify-between gap-1">
-                          <div className="min-w-0 flex-1">
-                            <h3 className="text-[12px] font-extrabold leading-snug" style={{ color: quickActionsText }}>
-                              {action.displayName}
-                            </h3>
-                            <p className="text-[10px] font-medium mt-0.5 leading-snug" style={{ color: `color-mix(in srgb, ${quickActionsText} 80%, var(--surface-color))` }}>
-                              {action.tagline}
-                            </p>
-                          </div>
-                          <ChevronRight className="h-3.5 w-3.5 flex-shrink-0 mt-0.5" style={{ color: `color-mix(in srgb, ${quickActionsText} 72%, transparent)` }} />
-                        </div>
+                        <ChevronRight className="h-3.5 w-3.5 flex-shrink-0 mt-0.5" style={{ color: `color-mix(in srgb, ${quickActionsText} 72%, transparent)` }} />
                       </div>
                     </button>
                   );
@@ -3547,7 +3544,6 @@ const Home = ({ onNavigate, onLogout }) => {
                 )}
 
               </div>
-              )
             ) : null,
           };
 

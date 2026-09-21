@@ -2,7 +2,8 @@ import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react'
 import { useNavigate } from 'react-router-dom';
 import {
   Plus, X, Menu, Home as HomeIcon,
-  AlertCircle, Building2, Loader2, ChevronRight, BadgeCheck
+  AlertCircle, Building2, Loader2, ChevronRight, BadgeCheck,
+  CheckCircle, Hash, Tag, FileText, Save, Users
 } from 'lucide-react';
 import Sidebar from './features/sidebar/Sidebar';
 import TrustIdCard from './TrustIdCard';
@@ -116,6 +117,42 @@ const deleteOtherMembership = async (id) => {
     .delete()
     .eq('id', id);
   if (error) throw error;
+};
+
+const EMPTY_FORM = { organisation_name: '', membership_no: '', membership_type: '', remark: '' };
+
+// Insert a new other_membership record
+const addOtherMembership = async ({ memberId, memberName, memberPhone, organisationName, membershipNo, membershipType, remark }) => {
+  const supabase = await getSupabase();
+  const { data, error } = await supabase
+    .from('other_memberships')
+    .insert({
+      member_id: memberId,
+      member_name: memberName || null,
+      member_phone: memberPhone || null,
+      organisation_name: organisationName,
+      membership_no: membershipNo,
+      membership_type: membershipType || null,
+      remark: remark || null,
+      is_active: true,
+    })
+    .select(`
+      id,
+      member_id,
+      member_name,
+      member_phone,
+      trust_id,
+      organisation_name,
+      membership_no,
+      membership_type,
+      is_active,
+      remark,
+      created_at,
+      Trust:trust_id ( id, name, icon_url )
+    `)
+    .single();
+  if (error) throw error;
+  return data;
 };
 
 // ─── Small reusable components ─────────────────────────────────────────────
@@ -539,6 +576,8 @@ const OtherMemberships = ({ onNavigate, variant = 'page' }) => {
     onPrimary: getThemeToken(theme, 'app_buttons.text_color', 'var(--app-button-text)'),
     error: 'var(--brand-red-dark)',
     errorBg: 'var(--brand-red-light)',
+    success: '#16a34a',
+    successBg: '#F0FDF4',
     vipText: getThemeToken(theme, 'advertisement.badge_text_color', 'var(--advertisement-badge-text)'),
     vipBg: 'linear-gradient(135deg, var(--advertisement-badge-bg) 0%, var(--app-accent-bg) 52%, var(--app-accent) 100%)',
     vipBorder: getThemeToken(theme, 'advertisement.card_border_color', 'var(--advertisement-card-border)'),
@@ -560,6 +599,26 @@ const OtherMemberships = ({ onNavigate, variant = 'page' }) => {
 
   // Delete state
   const [deletingId, setDeletingId] = useState(null);
+
+  // Add membership form state
+  const [showForm, setShowForm] = useState(false);
+  const [form, setForm] = useState(EMPTY_FORM);
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState('');
+  const [submitSuccess, setSubmitSuccess] = useState('');
+
+  const inputStyle = {
+    width: '100%',
+    padding: '11px 14px',
+    borderRadius: '12px',
+    border: '1.5px solid var(--advertisement-card-border)',
+    background: 'var(--advertisement-card-bg)',
+    color: 'var(--advertisement-description)',
+    fontSize: '14px',
+    fontWeight: 500,
+    outline: 'none',
+    boxSizing: 'border-box',
+  };
 
   const sortedOtherMems = useMemo(() => sortMembershipsAlphabetically(otherMems), [otherMems]);
   const sortedTrustLinks = useMemo(() => sortMembershipsAlphabetically(trustLinks), [trustLinks]);
@@ -673,6 +732,54 @@ const OtherMemberships = ({ onNavigate, variant = 'page' }) => {
   }, [isMenuOpen, isHomeVariant]);
 
   // ── handlers ──
+  const handleFormChange = (field, value) => {
+    setForm((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    const organisationName = form.organisation_name.trim();
+    const membershipNo = form.membership_no.trim();
+
+    if (!organisationName) {
+      setSubmitError('Please enter the trust or organisation name.');
+      return;
+    }
+    if (!membershipNo) {
+      setSubmitError('Please enter the membership number.');
+      return;
+    }
+
+    setSubmitting(true);
+    setSubmitError('');
+    try {
+      const storedUser = getStoredUser();
+      const memberId = (await resolveOtherMembershipMemberId(storedUser)) || normalizeText(storedUser?.members_id);
+      if (!memberId) throw new Error('Member ID not found. Please re-login.');
+      const lookup = getMemberLookupFields(storedUser);
+
+      const created = await addOtherMembership({
+        memberId,
+        memberName: lookup.name,
+        memberPhone: lookup.mobile,
+        organisationName,
+        membershipNo,
+        membershipType: form.membership_type.trim(),
+        remark: form.remark.trim(),
+      });
+
+      setOtherMems((prev) => [created, ...prev]);
+      setForm(EMPTY_FORM);
+      setShowForm(false);
+      setSubmitSuccess('Membership added successfully.');
+      window.setTimeout(() => setSubmitSuccess(''), 3000);
+    } catch (err) {
+      setSubmitError(err?.message || 'Failed to save membership. Please try again.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   const handleDelete = async (id) => {
     if (!window.confirm('Remove this membership record?')) return;
     setDeletingId(id);
@@ -1081,9 +1188,7 @@ const OtherMemberships = ({ onNavigate, variant = 'page' }) => {
         </button>
       </div>
 
-	      <Sidebar isOpen={isMenuOpen} onClose={() => setIsMenuOpen(false)} onNavigate={onNavigate} currentPage="other-memberships" />
-	        </>
-	      )}
+      <Sidebar isOpen={isMenuOpen} onClose={() => setIsMenuOpen(false)} onNavigate={onNavigate} currentPage="other-memberships" />
 
       {/* ── Content ── */}
       <div className="om-content" style={{ width: '100%', margin: '0 auto', boxSizing: 'border-box' }}>

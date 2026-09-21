@@ -76,7 +76,7 @@ export const SponsorsContent = ({ onNavigate, onBack, variant = 'page' }) => {
             {trustName}{list.length > 0 ? ` · ${list.length} sponsors` : ''}
           </p>
         </div>
-      )}
+      </div>
 
       <div className="sponsors-list-content px-4 py-4">
         {list.length === 0 ? (

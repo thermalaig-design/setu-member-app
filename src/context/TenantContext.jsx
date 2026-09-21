@@ -2,13 +2,17 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useR
 import { fetchTrustByAppSlug } from '../services/trustService';
 import { applyTenantManifest } from '../utils/pwaManifest';
 import { isReservedSlug } from '../constants/reservedRoutes';
-import { rememberWindowTenantSlug } from '../utils/tenantNavigation';
+import { rememberWindowTenantSlug, readWindowTenantSlug } from '../utils/tenantNavigation';
 
-// These keys represent the identity of THIS installed PWA / customer link.
-// They are set once when a valid Trust slug is resolved and must never be
-// overwritten by in-app Trust switching (that uses `selected_trust_id`).
-const INSTALLED_TRUST_ID_KEY = 'installed_app_trust_id';
-const INSTALLED_SLUG_KEY = 'installed_app_slug';
+// Per-tenant cached trust id, keyed by slug — e.g. `installed_app_trust_id:
+// siahh-niahh`. Multiple tenant PWAs share this origin's localStorage, so a
+// single shared key (the old `installed_app_trust_id`) would hold whichever
+// tenant was most recently resolved anywhere on the device/browser, not
+// necessarily this window's tenant. Scoping by slug means reading this
+// cache can never return another tenant's identity, even momentarily. Set
+// once per slug when that slug's Trust is resolved and never overwritten by
+// in-app Trust switching (that uses `selected_trust_id`).
+const getInstalledTrustIdKey = (slug) => `installed_app_trust_id:${slug}`;
 
 const TenantContext = createContext(null);
 
@@ -63,21 +67,16 @@ export const TenantProvider = ({ children }) => {
   const [tenantTrust, setTenantTrust] = useState(null);
   const [tenantLoading, setTenantLoading] = useState(false);
   const [tenantError, setTenantError] = useState('');
-  const [installedSlug, setInstalledSlug] = useState(() => {
-    const urlSlug = getUrlSlug();
-    return urlSlug || (isStandaloneDisplay() ? readStored(INSTALLED_SLUG_KEY) : '');
-  });
+  // The URL slug is the only authoritative identity at boot. When it's
+  // present, that's installedSlug — full stop, no shared-storage fallback
+  // that could resolve to a different tenant opened earlier on this device.
+  const [installedSlug, setInstalledSlug] = useState(() => getUrlSlug());
   const [installedTrustId, setInstalledTrustId] = useState(() => {
     const urlSlug = getUrlSlug();
-    if (!urlSlug && !isStandaloneDisplay()) return '';
-    const storedSlug = readStored(INSTALLED_SLUG_KEY);
-    // A cached trust id is only trustworthy when it belongs to the same
-    // slug the URL is asking for right now (or when this route carries no
-    // slug at all, e.g. a deeper in-app route within an already-resolved
-    // session) — otherwise it's another tenant's identity leaking in from
-    // shared localStorage, and must not be exposed even momentarily.
-    if (urlSlug && urlSlug !== storedSlug) return '';
-    return readStored(INSTALLED_TRUST_ID_KEY);
+    if (!urlSlug) return '';
+    // Per-slug cached trust id — reading it can never return another
+    // tenant's identity, since the key itself is scoped to this exact slug.
+    return readStored(getInstalledTrustIdKey(urlSlug));
   });
   const rehydratedRef = useRef(false);
 
@@ -99,12 +98,10 @@ export const TenantProvider = ({ children }) => {
       }
 
       setTenantTrust(trust);
-      writeStored(INSTALLED_TRUST_ID_KEY, String(trust.id));
-      writeStored(INSTALLED_SLUG_KEY, normalizedSlug);
-      // Per-window (sessionStorage) copy — the two keys above are shared by
-      // every tenant PWA on this origin, so they can't tell this window's
-      // tenant apart from one opened in another window/tab. getAppHomePath()
-      // reads this one, so in-app "Home" never jumps to another tenant.
+      writeStored(getInstalledTrustIdKey(normalizedSlug), String(trust.id));
+      // Per-window (sessionStorage) copy — getAppHomePath() reads this one,
+      // so in-app "Home" never jumps to another tenant opened in a
+      // different window/tab on the same origin.
       rememberWindowTenantSlug(normalizedSlug);
       setInstalledTrustId(String(trust.id));
       setInstalledSlug(normalizedSlug);
@@ -124,8 +121,10 @@ export const TenantProvider = ({ children }) => {
   // TenantLanding (mounted for that route) resolves it itself — never
   // rehydrate a different, possibly stale, cached tenant here in that case.
   // Only when this route carries no slug (a deeper in-app route within an
-  // already-resolved session) do we fall back to the last resolved tenant
-  // identity for this device, same as before.
+  // already-resolved session, e.g. the PWA was reopened straight onto
+  // /notices) do we fall back — and only to THIS window's own
+  // sessionStorage-recorded slug, never to any shared/global storage key
+  // that could belong to a different tenant PWA on the same origin.
   useEffect(() => {
     if (rehydratedRef.current) return;
     rehydratedRef.current = true;
@@ -140,8 +139,9 @@ export const TenantProvider = ({ children }) => {
     if (!isStandaloneDisplay()) {
       return;
     }
-    if (installedSlug && !tenantTrust) {
-      resolveTenantFromSlug(installedSlug);
+    const windowSlug = readWindowTenantSlug();
+    if (windowSlug && !tenantTrust) {
+      resolveTenantFromSlug(windowSlug);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

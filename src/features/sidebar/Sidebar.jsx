@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { flushSync } from 'react-dom';
 import { Users, ChevronRight, ChevronLeft, LogOut, Share2, PhoneCall, FileText, CirclePlus, Clock3, Lock, Facebook, Instagram, Linkedin, MessageCircle } from 'lucide-react';
+import { FaInstagram, FaFacebookF, FaWhatsapp, FaLinkedinIn, FaYoutube } from 'react-icons/fa';
 import { Capacitor } from '@capacitor/core';
 import { Share } from '@capacitor/share';
 import { getProfile, updateMemberPrivacy } from '../../services/api';

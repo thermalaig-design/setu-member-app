@@ -519,7 +519,7 @@ export const DirectoryContent = ({ onNavigate, variant = 'page' }) => {
             </button>
           </div>
         </div>
-      )}
+      </div>
 
       {isPageVariant && isMenuOpen && (
         <div
