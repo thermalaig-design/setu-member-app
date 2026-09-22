@@ -1,4 +1,5 @@
 import { supabase } from './supabaseClient';
+export { resolveAccessAllowed, resolveMembershipIsActive } from '../utils/tenantAccessDecision';
 
 const normalizeText = (value) => String(value || '').trim();
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -351,10 +352,23 @@ export const fetchTrustByAppSlug = async (appSlug) => {
 // Resolves (and, if needed, server-side creates) this member's reg_members
 // row for the tenant Trust behind /app/<appSlug>. Backed by the deployed
 // generate-webApp-link Edge Function's `resolve_app_access` action, which
-// reads Trust.app_visibility itself to decide is_active on insert (public ->
-// true, private -> false) and never touches is_active on an existing row —
-// the client only ever reads the decision, it never sends is_active/
-// app_visibility values of its own.
+// reads Trust.app_visibility itself to decide the new reg_members row's
+// is_active on insert (public -> true, private -> false) and never touches
+// is_active on an existing row — the client only ever reads the decision,
+// it never sends is_active/app_visibility values of its own, and never
+// writes reg_members.is_active itself.
+//
+// The response carries several fields for this decision, not just
+// is_active: `app_visibility`, `membership_is_active` (the raw stored
+// reg_members.is_active, mirrored under `reg_member.is_active` too),
+// `access_allowed` (the actual open/pending decision — already accounts for
+// a public app being open even when an existing membership row has
+// is_active=false), `access_status`, and a top-level `is_active` kept only
+// as a backward-compatible alias of `access_allowed`. Use this module's
+// re-exported resolveAccessAllowed()/resolveMembershipIsActive() (see
+// ../utils/tenantAccessDecision) rather than reading any of these fields
+// directly, so a future field rename/removal only needs updating in one
+// place.
 export const resolveTenantAppAccess = async ({ appSlug, membersId }) => {
   const normalizedSlug = normalizeText(appSlug).toLowerCase();
   const normalizedMembersId = normalizeText(membersId);

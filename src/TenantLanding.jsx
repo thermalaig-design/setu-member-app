@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams, Navigate } from 'react-router-dom';
 import { useTenant } from './context/TenantContext';
 import { isReservedSlug } from './constants/reservedRoutes';
-import { fetchMemberTrustMemberships, resolveTenantAppAccess, syncTenantMembershipName } from './services/trustService';
+import { fetchMemberTrustMemberships, resolveTenantAppAccess, resolveAccessAllowed, syncTenantMembershipName } from './services/trustService';
 import { saveProfile } from './services/api';
 import { getUserHospitalMemberships, clearTenantUserSession } from './utils/storageUtils';
 import { getAppHomePath } from './utils/tenantNavigation';
@@ -1600,7 +1600,7 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
         return true;
       }
 
-      if (access.is_active) {
+      if (resolveAccessAllowed(access)) {
         grantTenantHome(access.trust?.id || tenantTrustId, trustName);
         return true;
       }
@@ -1643,6 +1643,25 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
       }
     }
   }, [navigate, tenantTrust, normalizedAppSlug, grantTenantHome]);
+
+  // PENDING-ACCESS REVALIDATION ON FOREGROUND: an installed PWA left open on
+  // the pending screen never reloads on its own — if admin approval (or an
+  // app_visibility flip to public) lands while this tab is backgrounded,
+  // tenantAccessState would otherwise stay stuck on 'pending' forever, since
+  // nothing re-runs enterTenantTrust() after the one call that set it. This
+  // re-checks once whenever the tab becomes visible again while still
+  // pending — no polling/retry loop, just the same resolver call already
+  // used everywhere else, which naturally clears tenantAccessState back to
+  // Home (via grantTenantHome) the moment access_allowed is true, or leaves
+  // 'pending' untouched otherwise.
+  useEffect(() => {
+    if (tenantAccessState !== 'pending') return undefined;
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') enterTenantTrust();
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => document.removeEventListener('visibilitychange', handleVisibility);
+  }, [tenantAccessState, enterTenantTrust]);
 
   // Fresh-install auto-continue: once a verified-installed state is
   // reached FOR AN INSTALL ACCEPTED THIS SESSION (autoEnterAfterInstallRef
@@ -1811,7 +1830,7 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
       await syncTenantMembershipName({ regMemberId, name });
     }
 
-    if (tenantAccessPayload?.is_active) {
+    if (resolveAccessAllowed(tenantAccessPayload)) {
       grantTenantHome(tenantAccessPayload.trust?.id || tenantTrust?.id, tenantAccessPayload.trust?.name || tenantTrust?.name);
       setTenantAccessState(null);
     } else {
@@ -1914,7 +1933,7 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
         mobile={tenantAccessPayload?.member?.Mobile}
         initialName={tenantAccessPayload?.member?.Name || ''}
         initialEmail={tenantAccessPayload?.member?.Email || ''}
-        isActive={Boolean(tenantAccessPayload?.is_active)}
+        isActive={resolveAccessAllowed(tenantAccessPayload)}
         accent={accent}
         palette={palette}
         onSubmit={handleProfileSubmit}
