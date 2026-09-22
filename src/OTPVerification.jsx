@@ -3,12 +3,13 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { useBackNavigation } from './hooks';
 import { verifyOTP } from './services/authService';
 import { fetchDirectoryData } from './services/directoryService';
-import { fetchActiveTrustsByMobile, fetchMemberTrustMemberships, fetchTrustById } from './services/trustService';
+import { fetchActiveTrustsByMobile, fetchMemberTrustMemberships, fetchTrustById, fetchTrustByAppSlug } from './services/trustService';
 import { logUserSessionEvent } from './services/sessionAuditService';
 import { persistUserSession } from './utils/storageUtils';
 import { setLoginTermsPromptPending } from './utils/legalContent';
 import { useTenant } from './context/TenantContext';
-import { getAppHomePath } from './utils/tenantNavigation';
+import { getAppHomePath, readWindowTenantSlug } from './utils/tenantNavigation';
+import { resolveTenantAuthSlug, resolveLoginSelectedTrustId } from './utils/tenantAuthSelection';
 
 const TRUST_ID = import.meta.env.VITE_DEFAULT_TRUST_ID || '';
 const LOGIN_TRUST_CACHE_KEY = 'cached_base_trust_info';
@@ -68,18 +69,45 @@ const setCachedBaseTrust = (trust, trustId) => {
   }
 };
 
+// Matches the local copies in TenantLanding.jsx/TenantContext.jsx/App.jsx —
+// there is no shared export for this, so each file keeps its own.
+const isStandaloneDisplay = () => {
+  if (typeof window === 'undefined') return false;
+  const mql = window.matchMedia && window.matchMedia('(display-mode: standalone)');
+  return Boolean(mql?.matches) || window.navigator?.standalone === true;
+};
+
 function OTPVerification() {
   const navigate = useNavigate();
   const location = useLocation();
   useBackNavigation(() => navigate('/login'));
   const authDefaultTrust = resolveAuthDefaultTrust();
-  const { installedTrustId, tenantTrust } = useTenant();
+  const { installedTrustId, installedSlug, tenantTrust } = useTenant();
 
   const [otp, setOtp] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [focused, setFocused] = useState(false);
   const [trustInfo, setTrustInfo] = useState(() => getCachedBaseTrust(authDefaultTrust.id) || null);
+
+  // Tenant auth session identity — preserved independently of whether
+  // installedTrustId (an async Trust-row fetch) has resolved yet. Priority:
+  // TenantContext's own installedSlug (fastest, set synchronously from the
+  // URL) -> the tenantSlug Login.jsx passed through location.state (covers
+  // a fresh device where context hasn't caught up) -> this window's own
+  // sessionStorage-recorded slug (TenantContext/tenantNavigation's shared
+  // per-window record). Never '' just because installedTrustId is slow.
+  const locationTenantSlug = String(location.state?.tenantSlug || '').trim().toLowerCase();
+  const tenantSlug = resolveTenantAuthSlug({
+    installedSlug,
+    locationTenantSlug,
+    windowSlug: readWindowTenantSlug(),
+    // Same guard as Login.jsx: sessionStorage's per-window slug is only
+    // trusted inside a real tenant-owned (standalone) context, never for an
+    // ordinary browser OTP flow that merely has a stale leftover slug.
+    isStandaloneDisplay: isStandaloneDisplay()
+  });
+  const isTenantAuth = Boolean(tenantSlug);
 
   const user = location.state?.user || null;
   const accountCandidates = Array.isArray(location.state?.accounts) && location.state.accounts.length > 0
@@ -240,6 +268,49 @@ function OTPVerification() {
       };
     }
 
+    // TENANT AUTH: login started from /app/<tenantSlug> (see tenantSlug's
+    // own definition above) — tenant identity and tenant access are
+    // separate concerns. TenantLanding's own resolveTenantAppAccess (run
+    // after this redirect) is the sole authority on membership/access; this
+    // only pins WHICH Trust this session is for. A brand-new tenant
+    // membership's reg_members row is only created by resolve_app_access
+    // AFTER this redirect, so it is almost always still absent from
+    // enrichedUser.hospital_memberships here — that must never fall back to
+    // preferredMembership/activeTrustMemberships[0] (e.g. an
+    // alphabetically-earlier existing membership in a different Trust).
+    let tenantTrustId = normalizeText(installedTrustId);
+    let tenantTrustName = normalizeText(tenantTrust?.name);
+    if (isTenantAuth && !tenantTrustId) {
+      // TenantContext hasn't resolved this Trust yet (e.g. this device's
+      // very first visit to /app/<slug>) — resolve the slug directly
+      // rather than silently losing tenant identity.
+      try {
+        const resolvedTenantTrust = await fetchTrustByAppSlug(tenantSlug);
+        if (resolvedTenantTrust?.id) {
+          tenantTrustId = normalizeText(resolvedTenantTrust.id);
+          tenantTrustName = normalizeText(resolvedTenantTrust.name) || tenantTrustName;
+        }
+      } catch (err) {
+        console.warn('[OTP] Failed to resolve tenant Trust from slug:', err?.message || err);
+      }
+    }
+
+    if (isTenantAuth && tenantTrustId) {
+      // Overrides (never merges with) the preferredMembership-derived
+      // trust/primary_trust above — those saved fields drive UI elsewhere
+      // (e.g. Home's multi-trust fallback chains) and must reflect this
+      // tenant, not whichever membership happened to sort first.
+      // Deliberately no is_active here: membership approval is
+      // resolve_app_access's decision, never fabricated at login.
+      enrichedUser.trust = {
+        id: tenantTrustId,
+        name: tenantTrustName || null,
+        icon_url: tenantTrust?.icon_url || null,
+        remark: tenantTrust?.remark || null
+      };
+      enrichedUser.primary_trust = { ...enrichedUser.trust };
+    }
+
     const persisted = persistUserSession(enrichedUser);
     if (!persisted.success) {
       setError(persisted.message || 'Unable to save session on this device. Please try again.');
@@ -261,27 +332,22 @@ function OTPVerification() {
     const baseMembership = selectedMemberships.find((membership) => normalizeText(membership?.trust_id) === baseTrustId) || null;
     const fallbackMembership = selectedMemberships.find((membership) => membership?.is_active !== false) || selectedMemberships[0] || null;
 
-    // Installed/tenant identity (white-label /app/<slug> app): if the logged-in
-    // member actually belongs to the installed Trust, that Trust becomes the
-    // selected Trust for this session. If not, we fall back to the existing
-    // membership-based selection below rather than silently granting access
-    // to a Trust the member does not belong to.
-    const tenantTrustId = normalizeText(installedTrustId);
-    const tenantMembership = tenantTrustId
-      ? selectedMemberships.find((membership) => normalizeText(membership?.trust_id) === tenantTrustId) || null
-      : null;
-
-    if (tenantTrustId && !tenantMembership) {
-      console.warn('[OTP] Logged-in member is not part of the installed tenant Trust; using existing membership selection instead.', {
-        tenantTrustId
-      });
-    }
-
-    const selectedTrustId = tenantMembership
-      ? tenantTrustId
-      : (normalizeText(baseMembership?.trust_id) || normalizeText(fallbackMembership?.trust_id) || baseTrustId);
-    const selectedTrustName = tenantMembership
-      ? normalizeText(tenantMembership?.trust_name || tenantTrust?.name || authDefaultTrust?.name)
+    // Tenant auth: pin to the tenant Trust resolved above — never
+    // activeTrustMemberships[0]/first-active/selectedMemberships[0]/base
+    // Trust. This only pins identity; TenantLanding's resolveTenantAppAccess
+    // (run after the redirect below) remains the sole authority on
+    // public/private/pending access. Non-tenant auth (the ordinary '/'
+    // login) keeps its existing base/fallback membership selection,
+    // completely unchanged.
+    const selectedTrustId = resolveLoginSelectedTrustId({
+      isTenantAuth,
+      tenantTrustId,
+      baseTrustId,
+      baseMembershipTrustId: normalizeText(baseMembership?.trust_id),
+      fallbackMembershipTrustId: normalizeText(fallbackMembership?.trust_id)
+    });
+    const selectedTrustName = isTenantAuth
+      ? (tenantTrustName || normalizeText(localStorage.getItem('selected_trust_name')))
       : normalizeText(
         baseMembership?.trust_name ||
         trustInfo?.name ||
@@ -302,7 +368,12 @@ function OTPVerification() {
     try { sessionStorage.removeItem(OTP_FLOW_KEY); } catch { /* ignore */ }
     setLoginTermsPromptPending();
 
-    navigate(getAppHomePath(), { replace: true });
+    // Tenant auth must land back on /app/<slug> explicitly — getAppHomePath()
+    // resolves to '/' whenever the page isn't in standalone display mode
+    // (see tenantNavigation.js), which would otherwise drop tenant identity
+    // for a tenant login completed in an ordinary browser tab (not yet
+    // installed). Non-tenant auth is completely unchanged.
+    navigate(isTenantAuth ? `/app/${tenantSlug}` : getAppHomePath(), { replace: true });
     return true;
   };
 

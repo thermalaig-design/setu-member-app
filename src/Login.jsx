@@ -1,11 +1,12 @@
 import React, { useEffect, useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate, useLocation, Link } from 'react-router-dom';
 import { useBackNavigation } from './hooks';
 import { useTrustDataVersion } from './hooks/useTrustDataVersion';
 import { checkPhoneNumber } from './services/authService';
 import { fetchTrustById } from './services/trustService';
 import { useTenant } from './context/TenantContext';
-import { getAppHomePath } from './utils/tenantNavigation';
+import { getAppHomePath, readWindowTenantSlug } from './utils/tenantNavigation';
+import { resolveTenantAuthSlug } from './utils/tenantAuthSelection';
 
 const TRUST_ID = import.meta.env.VITE_DEFAULT_TRUST_ID || '';
 const LOGIN_TRUST_CACHE_KEY = 'cached_base_trust_info';
@@ -64,12 +65,40 @@ const setCachedBaseTrust = (trust, trustId) => {
   }
 };
 
+// Matches the local copies in TenantLanding.jsx/TenantContext.jsx/App.jsx —
+// there is no shared export for this, so each file keeps its own.
+const isStandaloneDisplay = () => {
+  if (typeof window === 'undefined') return false;
+  const mql = window.matchMedia && window.matchMedia('(display-mode: standalone)');
+  return Boolean(mql?.matches) || window.navigator?.standalone === true;
+};
+
 function Login() {
   const navigate = useNavigate();
+  const location = useLocation();
   useBackNavigation();
   const authDefaultTrust = resolveAuthDefaultTrust();
   const { installedTrustId, installedSlug, tenantTrust } = useTenant();
-  const isTenantMode = Boolean(installedTrustId);
+  // Tenant mode must not depend on installedTrustId alone — that's an async
+  // Trust-row fetch and can still be resolving on a fresh device/slow
+  // connection. installedSlug is set synchronously from the /app/<slug> URL
+  // (see TenantContext.jsx), so prefer it; location.state.tenantSlug (set
+  // by TenantLanding when it redirects here) and this window's own
+  // sessionStorage-recorded slug are further fallbacks for the same tenant
+  // identity, never a different one.
+  const locationTenantSlug = String(location.state?.tenantSlug || '').trim().toLowerCase();
+  const tenantSlug = resolveTenantAuthSlug({
+    installedSlug,
+    locationTenantSlug,
+    windowSlug: readWindowTenantSlug(),
+    // The sessionStorage fallback is only trusted inside a real
+    // tenant-owned context (an installed standalone PWA recovering its own
+    // identity) — never for an ordinary, non-standalone /login visit that
+    // merely has a stale slug left over from browsing a different tenant
+    // earlier in this same tab.
+    isStandaloneDisplay: isStandaloneDisplay()
+  });
+  const isTenantMode = Boolean(tenantSlug);
   // Priority 1: installed/tenant Trust (white-label /app/<slug> identity).
   // Priority 2: existing selected/default Trust fallback (unchanged).
   const effectiveTrust = isTenantMode
@@ -144,7 +173,7 @@ function Login() {
           user: checkResult.data.user,
           accounts: checkResult.data.accounts || [checkResult.data.user],
           phoneNumber,
-          tenantSlug: isTenantMode ? installedSlug : ''
+          tenantSlug: isTenantMode ? tenantSlug : ''
         }
       });
     } catch (err) {

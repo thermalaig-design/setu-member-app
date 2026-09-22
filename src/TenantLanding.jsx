@@ -3,6 +3,7 @@ import { useLocation, useNavigate, useParams, Navigate } from 'react-router-dom'
 import { useTenant } from './context/TenantContext';
 import { isReservedSlug } from './constants/reservedRoutes';
 import { fetchMemberTrustMemberships, resolveTenantAppAccess, resolveAccessAllowed, syncTenantMembershipName } from './services/trustService';
+import { mergeTenantMembershipEntry } from './utils/tenantAuthSelection';
 import { saveProfile } from './services/api';
 import { getUserHospitalMemberships, clearTenantUserSession } from './utils/storageUtils';
 import { getAppHomePath } from './utils/tenantNavigation';
@@ -1529,12 +1530,64 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
     stopInstallPendingHeartbeat();
   }, [clearSettleTimeout, stopInstallPendingHeartbeat]);
 
+  // Merges (never blindly replaces) the tenant Trust/reg_member resolved by
+  // resolve_app_access (or grantTenantHome's read-only fallback caller)
+  // into the saved user session BEFORE Home ever renders. Without this,
+  // Home's very first mount can still read a pre-login
+  // hospital_memberships/trust/primary_trust snapshot that never included
+  // this tenant (most visibly a brand-new membership resolve_app_access
+  // just created) — exactly what let a stale/foreign Trust flash before a
+  // manual refresh. Dedupes by trust_id so this never creates a duplicate
+  // entry for the same Trust on repeat logins/revalidations.
+  const mergeResolvedTenantMembershipIntoUserSession = (trust, regMember) => {
+    const trustId = normalizeText(trust?.id);
+    if (!trustId) return;
+    try {
+      const rawUser = localStorage.getItem('user');
+      const user = rawUser ? JSON.parse(rawUser) : null;
+      if (!user) return;
+
+      const { hospitalMemberships, trustSummary, membershipEntry } = mergeTenantMembershipEntry({
+        hospitalMemberships: user.hospital_memberships,
+        trust,
+        regMember,
+        fallbackMembersId: user.members_id || user.member_id || null
+      });
+
+      const nextUser = {
+        ...user,
+        hospital_memberships: hospitalMemberships,
+        // trust/primary_trust reflect THIS tenant session only — updated
+        // here, never merged with whatever trust they previously pointed
+        // to (that would be a different Trust entirely).
+        trust: trustSummary,
+        primary_trust: { ...trustSummary, is_active: membershipEntry.is_active }
+      };
+
+      localStorage.setItem('user', JSON.stringify(nextUser));
+    } catch (err) {
+      console.warn('[TenantLanding] Failed to merge tenant membership into user session:', err?.message || err);
+    }
+  };
+
   // Shared by the initial resolve below and by the profile-modal submit
   // handler: switches selected_trust_id to this tenant Trust and renders
   // Home in place (staying on /app/<appSlug>) instead of navigating to '/'.
-  const grantTenantHome = useCallback((trustId, trustName) => {
+  // `trustDetails`/`regMember` (both optional) come from resolve_app_access
+  // (or its read-only fallback) and drive mergeResolvedTenantMembershipIntoUserSession
+  // above — never fabricated membership approval, only identity pinning.
+  const grantTenantHome = useCallback((trustId, trustName, trustDetails = null, regMember = null) => {
     const normalizedTrustId = normalizeText(trustId);
     const normalizedTrustName = normalizeText(trustName);
+    mergeResolvedTenantMembershipIntoUserSession(
+      {
+        id: normalizedTrustId,
+        name: normalizedTrustName || trustDetails?.name,
+        icon_url: trustDetails?.icon_url,
+        remark: trustDetails?.remark
+      },
+      regMember
+    );
     localStorage.setItem('selected_trust_id', normalizedTrustId);
     localStorage.setItem(LAST_SELECTED_TRUST_ID_KEY, normalizedTrustId);
     if (normalizedTrustName) localStorage.setItem('selected_trust_name', normalizedTrustName);
@@ -1601,7 +1654,7 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
       }
 
       if (resolveAccessAllowed(access)) {
-        grantTenantHome(access.trust?.id || tenantTrustId, trustName);
+        grantTenantHome(access.trust?.id || tenantTrustId, trustName, access.trust, access.reg_member);
         return true;
       }
 
@@ -1630,7 +1683,11 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
 
         if (tenantMembership) {
           const trustName = normalizeText(tenantMembership.trust_name || tenantTrust?.name);
-          grantTenantHome(tenantTrustId, trustName);
+          grantTenantHome(tenantTrustId, trustName, {
+            name: trustName,
+            icon_url: tenantMembership.trust_icon_url,
+            remark: tenantMembership.trust_remark
+          }, tenantMembership);
           return true;
         }
 
@@ -1831,7 +1888,12 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
     }
 
     if (resolveAccessAllowed(tenantAccessPayload)) {
-      grantTenantHome(tenantAccessPayload.trust?.id || tenantTrust?.id, tenantAccessPayload.trust?.name || tenantTrust?.name);
+      grantTenantHome(
+        tenantAccessPayload.trust?.id || tenantTrust?.id,
+        tenantAccessPayload.trust?.name || tenantTrust?.name,
+        tenantAccessPayload.trust,
+        tenantAccessPayload.reg_member
+      );
       setTenantAccessState(null);
     } else {
       setTenantAccessState('pending');
