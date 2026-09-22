@@ -158,6 +158,28 @@ export const writeVerifiedRecord = (slug, { readyAt } = {}) => {
   }
 };
 
+// Moves a verified record's readyAt EARLIER, never later. Used when a
+// stronger, more specific signal than the conservative post-appinstalled
+// fallback (see TenantLanding.jsx's LAUNCH_READY_FALLBACK_MS) becomes
+// available — namely navigator.getInstalledRelatedApps() confirming THIS
+// tenant is actually registered, plus a short settle grace on top of that
+// — arrives before the fallback deadline would have. A real, specific
+// readiness signal always wins over waiting out the worst-case bound; it
+// must never be allowed to push the deadline LATER than what's already
+// persisted, which is why this only ever takes the earlier of the two.
+// No-op (returns null) if no verified record exists yet — there is nothing
+// to promote before a genuine appinstalled has written one in the first
+// place (see TenantLanding.jsx's finalizing-phase polling effect, which
+// only runs once installPhase is already 'finalizing').
+export const promoteVerifiedReadyAt = (slug, candidateReadyAt) => {
+  const normalizedSlug = normalizeSlugIdentity(slug);
+  if (!normalizedSlug || typeof candidateReadyAt !== 'number') return null;
+  const existing = readVerifiedRecord(normalizedSlug);
+  if (!existing) return null;
+  if (candidateReadyAt >= existing.readyAt) return existing;
+  return writeVerifiedRecord(normalizedSlug, { readyAt: candidateReadyAt });
+};
+
 // Invalidates a stale verified record — see this module's own comment for
 // why `beforeinstallprompt` firing again for the same slug is the signal
 // that triggers this (TenantLanding.jsx's deferredPrompt subscription).

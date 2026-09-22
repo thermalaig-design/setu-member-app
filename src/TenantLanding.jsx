@@ -14,6 +14,7 @@ import {
   clearPendingRecord,
   isInstallVerified,
   writeVerifiedRecord,
+  promoteVerifiedReadyAt,
   clearVerifiedRecord,
   resolveInstallUiState,
   readCountdownDeadline,
@@ -21,6 +22,7 @@ import {
   clearCountdownDeadline,
   INSTALL_COUNTDOWN_DURATION_MS
 } from './utils/installPendingState';
+import { matchesTenantRelatedApp, computeLaunchReadyCandidate, canAttemptOpenAppLaunch } from './utils/launchReadiness';
 import Home from './Home';
 
 import TenantProfileModal from './components/TenantProfileModal';
@@ -88,24 +90,39 @@ const logInstallFlow = (label, data) => {
 //   from an earlier one) can ever move this UI to the success/Open-App
 //   screen.
 //
-//   The record also carries a POST-APPINSTALLED SETTLE WINDOW
-//   (POST_APPINSTALLED_SETTLE_MS below): Android Chrome's `appinstalled`
-//   can fire before the WebAPK/home-screen app is actually reliably
-//   launchable, so appinstalled alone still isn't treated as "done" —
-//   handleAppInstalled writes the verified record with a `readyAt`
-//   deadline POST_APPINSTALLED_SETTLE_MS in the future, keeps installPhase
-//   at 'finalizing' (still a loader, NOT the success screen) for exactly
-//   that long, and only moves to 'installed' once `now >= readyAt` (see
-//   scheduleSettle/completeSettle below). This delay is a stabilization
-//   window ONLY, never proof of success by itself: if appinstalled never
-//   fires at all, nothing here ever promotes to installed, no matter how
-//   much time passes (the fresh-install flow stays in 'unconfirmed',
-//   subject only to the existing pending-record staleness recovery).
-//   readyAt is persisted (not a plain in-memory timer) specifically so a
-//   remount/tab-discard mid-window resumes the REMAINING time rather than
-//   restarting a fresh 20s, and a remount past the deadline shows success
-//   immediately — see resolveInstallUiState in installPendingState.js and
-//   its own tests for the exact math.
+//   The record also carries a LAUNCH-READINESS deadline (`readyAt`):
+//   Android Chrome's `appinstalled` can fire before the WebAPK/home-screen
+//   app's own OS-level registry entry and intent-filter resolution are
+//   actually settled, so appinstalled alone still isn't treated as "done".
+//   Three explicit concepts are kept separate here, never collapsed into
+//   one:
+//     A. install ACCEPTED — the native prompt's 'accepted' outcome.
+//     B. install CONFIRMED — a genuine `appinstalled` DOM event.
+//     C. installed app LAUNCH-READY — Android's own registry actually
+//        resolving an intent:// launch to the WebAPK, not just Chrome's
+//        appinstalled having fired.
+//   handleAppInstalled (confirms B) writes the verified record with a
+//   worst-case `readyAt` deadline LAUNCH_READY_FALLBACK_MS in the future —
+//   a bounded, conservative fallback, never itself proof of C — and keeps
+//   installPhase at 'finalizing' (still a loader, NOT the success screen)
+//   until `now >= readyAt` (see scheduleSettle/completeSettle below). A
+//   SEPARATE effect (see the "LAUNCH-READINESS POLLING" comment further
+//   down) polls navigator.getInstalledRelatedApps() for THIS tenant
+//   specifically while 'finalizing', and the moment it gets a genuine
+//   match, promotes `readyAt` EARLIER (via promoteVerifiedReadyAt, never
+//   later) to matchTime + LAUNCH_READY_GRACE_MS — a short settle grace on
+//   top of the registry match, since the registry and the intent resolver
+//   don't necessarily settle in the same instant. Passage of time ALONE
+//   (the fallback elapsing with no registry match) is still accepted —
+//   requirement 6 — but only as the bounded worst case, never the primary
+//   signal. If appinstalled never fires at all, nothing here ever promotes
+//   to installed, no matter how much time passes (the fresh-install flow
+//   stays in 'unconfirmed', subject only to the existing pending-record
+//   staleness recovery). readyAt is persisted (not a plain in-memory
+//   timer) specifically so a remount/tab-discard mid-window resumes the
+//   REMAINING time rather than restarting a fresh window, and a remount
+//   past the deadline shows success immediately — see resolveInstallUiState
+//   in installPendingState.js and its own tests for the exact math.
 //
 //   handleAppInstalled's order is strict: write the verified+readyAt
 //   record FIRST, then set installPhase, then clear the pending record —
@@ -128,11 +145,23 @@ const logInstallFlow = (label, data) => {
 // throughout (normalizeSlugIdentity strips a trailing slash inside
 // installPendingState.js, applied to every read/write here).
 const INSTALL_PENDING_HEARTBEAT_MS = 5000;
-// How long AFTER a real `appinstalled` event fires this component keeps
-// showing the loader before trusting the app is actually launchable — see
-// the big comment above. Requirement (1): a named constant, not a magic
-// number, so this window is easy to find/tune later.
-const POST_APPINSTALLED_SETTLE_MS = 20000;
+// Bounded, CONSERVATIVE FALLBACK ONLY (requirement 6) — the worst-case wait
+// after a real `appinstalled` event before Open App is shown as ready, used
+// only when navigator.getInstalledRelatedApps() is unsupported or never
+// confirms this specific tenant sooner (see the LAUNCH-READINESS POLLING
+// effect further down, and promoteVerifiedReadyAt in installPendingState.js
+// which lets that polling move this deadline earlier, never later). Never
+// itself proof of launch-readiness — see the big comment above.
+const LAUNCH_READY_FALLBACK_MS = 32000;
+// Once navigator.getInstalledRelatedApps() confirms THIS tenant is
+// registered, wait this much longer before trusting the intent resolver
+// has caught up too (requirement 5) — the OS registry and the intent
+// resolution used by Open App's intent:// URL don't necessarily settle in
+// the same instant.
+const LAUNCH_READY_GRACE_MS = 2500;
+// How often the launch-readiness effect polls getInstalledRelatedApps()
+// while waiting (requirement 3) — modest, not aggressive.
+const LAUNCH_READY_POLL_MS = 1000;
 
 const readInstallPending = (slug) => {
   const record = readPendingRecord(slug);
@@ -174,6 +203,14 @@ const writeInstallVerified = (slug, options) => {
 const clearInstallVerified = (slug, reason) => {
   clearVerifiedRecord(slug);
   logInstallFlow('verified-clear', { slug, reason: reason || 'unspecified' });
+};
+
+// Thin wrapper around promoteVerifiedReadyAt — see its own comment in
+// installPendingState.js. Only ever moves readyAt earlier, never later.
+const promoteInstallReadyAt = (slug, candidateReadyAt) => {
+  const value = promoteVerifiedReadyAt(slug, candidateReadyAt);
+  logInstallFlow('verified-promote', { slug, candidateReadyAt, value });
+  return value;
 };
 
 // Thin wrappers (same pattern/diagnostics as the pending/verified ones
@@ -368,6 +405,7 @@ function InstallCountdownScreen({
   accentGlow,
   countdownEndsAt,
   confirmed,
+  launchFailed,
   onOpenApp,
 }) {
   const reducedMotion = usePrefersReducedMotion();
@@ -493,7 +531,9 @@ function InstallCountdownScreen({
           </button>
           <p style={{ ...styles.loadingText, color: palette.textMuted, marginTop: '10px', fontSize: '12px', maxWidth: '280px' }}>
             {confirmed
-              ? 'This may open inside your browser instead of the installed app — that’s expected on some devices.'
+              ? (launchFailed
+                ? 'App is still finishing setup. Try again in a few seconds, or open it from your Home Screen.'
+                : 'This may open inside your browser instead of the installed app — that’s expected on some devices.')
               : 'You can try opening the app now, or check your Home Screen / Apps in a moment.'}
           </p>
         </>
@@ -810,7 +850,7 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
   const installUiSeed = resolveInstallUiState(normalizedAppSlug);
   const isFullyVerifiedInstall = installUiSeed.isInstalled;
   const isResumingAcceptedInstall = installUiSeed.isResumingAcceptedInstall;
-  // True when a verified record exists but its POST_APPINSTALLED_SETTLE_MS
+  // True when a verified record exists but its LAUNCH_READY_FALLBACK_MS
   // window hasn't elapsed yet — resuming straight into the settling loader
   // (phase 'finalizing') rather than 'unconfirmed', and straight into the
   // REMAINING settle time rather than a fresh 20s (see the mount effect
@@ -836,7 +876,7 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
   // the same kind of waiting screen, reached either after a 20s safety
   // timeout with no appinstalled yet, or by resuming an accepted-but-not-
   // yet-verified record across a reload; 'finalizing' is after appinstalled
-  // fires but before its POST_APPINSTALLED_SETTLE_MS stabilization window
+  // fires but before its LAUNCH_READY_FALLBACK_MS stabilization window
   // has elapsed (see scheduleSettle/completeSettle below) — a fixed delay,
   // never itself proof of success; 'installed' is the success screen,
   // reached ONLY once that window has actually elapsed for a verified
@@ -917,6 +957,11 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
   // of the page's life, forcing a full refresh to use it again.
   const openAppInFlightRef = useRef(false);
   const openAppResetTimeoutRef = useRef(null);
+  // Cleanup function for handleOpenApp's own visibilitychange/pagehide
+  // watch (requirement 10) — a ref, not just a local closure var, so the
+  // component's unmount effect can also tear it down if the tap happened
+  // right before navigation away.
+  const openAppWatchCleanupRef = useRef(null);
   // ANDROID FRESH-INSTALL PATH ONLY: the short "did the intent hand-off
   // actually leave this tab?" grace timer started right after
   // window.location.href = intentUrl below. Cleared the moment the page
@@ -956,6 +1001,14 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
   // never enterTenantTrust()/tenant Home in Chrome, never the Install App
   // card again.
   const [freshInstallHandoffBlocked, setFreshInstallHandoffBlocked] = useState(false);
+  // True only when a manual Open App tap (handleOpenApp below) fired the
+  // Android intent but the tab was still visible after
+  // OPEN_APP_HANDOFF_WATCH_MS — the launch didn't visibly hand off.
+  // Requirement 10: this only ever surfaces a small non-destructive
+  // message; it never triggers a reload, a retry loop, or another
+  // automatic intent launch. Reset to false at the very start of every new
+  // handleOpenApp tap, so retapping clears a stale message immediately.
+  const [openAppLaunchFailed, setOpenAppLaunchFailed] = useState(false);
   const [resolvedOnce, setResolvedOnce] = useState(() => alreadyResolvedThisSlug);
   const [membershipMessage, setMembershipMessage] = useState('');
   // Set by enterTenantTrust when resolveTenantAppAccess reports an
@@ -1031,6 +1084,7 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
     setCountdownEndsAt(null);
     setAutoEntering(false);
     setFreshInstallHandoffBlocked(false);
+    setOpenAppLaunchFailed(false);
     if (androidHandoffFallbackTimeoutRef.current) {
       clearTimeout(androidHandoffFallbackTimeoutRef.current);
       androidHandoffFallbackTimeoutRef.current = null;
@@ -1143,7 +1197,6 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
 
     let cancelled = false;
     let attempt = 0;
-    const manifestPath = `/pwa-manifest/${normalizedAppSlug}.webmanifest`.toLowerCase();
     // A single check right at mount can miss a genuine install: real-device
     // captures showed the OS's own installed-app registry (what this API
     // reads) can take anywhere from under a second to 30+ seconds to catch
@@ -1176,11 +1229,7 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
           // tenant PWA installed on the same device/browser must never flip
           // this tenant's card to the installed/Open App state; that tenant
           // must still show Install App unless it is itself installed.
-          const matchesThisTenant = (Array.isArray(relatedApps) ? relatedApps : []).some((app) => {
-            const url = String(app?.url || '').toLowerCase();
-            const id = String(app?.id || '').toLowerCase();
-            return url.includes(manifestPath) || id.includes(normalizedAppSlug);
-          });
+          const matchesThisTenant = matchesTenantRelatedApp(relatedApps, normalizedAppSlug);
           logInstallFlow('mount-getInstalledRelatedApps', { slug: normalizedAppSlug, relatedApps, matchesThisTenant, attempt });
           if (matchesThisTenant) {
             writeInstallVerified(normalizedAppSlug);
@@ -1350,7 +1399,7 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
   }, [clearSettleTimeout, normalizedAppSlug]);
 
   // Schedules completeSettle for the time REMAINING until `readyAt` —
-  // never a fresh POST_APPINSTALLED_SETTLE_MS window (requirement 4). If
+  // never a fresh LAUNCH_READY_FALLBACK_MS window (requirement 4). If
   // `readyAt` has already passed (e.g. a remount well after the settle
   // window elapsed, or a backgrounded tab that missed its own timer),
   // completes immediately instead of ever waiting a full window again.
@@ -1393,7 +1442,7 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
   // [install-flow:appinstalled-fired] log show `alreadyInstalled: true`:
   // proof the app had already been marked installed before Chrome's own
   // event fired. That's gone. In its place: a fixed
-  // POST_APPINSTALLED_SETTLE_MS stabilization window (completeSettle/
+  // LAUNCH_READY_FALLBACK_MS stabilization window (completeSettle/
   // scheduleSettle above) — a delay, never itself proof of success. If
   // appinstalled never fires at all, nothing here ever promotes to
   // installed, no matter how much time passes.
@@ -1432,14 +1481,19 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
       autoEnterAfterInstallRef.current = true;
       clearInstallPrompt();
       setDeferredPrompt(null);
-      const readyAt = Date.now() + POST_APPINSTALLED_SETTLE_MS;
+      // Worst-case, bounded fallback deadline (requirement 6) — the
+      // LAUNCH-READINESS POLLING effect below may promote this earlier the
+      // moment getInstalledRelatedApps confirms this specific tenant; this
+      // is only what's used if that never happens (unsupported API, or no
+      // match before the fallback elapses).
+      const readyAt = Date.now() + LAUNCH_READY_FALLBACK_MS;
       // Requirement 2, in this exact order: persist verified+readyAt
       // evidence FIRST, keep the UI on the settling loader (NOT
       // 'installed' yet), then clear pending last — a remount racing any
       // point in this sequence still finds the verified/readyAt record and
       // resumes the settle window correctly (see the resume effect above).
       writeInstallVerified(normalizedAppSlug, { readyAt });
-      logInstallFlow('settle-start', { slug: normalizedAppSlug, readyAt, settleMs: POST_APPINSTALLED_SETTLE_MS });
+      logInstallFlow('settle-start', { slug: normalizedAppSlug, readyAt, settleMs: LAUNCH_READY_FALLBACK_MS });
       stopInstallPendingHeartbeat();
       setInstallPhase('finalizing');
       clearInstallPending(normalizedAppSlug, 'appinstalled');
@@ -1452,6 +1506,70 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
       window.removeEventListener('appinstalled', handleAppInstalled);
     };
   }, [normalizedAppSlug, scheduleSettle, stopInstallPendingHeartbeat]);
+
+  // LAUNCH-READINESS POLLING (requirements 3-5): runs ONLY while
+  // installPhase is 'finalizing' — i.e. only ever after a genuine
+  // `appinstalled` for THIS fresh install already fired (handleAppInstalled
+  // above, or a resumed still-settling verified record seeded at mount —
+  // both put installPhase at 'finalizing'). This never itself promotes an
+  // accepted/pending install to success (requirement 4) — it has no effect
+  // at all outside 'finalizing', and 'finalizing' is unreachable without a
+  // real appinstalled. Where navigator.getInstalledRelatedApps() is
+  // supported, polls at a modest interval for a match of THIS tenant only
+  // (matchesTenantRelatedApp — the exact same per-tenant identity check the
+  // mount-time "already installed" effect uses, so a DIFFERENT tenant
+  // installed on the same origin can never be mistaken for this one). The
+  // moment it matches, promotes the persisted readyAt EARLIER (never later
+  // — promoteInstallReadyAt only ever moves it down) to
+  // matchTime + LAUNCH_READY_GRACE_MS, then reschedules completeSettle for
+  // that new, sooner deadline via scheduleSettle. If getInstalledRelatedApps
+  // is unsupported, or never matches before the LAUNCH_READY_FALLBACK_MS
+  // bound handleAppInstalled already scheduled elapses, that bounded
+  // fallback is what fires completeSettle instead — requirement 6, never an
+  // unbounded wait.
+  useEffect(() => {
+    if (installPhase !== 'finalizing') return undefined;
+    if (typeof navigator === 'undefined' || typeof navigator.getInstalledRelatedApps !== 'function') {
+      return undefined;
+    }
+
+    let cancelled = false;
+    let pollTimeoutId = null;
+
+    const poll = () => {
+      navigator.getInstalledRelatedApps()
+        .then((relatedApps) => {
+          if (cancelled) return;
+          const matchesThisTenant = matchesTenantRelatedApp(relatedApps, normalizedAppSlug);
+          logInstallFlow('launch-ready-poll', { slug: normalizedAppSlug, relatedApps, matchesThisTenant });
+          if (!matchesThisTenant) {
+            pollTimeoutId = setTimeout(() => { if (!cancelled) poll(); }, LAUNCH_READY_POLL_MS);
+            return;
+          }
+          const candidateReadyAt = computeLaunchReadyCandidate(Date.now(), LAUNCH_READY_GRACE_MS);
+          const promoted = promoteInstallReadyAt(normalizedAppSlug, candidateReadyAt);
+          if (promoted) {
+            scheduleSettle(promoted.readyAt);
+          }
+          // Matched — stop polling regardless of whether the promotion
+          // actually moved anything (a later match than an earlier one
+          // already found is simply redundant, never harmful).
+        })
+        .catch(() => {
+          // Unsupported/failed this tick — keep relying on the bounded
+          // fallback deadline handleAppInstalled already scheduled; retry
+          // in case it was transient.
+          if (!cancelled) pollTimeoutId = setTimeout(() => { if (!cancelled) poll(); }, LAUNCH_READY_POLL_MS);
+        });
+    };
+
+    poll();
+
+    return () => {
+      cancelled = true;
+      if (pollTimeoutId) clearTimeout(pollTimeoutId);
+    };
+  }, [installPhase, normalizedAppSlug, scheduleSettle]);
 
   // Not every Chromium build fires appinstalled after 'accepted' (browser
   // bugs, unusual install flows, older/newer versions behaving
@@ -1475,6 +1593,10 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
     if (openAppResetTimeoutRef.current) {
       clearTimeout(openAppResetTimeoutRef.current);
       openAppResetTimeoutRef.current = null;
+    }
+    if (openAppWatchCleanupRef.current) {
+      openAppWatchCleanupRef.current();
+      openAppWatchCleanupRef.current = null;
     }
     clearSettleTimeout();
     stopInstallPendingHeartbeat();
@@ -1928,6 +2050,143 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
   const accentGradient = `linear-gradient(135deg, ${accent.from}, ${accent.to})`;
   const pageBackground = `radial-gradient(circle at 50% 15%, ${accentGlow(0.22)}, transparent 55%), ${backgroundColor}`;
 
+  // How long a tap "locks" handleOpenApp against a duplicate tap before
+  // automatically unlocking again (see openAppInFlightRef's own comment).
+  const OPEN_APP_RETRY_RESET_MS = 1500;
+  // How long handleOpenApp watches for visibilitychange/pagehide after
+  // firing the Android intent before concluding the hand-off didn't
+  // visibly happen (requirement 10: ~1.5-2s).
+  const OPEN_APP_HANDOFF_WATCH_MS = 1750;
+
+  // The primary launch action, and the only one that is user-initiated
+  // (this click is what makes it a real user gesture). Defined here —
+  // BEFORE the early-return render branches below (the countdown screen's
+  // "Try Open App" button and the success card's "Open App" button both
+  // need it) — rather than further down where a plain `const` would still
+  // be in its temporal dead zone at the point those branches reference it.
+  //
+  // THE FIX for "first tap on Open App often refreshes/stays in the
+  // browser, second tap (5-10s later) works": the old version built the
+  // Android intent WITH S.browser_fallback_url set to this same tenant
+  // page (buildAndroidIntentUrl's default). The moment Android's own
+  // installed-app registry hadn't caught up yet (which the fixed 20s
+  // settle window never actually guaranteed — see LAUNCH_READY_FALLBACK_MS
+  // above), the OS fell through to that fallback and reloaded this exact
+  // page — indistinguishable from a refresh, exactly the reported bug.
+  // Requirement 9: no browser_fallback_url here, ever. Requirement 10: a
+  // ONE-SHOT launch attempt, watching visibilitychange/pagehide for
+  // OPEN_APP_HANDOFF_WATCH_MS — if the tab is still visible once that
+  // elapses, this surfaces a small non-destructive message (never a
+  // reload, never a retry loop, never a second automatic intent launch);
+  // if the tab goes hidden/unloads, the hand-off worked and nothing more
+  // happens here.
+  //
+  // HARD READINESS GUARD (not just button visibility): canAttemptOpenAppLaunch
+  // is this function's own first check, independent of whatever wired it
+  // up — a stray call while still 'finalizing' (or before appinstalled at
+  // all) is a silent no-op, never an intent launch. See its own comment in
+  // utils/launchReadiness.js for why installPhase === 'installed' already
+  // means both confirmed (B) AND launch-ready (C).
+  //
+  // SINGLE-FLIGHT (Android): openAppInFlightRef is held for the entire
+  // visibilitychange/pagehide watch window, released only from cleanup()
+  // below — never by a separate, shorter timer. A fixed-duration unlock
+  // independent of the watch (the previous OPEN_APP_RETRY_RESET_MS-only
+  // design) could unlock ~250ms before the watch itself concluded, letting
+  // a rapid re-tap fire a SECOND real Android intent while the first
+  // attempt's outcome was still undetermined. Non-Android has no watch
+  // window (a plain top-level navigation), so it keeps the original short
+  // debounce via openAppResetTimeoutRef.
+  const handleOpenApp = () => {
+    if (!canAttemptOpenAppLaunch({ installPhase, isInstalled })) return;
+    if (openAppInFlightRef.current) return;
+
+    openAppInFlightRef.current = true;
+    setOpenAppLaunchFailed(false);
+
+    // Exactly one trailing slash, always — matches the installed PWA's
+    // own scope/start_url (canonical /app/<slug>/ — requirement 8) so
+    // Chrome/Android has the best chance of recognizing this as "the same
+    // app" instead of an ordinary page.
+    const tenantUrl = buildTenantUrl(normalizedAppSlug);
+    if (!tenantUrl) {
+      openAppInFlightRef.current = false;
+      return;
+    }
+
+    if (openAppWatchCleanupRef.current) {
+      openAppWatchCleanupRef.current();
+      openAppWatchCleanupRef.current = null;
+    }
+
+    if (!isAndroid()) {
+      // No OS-level intent hand-off mechanism outside Android — plain
+      // navigation exactly as before; nothing here to watch for, so the
+      // lock just releases after a short debounce.
+      if (openAppResetTimeoutRef.current) {
+        window.clearTimeout(openAppResetTimeoutRef.current);
+      }
+      openAppResetTimeoutRef.current = window.setTimeout(() => {
+        openAppInFlightRef.current = false;
+        openAppResetTimeoutRef.current = null;
+      }, OPEN_APP_RETRY_RESET_MS);
+      window.location.assign(tenantUrl);
+      return;
+    }
+
+    const intentUrl = buildAndroidIntentUrl(tenantUrl, { includeFallback: false });
+    if (!intentUrl) {
+      openAppInFlightRef.current = false;
+      setOpenAppLaunchFailed(true);
+      return;
+    }
+
+    let settled = false;
+    let watchTimeoutId = null;
+    const cleanup = () => {
+      if (watchTimeoutId) clearTimeout(watchTimeoutId);
+      document.removeEventListener('visibilitychange', handleVisibility);
+      window.removeEventListener('pagehide', handlePageHide);
+      openAppWatchCleanupRef.current = null;
+      // Release the single-flight lock exactly when this attempt's outcome
+      // is known — success or failure — never earlier (requirement 2B/2D).
+      openAppInFlightRef.current = false;
+    };
+    // The hand-off worked — Android switched to the installed PWA (or is
+    // in the middle of doing so) and this tab is now hidden/unloading.
+    // Nothing else to do: never navigate, never message, never re-launch.
+    const markHandedOff = () => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+    };
+    const handleVisibility = () => {
+      if (document.visibilityState === 'hidden') markHandedOff();
+    };
+    const handlePageHide = () => markHandedOff();
+
+    document.addEventListener('visibilitychange', handleVisibility);
+    window.addEventListener('pagehide', handlePageHide);
+
+    watchTimeoutId = window.setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      // Still visible after the watch window — the hand-off didn't
+      // visibly happen. Stay exactly on this success card (no reload, no
+      // navigation) and surface the message instead; the lock is already
+      // released above, so a later manual retap is a fresh, allowed
+      // attempt.
+      if (document.visibilityState !== 'hidden') {
+        setOpenAppLaunchFailed(true);
+      }
+    }, OPEN_APP_HANDOFF_WATCH_MS);
+
+    openAppWatchCleanupRef.current = cleanup;
+
+    window.location.href = intentUrl;
+  };
+
   // Standalone tenant session already validated membership (see
   // enterTenantTrust): render the existing Home UI in place, reused as-is,
   // while the browser stays on /app/<appSlug> instead of navigating to '/'.
@@ -2012,7 +2271,7 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
   //   no appinstalled yet (or a reload resumed straight into this phase) —
   //   still not confirmed installed, still never falls back to Install App.
   // - 'finalizing': appinstalled fired, waiting out the
-  //   POST_APPINSTALLED_SETTLE_MS stabilization window (scheduleSettle/
+  //   LAUNCH_READY_FALLBACK_MS stabilization window (scheduleSettle/
   //   completeSettle above) — a fixed delay, never itself proof of success.
   // - autoEntering: settle complete, the existing Android hand-off effect
   //   (declared after enterTenantTrust above) is making its ONE best-effort
@@ -2044,12 +2303,25 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
         accentGlow={accentGlow}
         countdownEndsAt={countdownEndsAt}
         confirmed={installPhase === 'installed' && isInstalled}
-        onOpenApp={() => {
-          const tenantUrl = buildTenantUrl(normalizedAppSlug);
-          if (!tenantUrl) return;
-          const intentUrl = isAndroid() ? buildAndroidIntentUrl(tenantUrl, { includeFallback: false }) : tenantUrl;
-          window.location.href = intentUrl || tenantUrl;
-        }}
+        launchFailed={installPhase === 'installed' && isInstalled && openAppLaunchFailed}
+        onOpenApp={
+          installPhase === 'installed' && isInstalled
+            // Confirmed/launch-ready: the same one-shot, watched launch
+            // attempt as the success card's own "Open App" button
+            // (requirements 9-10) — no S.browser_fallback_url, no reload
+            // on a still-visible tab.
+            ? handleOpenApp
+            // Not yet confirmed (60s countdown timed out without
+            // appinstalled) — unchanged from before: a best-effort try,
+            // never gated on installPhase/isInstalled since neither is
+            // true yet here.
+            : () => {
+              const tenantUrl = buildTenantUrl(normalizedAppSlug);
+              if (!tenantUrl) return;
+              const intentUrl = isAndroid() ? buildAndroidIntentUrl(tenantUrl, { includeFallback: false }) : tenantUrl;
+              window.location.href = intentUrl || tenantUrl;
+            }
+        }
       />
     );
   }
@@ -2133,72 +2405,6 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
     } else {
       setInstallOutcome('unsupported');
     }
-  };
-
-  // How long a tap "locks" handleOpenApp against a duplicate tap before
-  // automatically unlocking again (see the ref's own comment above).
-  const OPEN_APP_RETRY_RESET_MS = 1500;
-
-  // The primary launch action, and the only one that is user-initiated
-  // (this click is what makes it a real user gesture) — a top-level
-  // navigation (not client-side routing) to the exact tenant URL, so
-  // Chrome/Android gets a chance to hand it off to the installed PWA via
-  // its app/URL association. That handoff is entirely browser/OS-
-  // controlled and not guaranteed; if it doesn't happen, this just
-  // reloads the page, which is why the helper text below points the user
-  // at their Home Screen icon as the fallback.
-  //
-  // Guarded against firing more than once per tap (openAppInFlightRef,
-  // declared with the component's other refs above), but only for a
-  // short debounce window (OPEN_APP_RETRY_RESET_MS): a second
-  // window.location.assign() call while the first is still in flight
-  // (double-tap, or the click landing on both the button and the card's
-  // own onClick below) aborts that first navigation and restarts it. That
-  // debounce window MUST expire on its own though — the hand-off to an
-  // installed PWA is best-effort and the common case is Chrome just
-  // staying on this page, not unloading it, so a permanent lock here
-  // would silently disable the button after its first (failed) attempt
-  // until the user refreshes.
-  //
-  // The installPhase/isInstalled check up front is a defensive repeat of
-  // the button's own render gate below (installPhase === 'installed' &&
-  // isInstalled) — this function must never actually launch anything
-  // while Android could still be finishing installation, even if it were
-  // ever invoked some other way.
-  const handleOpenApp = () => {
-    if (installPhase !== 'installed' || !isInstalled) return;
-
-    if (openAppInFlightRef.current) return;
-
-    openAppInFlightRef.current = true;
-
-    // Exactly one trailing slash, always — matches the installed PWA's
-    // own scope/start_url so Chrome/Android has the best chance of
-    // recognizing this as "the same app" instead of an ordinary page.
-    const tenantUrl = buildTenantUrl(normalizedAppSlug);
-
-    if (!tenantUrl) {
-      openAppInFlightRef.current = false;
-      return;
-    }
-
-    if (openAppResetTimeoutRef.current) {
-      window.clearTimeout(openAppResetTimeoutRef.current);
-    }
-
-    openAppResetTimeoutRef.current = window.setTimeout(() => {
-      openAppInFlightRef.current = false;
-      openAppResetTimeoutRef.current = null;
-    }, OPEN_APP_RETRY_RESET_MS);
-
-    // Android: hand the URL to the OS intent resolver rather than
-    // navigating this tab, so an installed WebAPK can actually take it
-    // (see buildAndroidIntentUrl). Its browser_fallback_url means a device
-    // without the app installed still lands on the normal URL, i.e. the
-    // exact behavior this button had before. Everywhere else (desktop,
-    // iOS) there is no such mechanism at all — plain navigation as before.
-    const androidIntentUrl = isAndroid() ? buildAndroidIntentUrl(tenantUrl) : '';
-    window.location.assign(androidIntentUrl || tenantUrl);
   };
 
   // Single click handler shared by the whole card (see cardBody below) so
@@ -2323,7 +2529,9 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
 
           {installPhase === 'installed' && isInstalled && (
             <p style={{ ...styles.instructions, color: palette.textMuted }}>
-              If the app does not open automatically, tap the app icon on your Home Screen.
+              {openAppLaunchFailed
+                ? 'App is still finishing setup. Try again in a few seconds, or open it from your Home Screen.'
+                : 'If the app does not open automatically, tap the app icon on your Home Screen.'}
             </p>
           )}
 
