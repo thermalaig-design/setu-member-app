@@ -24,6 +24,8 @@ import { AddCommunityContent } from './AddCommunity';
 import { UserPanelContent } from './components/PersistentUserPanel';
 import { OtherMembershipsContent } from './OtherMemberships';
 import { useAppTheme } from './context/ThemeContext';
+import { useTenant } from './context/TenantContext';
+import { shouldSkipTrustReassignment } from './utils/tenantTrustSelection';
 import { registerSidebarState, useTrustDataVersion } from './hooks';
 import { supabase } from './services/supabaseClient';
 import { clearLoginTermsPromptPending, isLoginTermsPromptPending, resolveLegalTrustId } from './utils/legalContent';
@@ -460,6 +462,29 @@ const Home = ({ onNavigate, onLogout }) => {
   // Welcome strip: initialize from localStorage instantly to avoid delay
   const [userProfile, setUserProfile] = useState(() => getCachedUserProfileSnapshot());
 
+  // A tenant route (/app/<slug>) pins this window to ONE Trust — see
+  // TenantLanding.jsx's grantTenantHome, the sole place that is supposed to
+  // set selected_trust_id for that session. This general member-app Home
+  // also runs the multi-trust "restore the member's last selected Trust
+  // from their full membership list" effects below, which are unaware of
+  // that pinning and — finding the just-pinned Trust absent from an
+  // unrelated API response (e.g. right after a tenant's visibility/approval
+  // just changed and that separate endpoint hasn't caught up yet) — would
+  // otherwise silently reassign selected_trust_id to some other Trust from
+  // the member's list (e.g. a previously opened "Backup" tenant on the same
+  // device), hijacking this tenant's identity.
+  //
+  // Deliberately NOT gated on isStandaloneDisplay(): TenantContext already
+  // treats an explicit /app/<slug> URL as authoritative and sets
+  // installedTrustId for it regardless of standalone/browser display mode
+  // (see TenantContext.jsx's getUrlSlug()-driven resolution) — a normal
+  // browser tab on /app/dds must be pinned to DDS exactly the same as the
+  // installed PWA is. installedTrustId is '' on the ordinary (non-tenant)
+  // '/' route, so this never affects the normal multi-trust switching
+  // experience there.
+  const { installedTrustId: pinnedTenantTrustId } = useTenant();
+  const isPinnedTenantSession = Boolean(pinnedTenantTrustId);
+
   // Trust: prefer user's last selection; fall back to env trust id.
   const [selectedTrustId, setSelectedTrustId] = useState(() => {
     const cachedSelected = normalizeTrustId(localStorage.getItem('selected_trust_id') || '');
@@ -747,6 +772,11 @@ const Home = ({ onNavigate, onLogout }) => {
 
         const currentSelected = normalizeTrustId(localStorage.getItem('selected_trust_id') || selectedTrustId);
         const selectedExists = apiTrusts.some((trust) => normalizeTrustId(trust?.id) === currentSelected);
+        if (shouldSkipTrustReassignment({ isPinnedTenantSession, selectedExists })) {
+          hasLoadedMemberTrusts.current = true;
+          setStrictTrustApiState('success');
+          return;
+        }
         const effectiveTrust = (selectedExists
           ? apiTrusts.find((trust) => normalizeTrustId(trust?.id) === currentSelected)
           : apiTrusts.find((trust) => trust?.is_active !== false) || apiTrusts[0]) || null;
@@ -820,7 +850,7 @@ const Home = ({ onNavigate, onLogout }) => {
           // Also apply default when selected trust is just stale env id
           // that failed to resolve (common after env/db trust id changes).
           const shouldApplyDefaultSelection =
-            !isApiAuthoritative && (
+            !isPinnedTenantSession && !isApiAuthoritative && (
               !currentSelected ||
               (!resolvedViaEnv && normalizedEnvTrustId && currentSelected === normalizedEnvTrustId)
             );
@@ -1081,6 +1111,7 @@ const Home = ({ onNavigate, onLogout }) => {
         localStorage.getItem('selected_trust_id') || selectedTrustId
       );
       const selectedExistsInMerged = mergedTrusts.some((t) => normalizeTrustId(t.id) === normalizedSelected);
+      if (shouldSkipTrustReassignment({ isPinnedTenantSession, selectedExists: selectedExistsInMerged })) return;
       const lastSelectedTrustId = normalizeTrustId(localStorage.getItem(LAST_SELECTED_TRUST_ID_KEY) || '');
       const lastSelectedExistsInMerged = mergedTrusts.some((t) => normalizeTrustId(t.id) === lastSelectedTrustId);
       const effectiveTrustId =
@@ -1327,6 +1358,10 @@ const Home = ({ onNavigate, onLogout }) => {
 
       const normalizedSelected = normalizeTrustId(selectedTrustId);
       const selectedExists = apiTrusts.some((trust) => normalizeTrustId(trust?.id) === normalizedSelected);
+      if (shouldSkipTrustReassignment({ isPinnedTenantSession, selectedExists })) {
+        hasLoadedMemberTrusts.current = true;
+        return;
+      }
       const effectiveTrust = (selectedExists
         ? apiTrusts.find((trust) => normalizeTrustId(trust?.id) === normalizedSelected)
         : apiTrusts.find((trust) => trust?.is_active !== false) || apiTrusts[0]) || null;
@@ -1419,6 +1454,9 @@ const Home = ({ onNavigate, onLogout }) => {
         });
         const normalizedSelected = normalizeTrustId(selectedTrustId);
         const selectedExistsInFinalList = withDefault.some((t) => normalizeTrustId(t.id) === normalizedSelected);
+        if (shouldSkipTrustReassignment({ isPinnedTenantSession, selectedExists: selectedExistsInFinalList })) {
+          return;
+        }
         const lastSelectedTrustId = normalizeTrustId(localStorage.getItem(LAST_SELECTED_TRUST_ID_KEY) || '');
         const lastSelectedExistsInFinalList = withDefault.some((t) => normalizeTrustId(t.id) === lastSelectedTrustId);
         const effectiveTrustId =
@@ -1454,7 +1492,7 @@ const Home = ({ onNavigate, onLogout }) => {
       }
     };
     loadMemberTrusts();
-  }, [selectedTrustId, defaultTrust?.id, strictTrustApiState]);
+  }, [selectedTrustId, defaultTrust?.id, strictTrustApiState, isPinnedTenantSession]);
 
 
   // Feature flags
