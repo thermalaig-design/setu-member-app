@@ -591,15 +591,6 @@ const isAndroid = () => {
   return /Android/i.test(navigator.userAgent || '');
 };
 
-// Samsung Internet's own WebAPK install path is what triggers Google Play
-// Protect's "Unsafe app blocked" warning on install for this app —
-// unrelated to targetSdk/compileSdk (both already current). The fix is
-// routing installation to Chrome instead, not touching either SDK level.
-const isSamsungInternet = () => {
-  if (typeof navigator === 'undefined') return false;
-  return /SamsungBrowser/i.test(navigator.userAgent || '');
-};
-
 // Detects "this page load is very likely a continuation of an install the
 // user just accepted on this exact tenant's own page" — WITHOUT relying on
 // any Web Storage. Real-device testing showed Android/Chrome can, on some
@@ -660,21 +651,6 @@ const buildAndroidIntentUrl = (httpsUrl, { includeFallback = true } = {}) => {
       ? `S.browser_fallback_url=${encodeURIComponent(httpsUrl)};`
       : '';
     return `${intentHead}${fallbackPart}end`;
-  } catch {
-    return '';
-  }
-};
-
-// Samsung Internet -> Chrome handoff (see isSamsungInternet above). An
-// explicit package= intent is what actually switches the handling browser
-// instead of just reopening Samsung Internet again. No
-// S.browser_fallback_url here on purpose: a failed intent should surface
-// this component's own "open Chrome from your browser menu" copy, not
-// silently reload the same tenant URL back in Samsung Internet.
-const buildChromeIntentUrl = (httpsUrl) => {
-  try {
-    const parsed = new URL(httpsUrl);
-    return `intent://${parsed.host}${parsed.pathname}${parsed.search}#Intent;scheme=https;package=com.android.chrome;end`;
   } catch {
     return '';
   }
@@ -848,10 +824,6 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
   const cameFromOwnInstallPage = isLikelyInstallContinuation(normalizedAppSlug);
 
   const [deferredPrompt, setDeferredPrompt] = useState(null);
-  // Samsung Internet only — drives the fallback copy on the Chrome-redirect
-  // card when the intent handoff doesn't visibly leave this tab (see
-  // handleOpenInChrome below).
-  const [chromeOpenFailed, setChromeOpenFailed] = useState(false);
   const [installOutcome, setInstallOutcome] = useState(() => (isFullyVerifiedInstall ? 'installed' : ''));
   // Only appinstalled (not the native prompt's 'accepted' outcome) actually
   // confirms the browser finished installing — see the appinstalled
@@ -1087,18 +1059,6 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
   useEffect(() => {
     const handlePromptEvent = (event) => {
       event.preventDefault();
-      // Samsung Internet's own WebAPK install path is what trips Google
-      // Play Protect's "Unsafe app blocked" warning (unrelated to
-      // targetSdk/compileSdk, both already current — see isSamsungInternet
-      // below). Never adopt or reuse its install prompt: drop it from the
-      // shared store too, so no other subscriber picks it back up, and let
-      // the Samsung-only Chrome-redirect card (see the early return further
-      // down) be the only install path this browser ever reaches.
-      if (isSamsungInternet()) {
-        clearInstallPrompt();
-        setDeferredPrompt(null);
-        return;
-      }
       setDeferredPrompt(event);
       // RECONCILE STALE "VERIFIED" STATE: the browser only ever fires
       // beforeinstallprompt for an origin/app it currently considers
@@ -1134,17 +1094,7 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
     };
 
     const existingPrompt = getInstallPrompt();
-    if (existingPrompt) {
-      // Same Samsung guard as handlePromptEvent above, for a prompt that
-      // was already captured (e.g. by index.html's inline bootstrap
-      // script) before this effect ran.
-      if (isSamsungInternet()) {
-        clearInstallPrompt();
-        setDeferredPrompt(null);
-      } else {
-        handlePromptEvent(existingPrompt);
-      }
-    }
+    if (existingPrompt) handlePromptEvent(existingPrompt);
 
     return subscribeInstallPrompt(handlePromptEvent);
   }, [normalizedAppSlug]);
@@ -2185,27 +2135,6 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
     }
   };
 
-  // Samsung Internet only: hands the exact current tenant URL (host,
-  // pathname, query — whatever tenant slug this is, never hardcoded) to
-  // Chrome via an Android intent, in this same tab. No new tab/window is
-  // opened; if Chrome can't be resolved the OS just leaves this tab where
-  // it was, which is what the visibility-timeout check below detects, no
-  // retry loop.
-  const handleOpenInChrome = () => {
-    setChromeOpenFailed(false);
-    const intentUrl = buildChromeIntentUrl(window.location.href);
-    if (!intentUrl) {
-      setChromeOpenFailed(true);
-      return;
-    }
-    window.location.href = intentUrl;
-    window.setTimeout(() => {
-      if (document.visibilityState === 'visible') {
-        setChromeOpenFailed(true);
-      }
-    }, 1500);
-  };
-
   // How long a tap "locks" handleOpenApp against a duplicate tap before
   // automatically unlocking again (see the ref's own comment above).
   const OPEN_APP_RETRY_RESET_MS = 1500;
@@ -2314,108 +2243,6 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
           Please keep this screen open.
         </p>
         <style>{'@keyframes spin { to { transform: rotate(360deg); } }'}</style>
-      </div>
-    );
-  }
-
-  // SAMSUNG INTERNET INSTALL REDIRECT — Samsung Internet's own WebAPK
-  // install path trips Google Play Protect's "Unsafe app blocked" warning
-  // regardless of targetSdk/compileSdk (both already current — see
-  // isSamsungInternet). Rather than let the user hit that broken flow,
-  // replace Install App with a card that hands off to Chrome, where the
-  // normal beforeinstallprompt/countdown/appinstalled flow below is
-  // completely untouched. Skipped once already installed (installPhase ===
-  // 'installed' && isInstalled, the one existing definition of "installed"
-  // used everywhere else in this file) — an already-installed user must
-  // never be redirected to Chrome.
-  if (isSamsungInternet() && !(installPhase === 'installed' && isInstalled)) {
-    return (
-      <div style={{ ...styles.page, background: pageBackground }}>
-        <div style={{ ...styles.glowOrb, top: '-70px', left: '-60px', background: accentGlow(0.4) }} />
-        <div style={{ ...styles.glowOrb, bottom: '-70px', right: '-60px', background: accentGlow(0.28) }} />
-
-        <div
-          className="tenant-card"
-          style={{ ...styles.card, background: palette.cardBackground, borderColor: palette.cardBorder }}
-        >
-          <div style={{ ...styles.accentBar, background: accentGradient }} />
-          <div className="tenant-card-body" style={styles.cardBody}>
-            <p style={{ ...styles.eyebrow, color: palette.textMuted }}>
-              Welcome to {tenantTrust.legal_name || tenantTrust.name}
-            </p>
-
-            {logoUrl && (
-              <img
-                src={logoUrl}
-                alt={tenantTrust.name || 'App icon'}
-                className="tenant-logo"
-                style={{ ...styles.logo, boxShadow: `0 0 0 6px ${accentGlow(0.16)}, 0 14px 28px ${accentGlow(0.32)}` }}
-                onError={(e) => { e.currentTarget.style.display = 'none'; }}
-              />
-            )}
-            <h1 style={{ ...styles.trustName, color: palette.textPrimary }}>{tenantTrust.name}</h1>
-
-            <p style={{ ...styles.subheading, color: palette.textPrimary, fontWeight: 700 }}>
-              Open in Chrome to install
-            </p>
-            <p style={{ ...styles.subheading, color: palette.textSecondary }}>
-              To install this app on your device, please continue in Google Chrome.
-            </p>
-
-            <button
-              type="button"
-              className="tenant-install-btn"
-              style={{ ...styles.installBtn, background: accentGradient, color: accent.text, boxShadow: `0 10px 26px ${accentGlow(0.4)}` }}
-              onClick={handleOpenInChrome}
-            >
-              <span>Open in Chrome</span>
-              <span className="tenant-install-btn-arrow" aria-hidden="true">→</span>
-            </button>
-
-            <p style={{ ...styles.instructions, color: palette.textMuted }}>
-              {chromeOpenFailed
-                ? 'Open this page in Google Chrome from your browser menu.'
-                : "You'll be switched to Chrome to finish installing."}
-            </p>
-          </div>
-        </div>
-
-        <a
-          href={SETU_DOWNLOAD_URL}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="tenant-powered-by"
-          style={{ ...styles.poweredBy, color: palette.textMuted, borderColor: palette.cardBorder, background: palette.cardBackground }}
-        >
-          <img
-            src={SETU_POWERED_LOGO}
-            alt="Setu"
-            style={styles.poweredLogo}
-            onError={(e) => { e.currentTarget.style.display = 'none'; }}
-          />
-          <span>Powered by Setu</span>
-        </a>
-
-        <style>{`
-          @keyframes tenantCardIn { from { opacity: 0; transform: translateY(14px) scale(0.98); } to { opacity: 1; transform: none; } }
-          @keyframes tenantLogoFloat { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-5px); } }
-          .tenant-card { animation: tenantCardIn 0.4s cubic-bezier(0.2, 0.8, 0.3, 1); }
-          .tenant-logo { animation: tenantLogoFloat 3.2s ease-in-out infinite; transition: transform 0.25s ease; }
-          .tenant-install-btn {
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            gap: 8px;
-            transition: transform 0.15s ease, box-shadow 0.15s ease;
-          }
-          .tenant-install-btn:hover { transform: translateY(-2px); }
-          .tenant-install-btn:active { transform: scale(0.97); }
-          .tenant-install-btn-arrow { display: inline-block; transition: transform 0.2s ease; }
-          .tenant-install-btn:hover .tenant-install-btn-arrow { transform: translateX(4px); }
-          .tenant-powered-by { transition: transform 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease; }
-          .tenant-powered-by:hover { transform: translateY(-1px); box-shadow: 0 6px 16px rgba(0,0,0,0.18); }
-          .tenant-powered-by:active { transform: translateY(0); }
-        `}</style>
       </div>
     );
   }
