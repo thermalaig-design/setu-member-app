@@ -50,71 +50,9 @@ export const buildChromeIntentUrl = (httpsUrl) => {
   }
 };
 
-// --- iOS / iPadOS Safari-only guided install --------------------------
-// Extends the same "guide the user into Chrome instead of running the
-// native install flow" idea to iOS, where Safari (not Chrome) is the only
-// browser this app's install UI is meaningfully served in today. iOS
-// Chrome (CriOS) is WebKit-based like Safari and structurally can never
-// fire beforeinstallprompt regardless of any code here — it's excluded
-// from isSafariUA() below purely so it falls through to whatever the
-// existing (unchanged) iOS install-instructions fallback already does for
-// it, never this new Safari-specific card.
-
-// iPadOS 13+ reports its UA as a plain "Macintosh" one, indistinguishable
-// from a real Mac purely by UA string — `isTouchDevice` (the caller's own
-// `'ontouchend' in document` check, exactly like TenantLanding.jsx's
-// existing isIosSafari()/isMacSafari() split) is what tells them apart. A
-// real (non-touch) Mac must never match this — it keeps its own separate
-// "mac-safari-instructions" (File > Add to Dock) flow, untouched by this
-// feature.
-export const isIOSUA = (ua, { isTouchDevice = false } = {}) => {
-  const value = String(ua || '');
-  if (/iPad|iPhone|iPod/.test(value)) return true;
-  return value.includes('Macintosh') && Boolean(isTouchDevice);
-};
-
-// REAL Safari only. Every iOS browser embeds WebKit and therefore also
-// carries "Safari" in its own UA — each known non-Safari iOS browser (and
-// common in-app embedded browsers) is excluded by its own distinguishing
-// token, the same shape as isRealAndroidChrome() above.
-export const isSafariUA = (ua) => {
-  const value = String(ua || '');
-  if (!/Safari/i.test(value)) return false;
-  if (/CriOS\//i.test(value)) return false; // Chrome for iOS
-  if (/FxiOS\//i.test(value)) return false; // Firefox for iOS
-  if (/EdgiOS\//i.test(value)) return false; // Edge for iOS
-  if (/OPiOS\//i.test(value)) return false; // Opera for iOS
-  if (/DuckDuckGo/i.test(value)) return false;
-  if (/YaBrowser/i.test(value)) return false;
-  if (/GSA\//i.test(value)) return false; // Google app's in-app browser
-  if (/FBAN|FBAV|FB_IAB|FBIOS|Instagram|WhatsApp/i.test(value)) return false;
-  return true;
-};
-
+// iOS never fires beforeinstallprompt on any browser — Safari and Chrome
+// (CriOS) alike only offer the OS-level "Add to Home Screen" step via the
+// Share sheet. isIOSChromeUA distinguishes CriOS so TenantLanding.jsx can
+// route it into the same manual Add to Home Screen instructions Safari
+// gets, instead of the generic 'unsupported' outcome.
 export const isIOSChromeUA = (ua) => /CriOS\//i.test(String(ua || ''));
-
-// THE gate for the iOS "Open in Google Chrome" compatibility card
-// (requirement 2): iOS + real Safari + not already running standalone
-// (an already-installed Home Screen launch). `isStandalone` is passed in
-// rather than read here (this module stays DOM-free/pure) — the caller
-// (TenantLanding.jsx) supplies its own existing isStandaloneDisplay().
-export const shouldShowIosSafariCompatCard = ({ ua, isTouchDevice, isStandalone }) =>
-  isIOSUA(ua, { isTouchDevice }) && isSafariUA(ua) && !isStandalone;
-
-// Chrome for iOS's documented custom URL scheme for opening an HTTPS link:
-// the scheme is swapped from "https:" to "googlechromes:" and everything
-// else — host, pathname (the /app/<slug>/ path), query string, and hash —
-// is preserved exactly (requirement 1's "preserving pathname +
-// search/hash if applicable"). No fallback parameter exists for this
-// scheme (unlike Android's intent:// S.browser_fallback_url) — a failed
-// hand-off is detected purely via the visibilitychange/pagehide watch in
-// TenantLanding.jsx, never a second navigation from this function.
-export const buildIOSChromeUrl = (httpsUrl) => {
-  try {
-    const parsed = new URL(httpsUrl);
-    if (parsed.protocol !== 'https:') return '';
-    return `googlechromes://${parsed.host}${parsed.pathname}${parsed.search}${parsed.hash}`;
-  } catch {
-    return '';
-  }
-};

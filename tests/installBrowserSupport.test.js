@@ -8,11 +8,7 @@ import {
   isRealAndroidChrome,
   isAndroidNonChromeBrowser,
   buildChromeIntentUrl,
-  isIOSUA,
-  isSafariUA,
   isIOSChromeUA,
-  shouldShowIosSafariCompatCard,
-  buildIOSChromeUrl,
 } from '../src/utils/installBrowserSupport.js';
 
 // Android Chrome-only guided PWA installation: on Android, only REAL Chrome
@@ -238,93 +234,21 @@ test('SamsungBrowser-like UA + standalone display => the compatibility card gate
 });
 
 // =========================================================================
-// iOS / iPadOS Safari-only guided install — extends the same idea to iOS,
-// without touching Android Chrome/Samsung behavior, the countdown, or
-// appinstalled/launch-readiness logic (all covered by the tests above,
-// re-run unmodified at the end of this file).
+// iOS Chrome (CriOS) classification — used to route CriOS into the same
+// manual Add to Home Screen instructions Safari gets. Android Chrome/
+// Samsung behavior, the countdown, and appinstalled/launch-readiness logic
+// are covered by the tests above, re-run unmodified at the end of this
+// file.
 // =========================================================================
 
 const IPHONE_SAFARI_UA =
   'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1';
-const IPAD_SAFARI_UA =
-  'Mozilla/5.0 (iPad; CPU OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1';
-// iPadOS 13+ reports as a plain "Macintosh" UA — only distinguishable from
-// a real desktop Mac via the touch signal, exactly like TenantLanding.jsx's
-// existing isIosSafari()/isMacSafari() split.
-const IPADOS_AS_MAC_SAFARI_UA =
-  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_6) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Safari/605.1.15';
-const DESKTOP_MAC_SAFARI_UA = IPADOS_AS_MAC_SAFARI_UA; // identical UA; only isTouchDevice differs
 const IPHONE_CHROME_UA =
   'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/126.0.6478.54 Mobile/15E148 Safari/604.1';
-const IPHONE_FIREFOX_UA =
-  'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) FxiOS/126.0 Mobile/15E148 Safari/605.1.15';
-
-test('isIOSUA: iPhone/iPad UAs are iOS regardless of touch signal', () => {
-  assert.equal(isIOSUA(IPHONE_SAFARI_UA), true);
-  assert.equal(isIOSUA(IPAD_SAFARI_UA), true);
-});
-
-test('isIOSUA: a Macintosh UA is iOS (iPadOS 13+) only when isTouchDevice is true — a real desktop Mac never matches', () => {
-  assert.equal(isIOSUA(IPADOS_AS_MAC_SAFARI_UA, { isTouchDevice: true }), true);
-  assert.equal(isIOSUA(DESKTOP_MAC_SAFARI_UA, { isTouchDevice: false }), false);
-  assert.equal(isIOSUA(DESKTOP_MAC_SAFARI_UA), false); // isTouchDevice defaults to false
-});
-
-test('isSafariUA: real Safari UAs pass; CriOS/FxiOS (which also carry "Safari") do not', () => {
-  assert.equal(isSafariUA(IPHONE_SAFARI_UA), true);
-  assert.equal(isSafariUA(IPHONE_CHROME_UA), false);
-  assert.equal(isSafariUA(IPHONE_FIREFOX_UA), false);
-});
 
 test('isIOSChromeUA: true only for CriOS UAs', () => {
   assert.equal(isIOSChromeUA(IPHONE_CHROME_UA), true);
   assert.equal(isIOSChromeUA(IPHONE_SAFARI_UA), false);
-});
-
-test('iPhone Safari + browser mode (not standalone) => the compatibility gate is true (Open in Chrome card)', () => {
-  assert.equal(
-    shouldShowIosSafariCompatCard({ ua: IPHONE_SAFARI_UA, isTouchDevice: true, isStandalone: false }),
-    true
-  );
-});
-
-test('iPad Safari + browser mode => the compatibility gate is true', () => {
-  assert.equal(
-    shouldShowIosSafariCompatCard({ ua: IPAD_SAFARI_UA, isTouchDevice: true, isStandalone: false }),
-    true
-  );
-});
-
-test('iPadOS-as-Mac Safari + browser mode => the compatibility gate is true (touch signal makes it iOS, not desktop Mac)', () => {
-  assert.equal(
-    shouldShowIosSafariCompatCard({ ua: IPADOS_AS_MAC_SAFARI_UA, isTouchDevice: true, isStandalone: false }),
-    true
-  );
-});
-
-test('iPhone Safari + standalone (already-installed Home Screen launch) => the compatibility gate is false, no card', () => {
-  assert.equal(
-    shouldShowIosSafariCompatCard({ ua: IPHONE_SAFARI_UA, isTouchDevice: true, isStandalone: true }),
-    false
-  );
-});
-
-test('real desktop Mac Safari (non-touch) => the compatibility gate is false — keeps its own separate mac-safari-instructions flow, untouched', () => {
-  assert.equal(
-    shouldShowIosSafariCompatCard({ ua: DESKTOP_MAC_SAFARI_UA, isTouchDevice: false, isStandalone: false }),
-    false
-  );
-});
-
-test('iOS Chrome (CriOS) => the compatibility gate is false, no Safari compatibility card, regardless of standalone state', () => {
-  assert.equal(
-    shouldShowIosSafariCompatCard({ ua: IPHONE_CHROME_UA, isTouchDevice: true, isStandalone: false }),
-    false
-  );
-  assert.equal(
-    shouldShowIosSafariCompatCard({ ua: IPHONE_CHROME_UA, isTouchDevice: true, isStandalone: true }),
-    false
-  );
 });
 
 test('iOS Chrome never enters the Android native install-prompt path — beforeinstallprompt is a Chromium/Android-only API, and CriOS is WebKit-based', () => {
@@ -336,119 +260,6 @@ test('iOS Chrome never enters the Android native install-prompt path — beforei
   // the same session.
   assert.equal(isAndroidUA(IPHONE_CHROME_UA), false);
   assert.equal(isIOSChromeUA(IPHONE_CHROME_UA), true);
-});
-
-test('iOS Chrome deep link preserves tenant slug, query params, and hash', () => {
-  const url = buildIOSChromeUrl('https://members.example.com/app/dds/?install=1&ref=qr#section');
-  assert.equal(url, 'googlechromes://members.example.com/app/dds/?install=1&ref=qr#section');
-});
-
-test('iOS Chrome deep link with no query/hash still preserves the exact tenant path', () => {
-  const url = buildIOSChromeUrl('https://members.example.com/app/dds/');
-  assert.equal(url, 'googlechromes://members.example.com/app/dds/');
-});
-
-test('iOS Chrome deep link falls back to empty string for a non-https URL or an unparsable one', () => {
-  assert.equal(buildIOSChromeUrl('http://members.example.com/app/dds/'), '');
-  assert.equal(buildIOSChromeUrl('not a url'), '');
-  assert.equal(buildIOSChromeUrl(''), '');
-});
-
-// --- Source guards on TenantLanding.jsx's handleOpenInIosChrome + card ---
-
-test('source guard: handleOpenInIosChrome is never called from a useEffect — user-tap triggered only, no auto-redirect on load', () => {
-  assert.ok(tenantLandingSource.indexOf('const handleOpenInIosChrome = () => {') !== -1);
-  assert.match(tenantLandingSource, /onClick=\{handleOpenInIosChrome\}/);
-
-  const effectCallRegex = /useEffect\(\s*\(\)\s*=>\s*\{/g;
-  let match;
-  let foundInEffect = false;
-  while ((match = effectCallRegex.exec(tenantLandingSource)) !== null) {
-    const bodyStart = match.index;
-    const depsIdx = tenantLandingSource.indexOf('}, [', bodyStart);
-    const effectBody = tenantLandingSource.slice(bodyStart, depsIdx === -1 ? bodyStart + 2000 : depsIdx);
-    if (effectBody.includes('handleOpenInIosChrome(')) {
-      foundInEffect = true;
-      break;
-    }
-  }
-  assert.equal(foundInEffect, false, 'handleOpenInIosChrome must never be called from inside a useEffect');
-});
-
-test('source guard: handleOpenInIosChrome uses buildIOSChromeUrl (no intent://, no S.browser_fallback_url) and watches visibilitychange/pagehide', () => {
-  const start = tenantLandingSource.indexOf('const handleOpenInIosChrome = () => {');
-  const end = tenantLandingSource.indexOf('\n  // iOS/iPadOS SAFARI ONLY:');
-  const body = tenantLandingSource.slice(start, end);
-
-  assert.match(body, /buildIOSChromeUrl\(window\.location\.href\)/);
-  assert.doesNotMatch(body, /intent:\/\//);
-  assert.doesNotMatch(body, /browser_fallback_url/);
-  assert.match(body, /addEventListener\('visibilitychange'/);
-  assert.match(body, /addEventListener\('pagehide'/);
-});
-
-test('source guard: successful hand-off (hidden/pagehide) calls cleanup() and never sets iosChromeHandoffFailed', () => {
-  const start = tenantLandingSource.indexOf('const handleOpenInIosChrome = () => {');
-  const end = tenantLandingSource.indexOf('\n  // iOS/iPadOS SAFARI ONLY:');
-  const body = tenantLandingSource.slice(start, end);
-
-  const markHandedOffStart = body.indexOf('const markHandedOff = () => {');
-  const markHandedOffBody = body.slice(markHandedOffStart, body.indexOf('};', markHandedOffStart));
-  assert.match(markHandedOffBody, /cleanup\(\);/);
-  assert.doesNotMatch(markHandedOffBody, /setIosChromeHandoffFailed/);
-});
-
-test('source guard: a failed hand-off shows the Install Chrome CTA, releases the lock, and never navigates — retry stays possible', () => {
-  const start = tenantLandingSource.indexOf('const handleOpenInIosChrome = () => {');
-  const end = tenantLandingSource.indexOf('\n  // iOS/iPadOS SAFARI ONLY:');
-  const body = tenantLandingSource.slice(start, end);
-
-  const cleanupStart = body.indexOf('const cleanup = () => {');
-  const cleanupBody = body.slice(cleanupStart, body.indexOf('};', cleanupStart));
-  assert.match(cleanupBody, /iosChromeHandoffInFlightRef\.current = false;/);
-
-  const watchTimeoutStart = body.indexOf('watchTimeoutId = window.setTimeout(() => {');
-  const watchTimeoutBody = body.slice(watchTimeoutStart, body.indexOf('}, IOS_CHROME_HANDOFF_WATCH_MS);', watchTimeoutStart));
-  assert.match(watchTimeoutBody, /cleanup\(\);/);
-  assert.match(watchTimeoutBody, /setIosChromeHandoffFailed\(true\)/);
-  assert.doesNotMatch(watchTimeoutBody, /window\.location/);
-
-  // The card itself renders the App Store CTA only when failed.
-  assert.match(tenantLandingSource, /IOS_CHROME_APP_STORE_URL/);
-  assert.match(tenantLandingSource, /apps\.apple\.com\/app\/google-chrome\/id535886823/);
-});
-
-test('double tap (pure logic): the single-flight guard blocks a second iOS Chrome handoff attempt while one is in flight', () => {
-  let inFlight = false;
-  const attempt = () => {
-    if (inFlight) return 'blocked-in-flight';
-    inFlight = true;
-    return 'launched';
-  };
-  assert.equal(attempt(), 'launched');
-  assert.equal(attempt(), 'blocked-in-flight');
-  assert.equal(attempt(), 'blocked-in-flight');
-  inFlight = false;
-  assert.equal(attempt(), 'launched');
-});
-
-test('source guard: the iOS compatibility card gate checks isStandaloneDisplay() directly (never installed/standalone), matching the Android card\'s own safety pattern', () => {
-  const gateStart = tenantLandingSource.indexOf('shouldShowIosSafariCompatCard({');
-  assert.ok(gateStart !== -1);
-  const guardRegion = tenantLandingSource.slice(gateStart - 50, gateStart + 350);
-  assert.match(guardRegion, /isStandalone: isStandaloneDisplay\(\)/);
-  assert.match(guardRegion, /!\(installPhase === 'installed' && isInstalled\)/);
-});
-
-test('source guard: the iOS card never appears between the Android compatibility card and Android\'s own handlers — no cross-platform interference', () => {
-  // Sanity check on ordering/isolation: the iOS gate is a wholly separate
-  // `if` block from the Android one, using its own state/refs
-  // (iosChromeHandoffFailed / iosChromeHandoffInFlightRef /
-  // iosChromeHandoffWatchCleanupRef) — never the Android card's.
-  const iosGateStart = tenantLandingSource.indexOf('shouldShowIosSafariCompatCard({');
-  const iosCardBody = tenantLandingSource.slice(iosGateStart, iosGateStart + 4000);
-  assert.doesNotMatch(iosCardBody, /buildChromeIntentUrl/);
-  assert.doesNotMatch(iosCardBody, /chromeHandoffInFlightRef\.current/); // Android's own ref, not the iOS one
 });
 
 // =========================================================================
@@ -487,7 +298,7 @@ test('regression: CriOS is classified into ios-instructions inside handleInstall
   assert.ok(iosInstructionsIdx < androidBranchIdx, 'ios-instructions must be resolved before the isAndroid() branch');
 });
 
-test('regression: CriOS never matches isAndroid(), the Android compatibility gate, or the iOS Safari compatibility gate — it is fully unclaimed by every OTHER branch, leaving only ios-instructions', () => {
+test('regression: CriOS never matches isAndroid() or the Android compatibility gate — it is fully unclaimed by every OTHER branch, leaving only ios-instructions', () => {
   const IPHONE_CHROME_UA =
     'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/126.0.6478.54 Mobile/15E148 Safari/604.1';
 
@@ -495,15 +306,6 @@ test('regression: CriOS never matches isAndroid(), the Android compatibility gat
   // Android non-Chrome "Open in Chrome" compatibility card.
   assert.equal(isAndroidUA(IPHONE_CHROME_UA), false);
   assert.equal(isAndroidNonChromeBrowser(IPHONE_CHROME_UA), false);
-
-  // Not real Safari -> never the Safari "Open in Chrome" compatibility
-  // card either (that card exists specifically to route Safari into
-  // Chrome — CriOS is already IN Chrome).
-  assert.equal(isSafariUA(IPHONE_CHROME_UA), false);
-  assert.equal(
-    shouldShowIosSafariCompatCard({ ua: IPHONE_CHROME_UA, isTouchDevice: true, isStandalone: false }),
-    false
-  );
 
   // It IS real iOS Chrome — the one remaining classification, and exactly
   // what the fixed handleInstallClick branch above now checks for.
@@ -522,57 +324,9 @@ test('regression: CriOS never fires/adopts beforeinstallprompt (no UI ever waits
 });
 
 // =========================================================================
-// FINAL SAFETY CHECK 2: the iOS "Install Chrome" CTA must point to the
-// Apple App Store, never the Android Google Play listing.
-// =========================================================================
-
-test('the iOS Install Chrome CTA points to the Apple App Store, never Google Play', () => {
-  const constStart = tenantLandingSource.indexOf('const IOS_CHROME_APP_STORE_URL =');
-  assert.ok(constStart !== -1);
-  const constLine = tenantLandingSource.slice(constStart, tenantLandingSource.indexOf(';', constStart) + 1);
-  assert.match(constLine, /https:\/\/apps\.apple\.com\//);
-  assert.doesNotMatch(constLine, /play\.google\.com/);
-});
-
-test('the iOS failure card\'s Install Chrome link uses IOS_CHROME_APP_STORE_URL, never the Android CHROME_PLAY_STORE_URL constant', () => {
-  const iosGateStart = tenantLandingSource.indexOf('shouldShowIosSafariCompatCard({');
-  const iosCardBody = tenantLandingSource.slice(iosGateStart, iosGateStart + 4000);
-  assert.match(iosCardBody, /href=\{IOS_CHROME_APP_STORE_URL\}/);
-  assert.doesNotMatch(iosCardBody, /href=\{CHROME_PLAY_STORE_URL\}/);
-  assert.doesNotMatch(iosCardBody, /play\.google\.com/);
-});
-
-test('the Android failure card\'s Install Chrome link still uses CHROME_PLAY_STORE_URL (Google Play), confirming the two platforms\' CTAs were never swapped', () => {
-  // The CHROME_PLAY_STORE_URL declaration sits just before the Android
-  // gate's own `if`, so include it by starting from the declaration.
-  const androidConstStart = tenantLandingSource.indexOf('const CHROME_PLAY_STORE_URL =');
-  // End strictly before the iOS section begins (its own constants/handler
-  // are declared before the iOS gate's `if`, so stopping at the iOS
-  // gate's own condition would incorrectly pull IOS_CHROME_APP_STORE_URL
-  // into this "Android only" slice).
-  const iosSectionStart = tenantLandingSource.indexOf('const IOS_CHROME_HANDOFF_WATCH_MS =');
-  assert.ok(androidConstStart !== -1 && androidConstStart < iosSectionStart);
-  const androidCardBody = tenantLandingSource.slice(androidConstStart, iosSectionStart);
-  assert.match(androidCardBody, /href=\{CHROME_PLAY_STORE_URL\}/);
-  assert.match(androidCardBody, /play\.google\.com/);
-  assert.doesNotMatch(androidCardBody, /apps\.apple\.com/);
-});
-
-// =========================================================================
-// iOS CHROME UX CLEANUP: CriOS must render the existing iOS Add to Home
+// iOS CHROME UX: CriOS must render the existing iOS Add to Home
 // Screen instructions DIRECTLY — never the generic Install App card first.
-// Desired flow: Safari -> Open in Chrome -> iOS instructions. NOT:
-// Safari -> Open in Chrome -> Install App -> iOS instructions.
 // =========================================================================
-
-test('iPhone Safari browser mode still gets the Open in Chrome compatibility card (unchanged by this cleanup)', () => {
-  const IPHONE_SAFARI_UA =
-    'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1';
-  assert.equal(
-    shouldShowIosSafariCompatCard({ ua: IPHONE_SAFARI_UA, isTouchDevice: true, isStandalone: false }),
-    true
-  );
-});
 
 test('source guard: a dedicated CriOS direct-instructions render gate exists, positioned BEFORE the generic Install App card\'s own JSX in render order', () => {
   const criosGateStart = tenantLandingSource.indexOf('isIOSChromeUA(navigator.userAgent || \'\') &&\n    !isStandaloneDisplay()');
