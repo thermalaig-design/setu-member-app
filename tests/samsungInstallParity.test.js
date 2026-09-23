@@ -4,42 +4,33 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-// TenantLanding.jsx used to special-case Samsung Internet: it detected the
-// UA, discarded any beforeinstallprompt event it fired/had already
-// captured, and redirected the user to a Chrome hand-off card instead of
-// the normal Install App flow. That whole branch has been removed —
-// Samsung now goes through the exact same deferredPrompt -> prompt() ->
-// userChoice -> 60s countdown -> appinstalled flow as Chrome.
+// HISTORY: TenantLanding.jsx originally special-cased Samsung Internet —
+// UA-detected it, discarded its beforeinstallprompt event, and redirected
+// to a Chrome hand-off card. That was later removed so Samsung ran the
+// exact same deferredPrompt -> prompt() -> userChoice -> 60s countdown ->
+// appinstalled flow as Chrome. The "Android Chrome-only guided PWA
+// installation" feature deliberately REINSTATES routing Samsung Internet
+// (and every other non-Chrome Android browser — Edge, Opera, etc.) to an
+// "Open in Chrome" compatibility card — see
+// utils/installBrowserSupport.js's isAndroidNonChromeBrowser and
+// tests/installBrowserSupport.test.js, which own that classification and
+// the card's own behavior now. This file's remaining job is narrower: the
+// SHARED beforeinstallprompt capture/prompt-store plumbing itself must
+// stay completely UA-agnostic — the compatibility card works by never
+// rendering the Install App button for non-Chrome browsers, NOT by
+// special-casing the prompt-capture effect, so that effect (and
+// installPrompt.js, the store it reads/writes) is exactly as
+// UA-independent as it was before this feature existed.
 //
 // There is no jsdom/React Testing Library harness in this repo (see
 // tenantNavigation.test.js's own comment on this), so TenantLanding.jsx's
-// render/click behavior can't be exercised directly here. This file proves
-// the fix two ways instead:
-//  1. A source-level regression guard: the Samsung-specific branching is
-//     gone from TenantLanding.jsx, and the shared install-prompt effect/
-//     handler is no longer gated behind any UA check.
-//  2. Behavioral tests against src/utils/installPrompt.js — the shared
-//     store TenantLanding.jsx's prompt effect reads/writes — proving it is
-//     (and always was) completely UA-agnostic: capturing, subscribing to,
-//     and clearing a prompt behaves identically regardless of
-//     navigator.userAgent. Combined with (1), this shows Chrome and
-//     Samsung now take the exact same path through the component.
+// render/click behavior can't be exercised directly here.
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const tenantLandingSource = fs.readFileSync(
   path.join(__dirname, '../src/TenantLanding.jsx'),
   'utf8'
 );
-
-test('source guard: no Samsung-specific UA detection, Chrome hand-off, or forced-Chrome UI remain in TenantLanding.jsx', () => {
-  assert.doesNotMatch(tenantLandingSource, /SamsungBrowser/);
-  assert.doesNotMatch(tenantLandingSource, /isSamsungInternet/);
-  assert.doesNotMatch(tenantLandingSource, /buildChromeIntentUrl/);
-  assert.doesNotMatch(tenantLandingSource, /handleOpenInChrome/);
-  assert.doesNotMatch(tenantLandingSource, /chromeOpenFailed/);
-  assert.doesNotMatch(tenantLandingSource, /Open in Chrome/);
-  assert.doesNotMatch(tenantLandingSource, /package=com\.android\.chrome/);
-});
 
 test('source guard: the beforeinstallprompt capture effect adopts every event unconditionally (no UA branch before setDeferredPrompt)', () => {
   const effectStart = tenantLandingSource.indexOf('const handlePromptEvent = (event) => {');
@@ -57,15 +48,18 @@ test('source guard: the already-captured getInstallPrompt() pickup adopts it unc
   assert.match(pickupBody, /if \(existingPrompt\) handlePromptEvent\(existingPrompt\);/);
 });
 
-test('source guard: the normal Install App card (handleCardClick/handleInstallClick) is reachable unconditionally — no early return before it browser-branches away', () => {
-  // The Samsung early-return used to sit between the countdown screen and
-  // this normal card's `return (` — confirming it's gone means every
-  // browser, Samsung included, now falls through to the same card.
+test('source guard: handleCardClick/handleInstallClick themselves stay browser-agnostic — the Chrome-only routing lives entirely in a separate render gate, not inside these handlers', () => {
+  // The Android Chrome-only compatibility card (see
+  // installBrowserSupport.test.js) is its own early return elsewhere in
+  // the render — it does not touch handleCardClick/handleInstallClick, so
+  // once a real Chrome (or any other still-supported) session reaches
+  // these handlers, they run exactly as before, with no UA branching
+  // inside them.
   const countdownIdx = tenantLandingSource.indexOf('FULL-SCREEN 60-SECOND INSTALL COUNTDOWN');
   const cardClickIdx = tenantLandingSource.indexOf('const handleCardClick = () => {');
   assert.ok(countdownIdx !== -1 && cardClickIdx !== -1);
   const between = tenantLandingSource.slice(countdownIdx, cardClickIdx);
-  assert.doesNotMatch(between, /SamsungBrowser|isSamsungInternet|Open in Chrome|package=com\.android\.chrome/);
+  assert.doesNotMatch(between, /SamsungBrowser|isSamsungInternet|isAndroidNonChromeBrowser|Open in Chrome|package=com\.android\.chrome/);
 });
 
 // --- installPrompt.js: the shared store is UA-agnostic -------------------

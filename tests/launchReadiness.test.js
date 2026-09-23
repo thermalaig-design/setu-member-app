@@ -363,7 +363,8 @@ test('source guard 2D: a failed attempt (watch window elapses, still visible) re
 
 test('source guard: unmount cleans up the Open App watch (which releases the in-flight lock), the debounce timer, and the settle timer', () => {
   const unmountStart = tenantLandingSource.indexOf('useEffect(() => () => {');
-  const unmountBody = tenantLandingSource.slice(unmountStart, unmountStart + 700);
+  const unmountEnd = tenantLandingSource.indexOf('}, [clearSettleTimeout, stopInstallPendingHeartbeat]);', unmountStart);
+  const unmountBody = tenantLandingSource.slice(unmountStart, unmountEnd);
   assert.match(unmountBody, /openAppResetTimeoutRef\.current/);
   assert.match(unmountBody, /openAppWatchCleanupRef\.current\(\)/);
   assert.match(unmountBody, /clearSettleTimeout\(\);/);

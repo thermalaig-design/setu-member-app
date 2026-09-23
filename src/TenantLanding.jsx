@@ -23,6 +23,7 @@ import {
   INSTALL_COUNTDOWN_DURATION_MS
 } from './utils/installPendingState';
 import { matchesTenantRelatedApp, computeLaunchReadyCandidate, canAttemptOpenAppLaunch } from './utils/launchReadiness';
+import { isAndroidNonChromeBrowser, buildChromeIntentUrl, shouldShowIosSafariCompatCard, buildIOSChromeUrl, isIOSChromeUA } from './utils/installBrowserSupport';
 import Home from './Home';
 
 import TenantProfileModal from './components/TenantProfileModal';
@@ -962,6 +963,20 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
   // component's unmount effect can also tear it down if the tap happened
   // right before navigation away.
   const openAppWatchCleanupRef = useRef(null);
+  // Single-flight lock + watch cleanup for handleOpenInChrome (the Android
+  // non-Chrome "Open in Chrome" compatibility card) — same pattern as
+  // openAppInFlightRef/openAppWatchCleanupRef above, kept as its own pair
+  // since the two flows (open the installed app vs. hand off to Chrome to
+  // install) are otherwise unrelated and must never share a lock.
+  const chromeHandoffInFlightRef = useRef(false);
+  const chromeHandoffWatchCleanupRef = useRef(null);
+  // Same single-flight lock + watch cleanup pair, for handleOpenInIosChrome
+  // (the iOS Safari-only "Open in Google Chrome" compatibility card) — kept
+  // fully separate from the Android pair above since the two platforms'
+  // hand-off mechanisms (intent:// vs. googlechromes://) are unrelated and
+  // must never share a lock.
+  const iosChromeHandoffInFlightRef = useRef(false);
+  const iosChromeHandoffWatchCleanupRef = useRef(null);
   // ANDROID FRESH-INSTALL PATH ONLY: the short "did the intent hand-off
   // actually leave this tab?" grace timer started right after
   // window.location.href = intentUrl below. Cleared the moment the page
@@ -1009,6 +1024,17 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
   // automatic intent launch. Reset to false at the very start of every new
   // handleOpenApp tap, so retapping clears a stale message immediately.
   const [openAppLaunchFailed, setOpenAppLaunchFailed] = useState(false);
+  // Same shape as openAppLaunchFailed above, for the Android non-Chrome
+  // "Open in Chrome" compatibility card's handleOpenInChrome: true only
+  // once its own visibilitychange/pagehide watch elapses with the tab
+  // still visible — i.e. the hand-off to Chrome didn't visibly happen.
+  // Drives the "Google Chrome is required to install this app." message;
+  // never a reload/redirect loop.
+  const [chromeHandoffFailed, setChromeHandoffFailed] = useState(false);
+  // Same shape again, for the iOS Safari-only "Open in Google Chrome"
+  // compatibility card's handleOpenInIosChrome. Drives the "Google Chrome
+  // is required to continue." message; never a reload/redirect loop.
+  const [iosChromeHandoffFailed, setIosChromeHandoffFailed] = useState(false);
   const [resolvedOnce, setResolvedOnce] = useState(() => alreadyResolvedThisSlug);
   const [membershipMessage, setMembershipMessage] = useState('');
   // Set by enterTenantTrust when resolveTenantAppAccess reports an
@@ -1085,9 +1111,19 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
     setAutoEntering(false);
     setFreshInstallHandoffBlocked(false);
     setOpenAppLaunchFailed(false);
+    setChromeHandoffFailed(false);
+    setIosChromeHandoffFailed(false);
     if (androidHandoffFallbackTimeoutRef.current) {
       clearTimeout(androidHandoffFallbackTimeoutRef.current);
       androidHandoffFallbackTimeoutRef.current = null;
+    }
+    if (chromeHandoffWatchCleanupRef.current) {
+      chromeHandoffWatchCleanupRef.current();
+      chromeHandoffWatchCleanupRef.current = null;
+    }
+    if (iosChromeHandoffWatchCleanupRef.current) {
+      iosChromeHandoffWatchCleanupRef.current();
+      iosChromeHandoffWatchCleanupRef.current = null;
     }
   }, [forceInstallLanding, normalizedAppSlug]);
 
@@ -1597,6 +1633,14 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
     if (openAppWatchCleanupRef.current) {
       openAppWatchCleanupRef.current();
       openAppWatchCleanupRef.current = null;
+    }
+    if (chromeHandoffWatchCleanupRef.current) {
+      chromeHandoffWatchCleanupRef.current();
+      chromeHandoffWatchCleanupRef.current = null;
+    }
+    if (iosChromeHandoffWatchCleanupRef.current) {
+      iosChromeHandoffWatchCleanupRef.current();
+      iosChromeHandoffWatchCleanupRef.current = null;
     }
     clearSettleTimeout();
     stopInstallPendingHeartbeat();
@@ -2396,7 +2440,15 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
     }
     if (isInAppEmbeddedBrowser()) {
       setInstallOutcome('in-app-browser');
-    } else if (isIosSafari()) {
+    } else if (isIosSafari() || isIOSChromeUA(navigator.userAgent || '')) {
+      // isIosSafari()'s own Safari check deliberately excludes CriOS (see
+      // its definition) — without this addition, iOS Chrome (which never
+      // matches the Safari compatibility card either, since that card
+      // exists precisely to route Safari into Chrome) fell through this
+      // entire chain into the generic 'unsupported' branch below instead
+      // of the same Add to Home Screen guidance Safari gets — iOS has no
+      // separate PWA-install mechanism for Chrome vs. Safari; both save to
+      // the Home Screen through the same OS-level flow.
       setInstallOutcome('ios-instructions');
     } else if (isMacSafari()) {
       setInstallOutcome('mac-safari-instructions');
@@ -2419,15 +2471,543 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
     handleInstallClick();
   };
 
+  // iOS (iPhone/iPad) never fires beforeinstallprompt on ANY browser there
+  // — Safari and Chrome (CriOS) alike only offer the OS-level "Add to Home
+  // Screen" step via the Share sheet. Kept browser-neutral (no "Safari's
+  // toolbar" wording) since this same array now backs both the Safari
+  // ios-instructions modal below AND the CriOS direct-instructions card
+  // further down — a Chrome user reading "Safari's toolbar" would be
+  // pointed at the wrong browser's UI.
+  const IOS_ADD_TO_HOME_SCREEN_STEPS = ['Tap the Share button, then choose Add to Home Screen', 'Tap "Add" to confirm'];
+
   // Safari (iOS and macOS) never fires beforeinstallprompt — there is no
   // automatic install on that browser, only its own manual add-to-device
   // step. Spelling that out as numbered steps is the simplest experience
   // Safari allows.
   const installSteps = installOutcome === 'ios-instructions'
-    ? ['Tap the Share icon in Safari’s toolbar', 'Scroll down and tap "Add to Home Screen"', 'Tap "Add" to confirm']
+    ? IOS_ADD_TO_HOME_SCREEN_STEPS
     : installOutcome === 'mac-safari-instructions'
       ? ['Click "File" in Safari’s menu bar', 'Choose "Add to Dock…"', 'Click "Add" to confirm']
       : null;
+
+  // ANDROID CHROME-ONLY GUIDED INSTALL: how long handleOpenInChrome watches
+  // for visibilitychange/pagehide after firing the Chrome intent before
+  // concluding the hand-off didn't visibly happen (requirement 6: ~1.5-2s)
+  // — same window/pattern as handleOpenApp's OPEN_APP_HANDOFF_WATCH_MS
+  // above, kept as its own constant since the two flows are unrelated.
+  const CHROME_HANDOFF_WATCH_MS = 1750;
+  const CHROME_PLAY_STORE_URL = 'https://play.google.com/store/apps/details?id=com.android.chrome';
+
+  // Requirement 7: user-initiated ONLY — this is never called from an
+  // effect/on mount, only from the "Open in Chrome" button below. Mirrors
+  // handleOpenApp's single-flight + watch pattern exactly: one intent
+  // fired, visibilitychange/pagehide watched for CHROME_HANDOFF_WATCH_MS,
+  // the in-flight lock released only when that watch concludes (never a
+  // separate, shorter timer — requirement 8), and NO
+  // S.browser_fallback_url (requirement 5) — a failed hand-off must never
+  // silently reload this same page in the non-Chrome browser, only
+  // surface the "Google Chrome is required" message below.
+  const handleOpenInChrome = () => {
+    if (chromeHandoffInFlightRef.current) return;
+    chromeHandoffInFlightRef.current = true;
+    setChromeHandoffFailed(false);
+
+    const intentUrl = buildChromeIntentUrl(window.location.href);
+    if (!intentUrl) {
+      chromeHandoffInFlightRef.current = false;
+      setChromeHandoffFailed(true);
+      return;
+    }
+
+    if (chromeHandoffWatchCleanupRef.current) {
+      chromeHandoffWatchCleanupRef.current();
+      chromeHandoffWatchCleanupRef.current = null;
+    }
+
+    let settled = false;
+    let watchTimeoutId = null;
+    const cleanup = () => {
+      if (watchTimeoutId) clearTimeout(watchTimeoutId);
+      document.removeEventListener('visibilitychange', handleVisibility);
+      window.removeEventListener('pagehide', handlePageHide);
+      chromeHandoffWatchCleanupRef.current = null;
+      // Release the single-flight lock exactly when this attempt's outcome
+      // is known — success or failure — never earlier.
+      chromeHandoffInFlightRef.current = false;
+    };
+    // The hand-off worked — Chrome is opening (or already open) with this
+    // tenant URL and this tab is now hidden/unloading. Nothing else to do.
+    const markHandedOff = () => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+    };
+    const handleVisibility = () => {
+      if (document.visibilityState === 'hidden') markHandedOff();
+    };
+    const handlePageHide = () => markHandedOff();
+
+    document.addEventListener('visibilitychange', handleVisibility);
+    window.addEventListener('pagehide', handlePageHide);
+
+    watchTimeoutId = window.setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      // Still visible after the watch window — Chrome likely isn't
+      // installed (or the hand-off otherwise didn't happen). Stay exactly
+      // on this card (no reload, no navigation) and surface the message;
+      // the lock is already released, so a later manual retap is allowed.
+      if (document.visibilityState !== 'hidden') {
+        setChromeHandoffFailed(true);
+      }
+    }, CHROME_HANDOFF_WATCH_MS);
+
+    chromeHandoffWatchCleanupRef.current = cleanup;
+
+    window.location.href = intentUrl;
+  };
+
+  // ANDROID NON-CHROME: Samsung Internet, Edge, Opera, and any other
+  // Chromium-based Android browser that isn't real Chrome. These never run
+  // the native install flow here (requirement 2) — this card replaces the
+  // Install App card entirely, so handleInstallClick/deferredPrompt.prompt()
+  // are simply never reached for these browsers (the button that would
+  // call them doesn't render). Skipped once already installed
+  // (installPhase === 'installed' && isInstalled — the one existing
+  // definition of "installed" used everywhere else in this file), matching
+  // requirement 9: once this tenant is genuinely installed, no compatibility
+  // card, ever — the existing installed/Open App UI takes over exactly as
+  // for Chrome. Never reached on iOS (isAndroidNonChromeBrowser requires an
+  // Android UA first) or on desktop.
+  //
+  // STANDALONE SAFETY: also gated directly on !isStandaloneDisplay(), not
+  // only on installPhase/isInstalled. Those two are seeded by a useEffect
+  // (the isStandaloneDisplay()/getInstalledRelatedApps() mount effect
+  // above), which commits AFTER the first render — so on a device where a
+  // non-Chrome engine's OWN "Add to Home Screen" produced a standalone-
+  // launching shortcut (e.g. Samsung Internet's own webapp shortcuts, not
+  // this feature's Chrome-guided install), the very first render would
+  // otherwise still see the pre-effect isInstalled === false and flash this
+  // card for one frame inside an already-installed standalone launch.
+  // isStandaloneDisplay() itself is synchronous (reads
+  // matchMedia('(display-mode: standalone)')/navigator.standalone
+  // directly, no state/effect involved), so checking it here closes that
+  // gap outright — this card can never render in a standalone context,
+  // full stop, regardless of which engine launched it.
+  if (
+    typeof navigator !== 'undefined' &&
+    isAndroidNonChromeBrowser(navigator.userAgent || '') &&
+    !isStandaloneDisplay() &&
+    !(installPhase === 'installed' && isInstalled)
+  ) {
+    return (
+      <div style={{ ...styles.page, background: pageBackground }}>
+        <div style={{ ...styles.glowOrb, top: '-70px', left: '-60px', background: accentGlow(0.4) }} />
+        <div style={{ ...styles.glowOrb, bottom: '-70px', right: '-60px', background: accentGlow(0.28) }} />
+
+        <div
+          className="tenant-card"
+          style={{ ...styles.card, background: palette.cardBackground, borderColor: palette.cardBorder }}
+        >
+          <div style={{ ...styles.accentBar, background: accentGradient }} />
+          <div className="tenant-card-body" style={styles.cardBody}>
+            <p style={{ ...styles.eyebrow, color: palette.textMuted }}>
+              Welcome to {tenantTrust.legal_name || tenantTrust.name}
+            </p>
+
+            {logoUrl && (
+              <img
+                src={logoUrl}
+                alt={tenantTrust.name || 'App icon'}
+                className="tenant-logo"
+                style={{ ...styles.logo, boxShadow: `0 0 0 6px ${accentGlow(0.16)}, 0 14px 28px ${accentGlow(0.32)}` }}
+                onError={(e) => { e.currentTarget.style.display = 'none'; }}
+              />
+            )}
+            <h1 style={{ ...styles.trustName, color: palette.textPrimary }}>{tenantTrust.name}</h1>
+
+            <p style={{ ...styles.subheading, color: palette.textPrimary, fontWeight: 700 }}>
+              {chromeHandoffFailed ? 'Google Chrome is required to install this app.' : 'Open in Google Chrome'}
+            </p>
+            {!chromeHandoffFailed && (
+              <p style={{ ...styles.subheading, color: palette.textSecondary }}>
+                To install this app on your device, please continue in Google Chrome.
+              </p>
+            )}
+
+            <button
+              type="button"
+              className="tenant-install-btn"
+              style={{ ...styles.installBtn, background: accentGradient, color: accent.text, boxShadow: `0 10px 26px ${accentGlow(0.4)}` }}
+              onClick={handleOpenInChrome}
+            >
+              <span>Open in Chrome</span>
+              <span className="tenant-install-btn-arrow" aria-hidden="true">→</span>
+            </button>
+
+            {chromeHandoffFailed && (
+              <a
+                href={CHROME_PLAY_STORE_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="tenant-install-btn"
+                style={{ ...styles.installBtn, marginTop: '10px', background: 'transparent', color: palette.textPrimary, border: `1px solid ${palette.cardBorder}`, boxShadow: 'none' }}
+              >
+                <span>Install Chrome</span>
+              </a>
+            )}
+
+            <p style={{ ...styles.instructions, color: palette.textMuted }}>
+              {chromeHandoffFailed
+                ? 'If Chrome is already installed, try Open in Chrome again.'
+                : "You'll be switched to Chrome to continue."}
+            </p>
+          </div>
+        </div>
+
+        <a
+          href={SETU_DOWNLOAD_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="tenant-powered-by"
+          style={{ ...styles.poweredBy, color: palette.textMuted, borderColor: palette.cardBorder, background: palette.cardBackground }}
+        >
+          <img
+            src={SETU_POWERED_LOGO}
+            alt="Setu"
+            style={styles.poweredLogo}
+            onError={(e) => { e.currentTarget.style.display = 'none'; }}
+          />
+          <span>Powered by Setu</span>
+        </a>
+
+        <style>{`
+          @keyframes tenantCardIn { from { opacity: 0; transform: translateY(14px) scale(0.98); } to { opacity: 1; transform: none; } }
+          @keyframes tenantLogoFloat { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-5px); } }
+          .tenant-card { animation: tenantCardIn 0.4s cubic-bezier(0.2, 0.8, 0.3, 1); }
+          .tenant-logo { animation: tenantLogoFloat 3.2s ease-in-out infinite; transition: transform 0.25s ease; }
+          .tenant-install-btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            transition: transform 0.15s ease, box-shadow 0.15s ease;
+          }
+          .tenant-install-btn:hover { transform: translateY(-2px); }
+          .tenant-install-btn:active { transform: scale(0.97); }
+          .tenant-install-btn-arrow { display: inline-block; transition: transform 0.2s ease; }
+          .tenant-install-btn:hover .tenant-install-btn-arrow { transform: translateX(4px); }
+          .tenant-powered-by { transition: transform 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease; }
+          .tenant-powered-by:hover { transform: translateY(-1px); box-shadow: 0 6px 16px rgba(0,0,0,0.18); }
+          .tenant-powered-by:active { transform: translateY(0); }
+        `}</style>
+      </div>
+    );
+  }
+
+  // How long handleOpenInIosChrome watches for visibilitychange/pagehide
+  // after firing the Chrome hand-off before concluding it didn't visibly
+  // happen (requirement 3: ~1.5-2s) — same window/pattern as the Android
+  // card's CHROME_HANDOFF_WATCH_MS, kept as its own constant since the two
+  // platforms' hand-off mechanisms are unrelated.
+  const IOS_CHROME_HANDOFF_WATCH_MS = 1750;
+  const IOS_CHROME_APP_STORE_URL = 'https://apps.apple.com/app/google-chrome/id535886823';
+
+  // Requirement 4: user-initiated ONLY — never called from an effect/on
+  // mount, only from the "Open in Chrome" button below. Mirrors
+  // handleOpenInChrome's single-flight + watch pattern exactly, just with
+  // buildIOSChromeUrl's googlechromes:// scheme instead of an Android
+  // intent:// URL — there is no browser_fallback_url equivalent for this
+  // scheme, so a failed hand-off is detected purely via the
+  // visibilitychange/pagehide watch, never a second navigation.
+  const handleOpenInIosChrome = () => {
+    if (iosChromeHandoffInFlightRef.current) return;
+    iosChromeHandoffInFlightRef.current = true;
+    setIosChromeHandoffFailed(false);
+
+    const chromeUrl = buildIOSChromeUrl(window.location.href);
+    if (!chromeUrl) {
+      iosChromeHandoffInFlightRef.current = false;
+      setIosChromeHandoffFailed(true);
+      return;
+    }
+
+    if (iosChromeHandoffWatchCleanupRef.current) {
+      iosChromeHandoffWatchCleanupRef.current();
+      iosChromeHandoffWatchCleanupRef.current = null;
+    }
+
+    let settled = false;
+    let watchTimeoutId = null;
+    const cleanup = () => {
+      if (watchTimeoutId) clearTimeout(watchTimeoutId);
+      document.removeEventListener('visibilitychange', handleVisibility);
+      window.removeEventListener('pagehide', handlePageHide);
+      iosChromeHandoffWatchCleanupRef.current = null;
+      // Release the single-flight lock exactly when this attempt's outcome
+      // is known — success or failure — never earlier (requirement 5).
+      iosChromeHandoffInFlightRef.current = false;
+    };
+    // The hand-off worked — Chrome is opening (or already open) with this
+    // tenant URL and this tab is now hidden/unloading. Nothing else to do.
+    const markHandedOff = () => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+    };
+    const handleVisibility = () => {
+      if (document.visibilityState === 'hidden') markHandedOff();
+    };
+    const handlePageHide = () => markHandedOff();
+
+    document.addEventListener('visibilitychange', handleVisibility);
+    window.addEventListener('pagehide', handlePageHide);
+
+    watchTimeoutId = window.setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      // Still visible after the watch window — Chrome likely isn't
+      // installed (or the hand-off otherwise didn't happen). Stay exactly
+      // on this card (no reload, no navigation) and surface the message;
+      // the lock is already released, so a later manual retap is allowed.
+      if (document.visibilityState !== 'hidden') {
+        setIosChromeHandoffFailed(true);
+      }
+    }, IOS_CHROME_HANDOFF_WATCH_MS);
+
+    iosChromeHandoffWatchCleanupRef.current = cleanup;
+
+    window.location.href = chromeUrl;
+  };
+
+  // iOS/iPadOS SAFARI ONLY: guides the user into Chrome instead of Safari's
+  // own Add to Home Screen flow (requirement 2). iOS Chrome (CriOS) never
+  // matches shouldShowIosSafariCompatCard (isSafariUA excludes it), so it
+  // falls straight through to whatever the existing, unchanged
+  // isIosSafari()/handleInstallClick fallback chain already does for it —
+  // this card never touches that code (requirement 7). Skipped once
+  // already installed (installPhase === 'installed' && isInstalled) or
+  // already running standalone (checked directly inside
+  // shouldShowIosSafariCompatCard via isStandalone, the same synchronous
+  // isStandaloneDisplay() safety used by the Android card above — never
+  // relying on isInstalled/installPhase alone, which are only seeded by an
+  // effect that commits after the first render). Never reached on Android
+  // or desktop (isIOSUA requires an iPhone/iPad/iPod UA, or a touch-Mac UA
+  // for iPadOS 13+, checked via 'ontouchend' in document exactly like the
+  // existing isIosSafari()/isMacSafari() split — so a real, non-touch
+  // desktop Mac never matches this either).
+  if (
+    typeof navigator !== 'undefined' &&
+    typeof document !== 'undefined' &&
+    shouldShowIosSafariCompatCard({
+      ua: navigator.userAgent || '',
+      isTouchDevice: 'ontouchend' in document,
+      isStandalone: isStandaloneDisplay()
+    }) &&
+    !(installPhase === 'installed' && isInstalled)
+  ) {
+    return (
+      <div style={{ ...styles.page, background: pageBackground }}>
+        <div style={{ ...styles.glowOrb, top: '-70px', left: '-60px', background: accentGlow(0.4) }} />
+        <div style={{ ...styles.glowOrb, bottom: '-70px', right: '-60px', background: accentGlow(0.28) }} />
+
+        <div
+          className="tenant-card"
+          style={{ ...styles.card, background: palette.cardBackground, borderColor: palette.cardBorder }}
+        >
+          <div style={{ ...styles.accentBar, background: accentGradient }} />
+          <div className="tenant-card-body" style={styles.cardBody}>
+            <p style={{ ...styles.eyebrow, color: palette.textMuted }}>
+              Welcome to {tenantTrust.legal_name || tenantTrust.name}
+            </p>
+
+            {logoUrl && (
+              <img
+                src={logoUrl}
+                alt={tenantTrust.name || 'App icon'}
+                className="tenant-logo"
+                style={{ ...styles.logo, boxShadow: `0 0 0 6px ${accentGlow(0.16)}, 0 14px 28px ${accentGlow(0.32)}` }}
+                onError={(e) => { e.currentTarget.style.display = 'none'; }}
+              />
+            )}
+            <h1 style={{ ...styles.trustName, color: palette.textPrimary }}>{tenantTrust.name}</h1>
+
+            <p style={{ ...styles.subheading, color: palette.textPrimary, fontWeight: 700 }}>
+              {iosChromeHandoffFailed ? 'Google Chrome is required to continue.' : 'Open in Google Chrome'}
+            </p>
+            {!iosChromeHandoffFailed && (
+              <p style={{ ...styles.subheading, color: palette.textSecondary }}>
+                To continue installing this app, open this page in Google Chrome.
+              </p>
+            )}
+
+            <button
+              type="button"
+              className="tenant-install-btn"
+              style={{ ...styles.installBtn, background: accentGradient, color: accent.text, boxShadow: `0 10px 26px ${accentGlow(0.4)}` }}
+              onClick={handleOpenInIosChrome}
+            >
+              <span>Open in Chrome</span>
+              <span className="tenant-install-btn-arrow" aria-hidden="true">→</span>
+            </button>
+
+            {iosChromeHandoffFailed && (
+              <a
+                href={IOS_CHROME_APP_STORE_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="tenant-install-btn"
+                style={{ ...styles.installBtn, marginTop: '10px', background: 'transparent', color: palette.textPrimary, border: `1px solid ${palette.cardBorder}`, boxShadow: 'none' }}
+              >
+                <span>Install Chrome</span>
+              </a>
+            )}
+
+            <p style={{ ...styles.instructions, color: palette.textMuted }}>
+              {iosChromeHandoffFailed
+                ? 'If Chrome is already installed, try Open in Chrome again.'
+                : "You'll be switched to Chrome to continue."}
+            </p>
+          </div>
+        </div>
+
+        <a
+          href={SETU_DOWNLOAD_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="tenant-powered-by"
+          style={{ ...styles.poweredBy, color: palette.textMuted, borderColor: palette.cardBorder, background: palette.cardBackground }}
+        >
+          <img
+            src={SETU_POWERED_LOGO}
+            alt="Setu"
+            style={styles.poweredLogo}
+            onError={(e) => { e.currentTarget.style.display = 'none'; }}
+          />
+          <span>Powered by Setu</span>
+        </a>
+
+        <style>{`
+          @keyframes tenantCardIn { from { opacity: 0; transform: translateY(14px) scale(0.98); } to { opacity: 1; transform: none; } }
+          @keyframes tenantLogoFloat { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-5px); } }
+          .tenant-card { animation: tenantCardIn 0.4s cubic-bezier(0.2, 0.8, 0.3, 1); }
+          .tenant-logo { animation: tenantLogoFloat 3.2s ease-in-out infinite; transition: transform 0.25s ease; }
+          .tenant-install-btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            transition: transform 0.15s ease, box-shadow 0.15s ease;
+          }
+          .tenant-install-btn:hover { transform: translateY(-2px); }
+          .tenant-install-btn:active { transform: scale(0.97); }
+          .tenant-install-btn-arrow { display: inline-block; transition: transform 0.2s ease; }
+          .tenant-install-btn:hover .tenant-install-btn-arrow { transform: translateX(4px); }
+          .tenant-powered-by { transition: transform 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease; }
+          .tenant-powered-by:hover { transform: translateY(-1px); box-shadow: 0 6px 16px rgba(0,0,0,0.18); }
+          .tenant-powered-by:active { transform: translateY(0); }
+        `}</style>
+      </div>
+    );
+  }
+
+  // iOS CHROME (CriOS) DIRECT INSTRUCTIONS: never show the generic
+  // Install App card first, and never route through it — CriOS is
+  // WebKit-based exactly like Safari, so it never fires
+  // beforeinstallprompt either, and it never matches
+  // shouldShowIosSafariCompatCard above (that card exists specifically to
+  // route Safari INTO Chrome; CriOS is already there). Desired flow:
+  // Safari -> Open in Chrome -> iOS Add to Home Screen instructions —
+  // never Safari -> Open in Chrome -> Install App -> iOS instructions.
+  // Renders the exact same IOS_ADD_TO_HOME_SCREEN_STEPS copy the Safari
+  // ios-instructions modal uses (defined below, near installSteps) as its
+  // own full card instead of a modal over an "Install App" button that
+  // never needs tapping here. handleInstallClick's own
+  // `isIosSafari() || isIOSChromeUA(...)` branch is left completely
+  // in place as defense-in-depth (requirement 3) — it simply becomes
+  // unreachable for CriOS in the normal flow now that this card intercepts
+  // first, but still protects any future/edge path that somehow reaches
+  // the generic card anyway. Skipped once already installed or running
+  // standalone, matching every other compatibility card's own safety
+  // pattern (checked directly via isStandaloneDisplay(), never only
+  // installPhase/isInstalled — see the Android/Safari cards' own comments
+  // on why that matters). Never reached on Android, desktop, or real
+  // Safari (isIOSChromeUA requires a CriOS UA token).
+  if (
+    typeof navigator !== 'undefined' &&
+    isIOSChromeUA(navigator.userAgent || '') &&
+    !isStandaloneDisplay() &&
+    !(installPhase === 'installed' && isInstalled)
+  ) {
+    return (
+      <div style={{ ...styles.page, background: pageBackground }}>
+        <div style={{ ...styles.glowOrb, top: '-70px', left: '-60px', background: accentGlow(0.4) }} />
+        <div style={{ ...styles.glowOrb, bottom: '-70px', right: '-60px', background: accentGlow(0.28) }} />
+
+        <div
+          className="tenant-card"
+          style={{ ...styles.card, background: palette.cardBackground, borderColor: palette.cardBorder }}
+        >
+          <div style={{ ...styles.accentBar, background: accentGradient }} />
+          <div className="tenant-card-body" style={styles.cardBody}>
+            <p style={{ ...styles.eyebrow, color: palette.textMuted }}>
+              Welcome to {tenantTrust.legal_name || tenantTrust.name}
+            </p>
+
+            {logoUrl && (
+              <img
+                src={logoUrl}
+                alt={tenantTrust.name || 'App icon'}
+                className="tenant-logo"
+                style={{ ...styles.logo, boxShadow: `0 0 0 6px ${accentGlow(0.16)}, 0 14px 28px ${accentGlow(0.32)}` }}
+                onError={(e) => { e.currentTarget.style.display = 'none'; }}
+              />
+            )}
+            <h1 style={{ ...styles.trustName, color: palette.textPrimary }}>{tenantTrust.name}</h1>
+
+            <p style={{ ...styles.subheading, color: palette.textPrimary, fontWeight: 700 }}>
+              Add to Home Screen
+            </p>
+            <p style={{ ...styles.subheading, color: palette.textSecondary }}>
+              Install {tenantTrust.name} for the full app experience.
+            </p>
+
+            <ol style={{ ...styles.instructionsList, color: palette.textMuted, marginTop: '10px' }}>
+              {IOS_ADD_TO_HOME_SCREEN_STEPS.map((step) => <li key={step}>{step}</li>)}
+            </ol>
+          </div>
+        </div>
+
+        <a
+          href={SETU_DOWNLOAD_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="tenant-powered-by"
+          style={{ ...styles.poweredBy, color: palette.textMuted, borderColor: palette.cardBorder, background: palette.cardBackground }}
+        >
+          <img
+            src={SETU_POWERED_LOGO}
+            alt="Setu"
+            style={styles.poweredLogo}
+            onError={(e) => { e.currentTarget.style.display = 'none'; }}
+          />
+          <span>Powered by Setu</span>
+        </a>
+
+        <style>{`
+          @keyframes tenantCardIn { from { opacity: 0; transform: translateY(14px) scale(0.98); } to { opacity: 1; transform: none; } }
+          @keyframes tenantLogoFloat { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-5px); } }
+          .tenant-card { animation: tenantCardIn 0.4s cubic-bezier(0.2, 0.8, 0.3, 1); }
+          .tenant-logo { animation: tenantLogoFloat 3.2s ease-in-out infinite; transition: transform 0.25s ease; }
+          .tenant-powered-by { transition: transform 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease; }
+          .tenant-powered-by:hover { transform: translateY(-1px); box-shadow: 0 6px 16px rgba(0,0,0,0.18); }
+          .tenant-powered-by:active { transform: translateY(0); }
+        `}</style>
+      </div>
+    );
+  }
 
   // See MOUNT_INSTALL_CHECK_GRACE_MS/cameFromOwnInstallPage above: only ever
   // reached when this page load looks like a continuation of an install
@@ -2579,7 +3159,9 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
                 ×
               </button>
               <h2 style={{ ...styles.modalTitle, color: palette.textPrimary }}>
-                Install {tenantTrust.name} on Safari
+                {installOutcome === 'ios-instructions'
+                  ? `Install ${tenantTrust.name}`
+                  : `Install ${tenantTrust.name} on Safari`}
               </h2>
               <ol style={{ ...styles.instructionsList, color: palette.textMuted }}>
                 {installSteps.map((step) => <li key={step}>{step}</li>)}
