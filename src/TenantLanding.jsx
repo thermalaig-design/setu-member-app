@@ -24,9 +24,11 @@ import {
 } from './utils/installPendingState';
 import { matchesTenantRelatedApp, computeLaunchReadyCandidate, canAttemptOpenAppLaunch } from './utils/launchReadiness';
 import { isAndroidNonChromeBrowser, buildChromeIntentUrl, isIOSChromeUA } from './utils/installBrowserSupport';
+import { readIosA2hsAck, writeIosA2hsAck, clearIosA2hsAck } from './utils/iosA2hsAck';
 import Home from './Home';
 
 import TenantProfileModal from './components/TenantProfileModal';
+import IosInstallInstructionsModal from './components/IosInstallInstructionsModal';
 
 const LAST_SELECTED_TRUST_ID_KEY = 'last_selected_trust_id';
 const PENDING_CREATED_APP_URL_KEY = 'pending_created_app_install_url';
@@ -611,6 +613,19 @@ const isMacSafari = () => {
   return isMac && isRealSafari;
 };
 
+// Any iOS/iPadOS device, regardless of which browser (Safari, CriOS, or an
+// already-launched standalone webclip all carry an iPhone/iPad/iPod UA, or
+// the touch-Mac UA iPadOS 13+ reports — same detection isIosSafari()/
+// isMacSafari() already use their own touch split for). Used only to gate
+// the iOS post-Add-to-Home-Screen acknowledgement card below — never
+// Android/desktop, and deliberately browser-agnostic since that card must
+// show for iOS Safari and iOS Chrome alike.
+const isIOSDeviceUA = (ua) => {
+  const value = String(ua || '');
+  if (/iPad|iPhone|iPod/.test(value)) return true;
+  return value.includes('Macintosh') && typeof document !== 'undefined' && 'ontouchend' in document;
+};
+
 // Embedded in-app browsers (WhatsApp/Instagram/Facebook) never fire
 // beforeinstallprompt and their limited chrome often can't complete an
 // install even via manual browser-menu steps — the only reliable guidance
@@ -1033,6 +1048,15 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
   // the modal's submit handler) have the trust/member/reg_member data they need.
   const [tenantAccessState, setTenantAccessState] = useState(null);
   const [tenantAccessPayload, setTenantAccessPayload] = useState(null);
+  // iOS-only, self-reported "I followed Add to Home Screen for THIS slug"
+  // flag — see utils/iosA2hsAck.js for why this is a wholly separate record
+  // from the Android verified/pending ones and must never touch
+  // isInstalled/installPhase. Seeded synchronously from localStorage so a
+  // returning visit renders the post-A2HS card immediately, then kept fresh
+  // by the mount/focus/pageshow/visibilitychange effect below (the user may
+  // have tapped "I've Added It" in a different tab, or on iOS the page can
+  // simply resume from the same background state without remounting).
+  const [iosA2hsAcknowledged, setIosA2hsAcknowledged] = useState(() => Boolean(readIosA2hsAck(normalizedAppSlug)));
   // Standalone (installed PWA) sessions render Home in place instead of
   // navigating to '/', so the browser stays on /app/<appSlug> — see
   // enterTenantTrust below. Initialized synchronously from the same-session
@@ -1202,6 +1226,16 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
       setIsInstalled(true);
       setInstallOutcome('installed');
       setInstallPhase('installed');
+      // Additional evidence only, never a substitute for it: a standalone
+      // launch is itself stronger proof than the user's own "I've Added It"
+      // tap, so backfill the iOS ack record here too (e.g. the user closed
+      // the instructions modal without tapping the CTA, then launched from
+      // the Home Screen anyway) — but this never feeds into
+      // isInstalled/installPhase/writeInstallVerified above, which already
+      // ran on their own Android-equivalent evidence a moment earlier.
+      if (typeof navigator !== 'undefined' && isIOSDeviceUA(navigator.userAgent || '')) {
+        writeIosA2hsAck(normalizedAppSlug);
+      }
       return;
     }
 
@@ -1279,6 +1313,34 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
   useEffect(() => {
     isInstalledRef.current = isInstalled;
   }, [isInstalled]);
+
+  // Re-reads the iOS A2HS ack for THIS slug on mount, and again whenever the
+  // tab becomes visible again (focus/pageshow/visibilitychange) — the
+  // acknowledging tap in IosInstallInstructionsModal (or a reset via "Show
+  // install steps again") most commonly happens in this same tab, but iOS
+  // can also suspend/resume this page across the Home Screen round-trip
+  // without a fresh mount, and the user can have multiple tabs/windows open
+  // on the same tenant URL. Scoped to normalizedAppSlug exactly like every
+  // other install record, so tenant A's ack can never surface on tenant B's
+  // page even if both are open on the same device.
+  useEffect(() => {
+    if (!normalizedAppSlug) return undefined;
+    const refresh = () => {
+      setIosA2hsAcknowledged(Boolean(readIosA2hsAck(normalizedAppSlug)));
+    };
+    refresh();
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') refresh();
+    };
+    window.addEventListener('focus', refresh);
+    window.addEventListener('pageshow', refresh);
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => {
+      window.removeEventListener('focus', refresh);
+      window.removeEventListener('pageshow', refresh);
+      document.removeEventListener('visibilitychange', handleVisibility);
+    };
+  }, [normalizedAppSlug]);
 
   // Runs the MOUNT_INSTALL_CHECK_GRACE_MS window described above — a single
   // bounded timer per mount, not tied to any other state, so it can't be
@@ -2451,24 +2513,52 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
     handleInstallClick();
   };
 
-  // iOS (iPhone/iPad) never fires beforeinstallprompt on ANY browser there
-  // — Safari and Chrome (CriOS) alike only offer the OS-level "Add to Home
-  // Screen" step via the Share sheet. Kept browser-neutral (no "Safari's
-  // toolbar" wording) since this same array now backs both the Safari
-  // ios-instructions modal below AND the CriOS direct-instructions card
-  // further down — a Chrome user reading "Safari's toolbar" would be
-  // pointed at the wrong browser's UI.
-  const IOS_ADD_TO_HOME_SCREEN_STEPS = ['Tap the Share button, then choose Add to Home Screen', 'Tap "Add" to confirm'];
+  // IosInstallInstructionsModal's "I've Added It" CTA — the user's own
+  // confirmation that they finished Share -> Add to Home Screen -> Add.
+  // Writes ONLY the separate iOS ack record (utils/iosA2hsAck.js), never
+  // writeInstallVerified/isInstalled/installPhase — see that module's own
+  // comment for why the two must stay independent. Closes the modal the
+  // same way the existing × close does (setInstallOutcome('')), so this is
+  // purely additive to that existing dismiss behavior.
+  const acknowledgeIosA2hs = () => {
+    writeIosA2hsAck(normalizedAppSlug);
+    setIosA2hsAcknowledged(true);
+    setInstallOutcome('');
+  };
 
-  // Safari (iOS and macOS) never fires beforeinstallprompt — there is no
-  // automatic install on that browser, only its own manual add-to-device
-  // step. Spelling that out as numbered steps is the simplest experience
-  // Safari allows.
-  const installSteps = installOutcome === 'ios-instructions'
-    ? IOS_ADD_TO_HOME_SCREEN_STEPS
-    : installOutcome === 'mac-safari-instructions'
-      ? ['Click "File" in Safari’s menu bar', 'Choose "Add to Dock…"', 'Click "Add" to confirm']
-      : null;
+  // "Show install steps again" on the post-A2HS card — for a user who
+  // removed the Home Screen icon and wants the Install App flow back.
+  // Clears the ack record and nothing else; the next render immediately
+  // falls through to the ordinary Install App card since iosA2hsAcknowledged
+  // is now false, no navigation involved.
+  const resetIosA2hsAck = () => {
+    clearIosA2hsAck(normalizedAppSlug);
+    setIosA2hsAcknowledged(false);
+  };
+
+  // Best-effort only (see IosInstallInstructionsModal/iosA2hsAck.js's own
+  // comments on why iOS gives a normal browser tab no reliable "installed"
+  // signal): a plain https navigation to the tenant URL from here is
+  // handled by the SAME browser tab exactly like any other link — iOS does
+  // not expose an API to force-launch an already-installed Home Screen
+  // PWA, so this can only ever be an attempt, never a guarantee, and the
+  // card below always pairs it with the "tap the Home Screen icon"
+  // fallback copy rather than implying this button alone is reliable.
+  const handleOpenIosHomeScreenApp = () => {
+    const tenantUrl = buildTenantUrl(normalizedAppSlug);
+    if (tenantUrl) {
+      window.location.href = tenantUrl;
+    }
+  };
+
+  // Desktop macOS Safari never fires beforeinstallprompt either — there is
+  // no automatic install on that browser, only its own manual "Add to
+  // Dock" step. iOS Safari/Chrome (installOutcome === 'ios-instructions')
+  // gets its own IosInstallInstructionsModal instead of this text-step
+  // modal — see its render further below.
+  const installSteps = installOutcome === 'mac-safari-instructions'
+    ? ['Click "File" in Safari’s menu bar', 'Choose "Add to Dock…"', 'Click "Add" to confirm']
+    : null;
 
   // ANDROID CHROME-ONLY GUIDED INSTALL: how long handleOpenInChrome watches
   // for visibilitychange/pagehide after firing the Chrome intent before
@@ -2686,30 +2776,23 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
     );
   }
 
-  // iOS CHROME (CriOS) DIRECT INSTRUCTIONS: never show the generic
-  // Install App card first, and never route through it — CriOS is
-  // WebKit-based exactly like Safari, so it never fires
-  // beforeinstallprompt either. Desired flow: Install App tap -> iOS Add to
-  // Home Screen instructions directly. Renders the exact same
-  // IOS_ADD_TO_HOME_SCREEN_STEPS copy the Safari ios-instructions modal
-  // uses (defined below, near installSteps) as its own full card instead
-  // of a modal over an "Install App" button that never needs tapping here.
-  // handleInstallClick's own
-  // `isIosSafari() || isIOSChromeUA(...)` branch is left completely
-  // in place as defense-in-depth (requirement 3) — it simply becomes
-  // unreachable for CriOS in the normal flow now that this card intercepts
-  // first, but still protects any future/edge path that somehow reaches
-  // the generic card anyway. Skipped once already installed or running
-  // standalone, matching every other compatibility card's own safety
-  // pattern (checked directly via isStandaloneDisplay(), never only
-  // installPhase/isInstalled — see the Android/Safari cards' own comments
-  // on why that matters). Never reached on Android, desktop, or real
-  // Safari (isIOSChromeUA requires a CriOS UA token).
+  // iOS POST-ADD-TO-HOME-SCREEN CARD: the user self-reported (via
+  // IosInstallInstructionsModal's "I've Added It") completing Add to Home
+  // Screen for THIS slug. This is deliberately NOT Android-style verified
+  // evidence — see utils/iosA2hsAck.js's own comment for why a normal iOS
+  // browser tab has no reliable "installed" signal to check — so it never
+  // reads/writes isInstalled, installPhase, or the installPendingState.js
+  // records; it only swaps which card renders. Gated directly on
+  // isIOSDeviceUA() + !isStandaloneDisplay(), the same synchronous safety
+  // pattern every other compatibility card above uses, so it can never
+  // render on Android/desktop or inside an already-standalone launch (that
+  // takes the wholly separate, pre-existing isStandaloneDisplay() branch
+  // near the top of the component instead).
   if (
     typeof navigator !== 'undefined' &&
-    isIOSChromeUA(navigator.userAgent || '') &&
+    isIOSDeviceUA(navigator.userAgent || '') &&
     !isStandaloneDisplay() &&
-    !(installPhase === 'installed' && isInstalled)
+    iosA2hsAcknowledged
   ) {
     return (
       <div style={{ ...styles.page, background: pageBackground }}>
@@ -2737,16 +2820,47 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
             )}
             <h1 style={{ ...styles.trustName, color: palette.textPrimary }}>{tenantTrust.name}</h1>
 
-            <p style={{ ...styles.subheading, color: palette.textPrimary, fontWeight: 700 }}>
-              Add to Home Screen
+            <div style={{ ...styles.installedBadge, background: accentGradient, color: accent.text }} aria-hidden="true">✓</div>
+            <p style={{ ...styles.installedHeading, color: palette.textPrimary }}>
+              App Added
             </p>
             <p style={{ ...styles.subheading, color: palette.textSecondary }}>
-              Install {tenantTrust.name} for the full app experience.
+              {tenantTrust.name} has been added to your Home Screen.
+            </p>
+            <p style={{ ...styles.subheading, color: palette.textSecondary }}>
+              Open it from your Home Screen for the full app experience.
             </p>
 
-            <ol style={{ ...styles.instructionsList, color: palette.textMuted, marginTop: '10px' }}>
-              {IOS_ADD_TO_HOME_SCREEN_STEPS.map((step) => <li key={step}>{step}</li>)}
-            </ol>
+            <button
+              type="button"
+              className="tenant-install-btn"
+              style={{ ...styles.installBtn, background: accentGradient, color: accent.text, boxShadow: `0 10px 26px ${accentGlow(0.4)}` }}
+              onClick={handleOpenIosHomeScreenApp}
+            >
+              <span>Open App</span>
+              <span className="tenant-install-btn-arrow" aria-hidden="true">→</span>
+            </button>
+
+            <p style={{ ...styles.instructions, color: palette.textMuted }}>
+              If it does not open automatically, tap the app icon on your Home Screen.
+            </p>
+
+            <button
+              type="button"
+              onClick={resetIosA2hsAck}
+              style={{
+                ...styles.instructions,
+                color: palette.textMuted,
+                background: 'none',
+                border: 'none',
+                textDecoration: 'underline',
+                cursor: 'pointer',
+                marginTop: '10px',
+                padding: 0
+              }}
+            >
+              Show install steps again
+            </button>
           </div>
         </div>
 
@@ -2771,6 +2885,17 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
           @keyframes tenantLogoFloat { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-5px); } }
           .tenant-card { animation: tenantCardIn 0.4s cubic-bezier(0.2, 0.8, 0.3, 1); }
           .tenant-logo { animation: tenantLogoFloat 3.2s ease-in-out infinite; transition: transform 0.25s ease; }
+          .tenant-install-btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            transition: transform 0.15s ease, box-shadow 0.15s ease;
+          }
+          .tenant-install-btn:hover { transform: translateY(-2px); }
+          .tenant-install-btn:active { transform: scale(0.97); }
+          .tenant-install-btn-arrow { display: inline-block; transition: transform 0.2s ease; }
+          .tenant-install-btn:hover .tenant-install-btn-arrow { transform: translateX(4px); }
           .tenant-powered-by { transition: transform 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease; }
           .tenant-powered-by:hover { transform: translateY(-1px); box-shadow: 0 6px 16px rgba(0,0,0,0.18); }
           .tenant-powered-by:active { transform: translateY(0); }
@@ -2906,6 +3031,16 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
         </div>
       </div>
 
+      {installOutcome === 'ios-instructions' && (
+        <IosInstallInstructionsModal
+          trustName={tenantTrust.name}
+          accent={accent}
+          palette={palette}
+          onClose={() => setInstallOutcome('')}
+          onAcknowledge={acknowledgeIosA2hs}
+        />
+      )}
+
       {installSteps && (
         <div
           className="tenant-safari-modal-overlay"
@@ -2929,9 +3064,7 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
                 ×
               </button>
               <h2 style={{ ...styles.modalTitle, color: palette.textPrimary }}>
-                {installOutcome === 'ios-instructions'
-                  ? `Install ${tenantTrust.name}`
-                  : `Install ${tenantTrust.name} on Safari`}
+                {`Install ${tenantTrust.name} on Safari`}
               </h2>
               <ol style={{ ...styles.instructionsList, color: palette.textMuted }}>
                 {installSteps.map((step) => <li key={step}>{step}</li>)}

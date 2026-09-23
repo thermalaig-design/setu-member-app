@@ -328,86 +328,44 @@ test('regression: CriOS never fires/adopts beforeinstallprompt (no UI ever waits
 // Screen instructions DIRECTLY — never the generic Install App card first.
 // =========================================================================
 
-test('source guard: a dedicated CriOS direct-instructions render gate exists, positioned BEFORE the generic Install App card\'s own JSX in render order', () => {
-  const criosGateStart = tenantLandingSource.indexOf('isIOSChromeUA(navigator.userAgent || \'\') &&\n    !isStandaloneDisplay()');
-  assert.ok(criosGateStart !== -1, 'expected a dedicated CriOS render gate (isIOSChromeUA + !isStandaloneDisplay())');
+// =========================================================================
+// IosInstallInstructionsModal: both iOS Safari and iOS Chrome (CriOS) now
+// land on the SAME generic Install App card, and tapping Install App is
+// what opens the popup (installOutcome === 'ios-instructions') — CriOS no
+// longer gets its own direct full-page render, matching Android's own
+// "tap Install App to see the next step" pattern.
+// =========================================================================
 
-  // handleCardClick is just a function DEFINITION (declared early,
-  // alongside installSteps, so it's in scope for JSX below) — it doesn't
-  // itself render anything, so its textual position isn't what matters.
-  // What matters is that this gate's own `return (...)` executes (an
-  // early return, top-to-bottom in the component body) BEFORE the actual
-  // generic card's JSX — the one containing the "Install App" button
-  // label — is ever reached.
-  const installAppButtonIdx = tenantLandingSource.indexOf('<span>Install App</span>');
-  assert.ok(installAppButtonIdx !== -1, 'expected the generic Install App button label to exist');
-  assert.ok(
-    criosGateStart < installAppButtonIdx,
-    'the CriOS direct-instructions gate must early-return before the generic Install App button\'s own JSX'
-  );
+test('source guard: CriOS no longer has its own direct-render gate — it falls through to the same generic Install App card as Safari', () => {
+  assert.doesNotMatch(tenantLandingSource, /isIOSChromeUA\(navigator\.userAgent \|\| ''\) &&\n\s*!isStandaloneDisplay\(\)/);
 });
 
-test('source guard: the CriOS gate never renders the generic "Install App" button/card — it renders IOS_ADD_TO_HOME_SCREEN_STEPS directly, no beforeinstallprompt/deferredPrompt dependency', () => {
-  const criosGateStart = tenantLandingSource.indexOf('isIOSChromeUA(navigator.userAgent || \'\') &&\n    !isStandaloneDisplay()');
-  const criosCardEnd = tenantLandingSource.indexOf('// See MOUNT_INSTALL_CHECK_GRACE_MS/cameFromOwnInstallPage above');
-  assert.ok(criosGateStart !== -1 && criosCardEnd !== -1 && criosGateStart < criosCardEnd);
-  const criosCardBody = tenantLandingSource.slice(criosGateStart, criosCardEnd);
-
-  assert.match(criosCardBody, /IOS_ADD_TO_HOME_SCREEN_STEPS\.map/);
-  assert.doesNotMatch(criosCardBody, />Install App</); // no "Install App" button label rendered
-  assert.doesNotMatch(criosCardBody, /deferredPrompt/);
-  assert.doesNotMatch(criosCardBody, /handleInstallClick/);
-  assert.doesNotMatch(criosCardBody, /handleCardClick/);
-});
-
-test('source guard: the CriOS gate is skipped in standalone mode and once already installed — matches every other compatibility card\'s own safety pattern', () => {
-  const criosGateStart = tenantLandingSource.indexOf('isIOSChromeUA(navigator.userAgent || \'\') &&\n    !isStandaloneDisplay()');
-  assert.ok(criosGateStart !== -1);
-  const guardRegion = tenantLandingSource.slice(criosGateStart, criosGateStart + 150);
-  assert.match(guardRegion, /!isStandaloneDisplay\(\)/);
-  assert.match(guardRegion, /!\(installPhase === 'installed' && isInstalled\)/);
-});
-
-test('CriOS standalone (pure logic): isIOSChromeUA is true but the render gate requires !isStandaloneDisplay(), so standalone never shows this card', () => {
-  const IPHONE_CHROME_UA =
-    'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/126.0.6478.54 Mobile/15E148 Safari/604.1';
-  // Mirrors the exact runtime gate: isIOSChromeUA(ua) && !isStandalone && !(installed).
-  const evaluateCriosGate = ({ ua, isStandalone, installPhase, isInstalled }) =>
-    isIOSChromeUA(ua) && !isStandalone && !(installPhase === 'installed' && isInstalled);
-
-  assert.equal(isIOSChromeUA(IPHONE_CHROME_UA), true);
-  assert.equal(
-    evaluateCriosGate({ ua: IPHONE_CHROME_UA, isStandalone: true, installPhase: 'idle', isInstalled: false }),
-    false
-  );
-  assert.equal(
-    evaluateCriosGate({ ua: IPHONE_CHROME_UA, isStandalone: false, installPhase: 'idle', isInstalled: false }),
-    true
-  );
-});
-
-test('source guard: handleInstallClick\'s CriOS fallback (isIosSafari() || isIOSChromeUA(...)) is kept in place as defense-in-depth, unchanged', () => {
+test('source guard: handleInstallClick\'s CriOS fallback (isIosSafari() || isIOSChromeUA(...)) still sets ios-instructions, unchanged', () => {
   assert.match(tenantLandingSource, /\} else if \(isIosSafari\(\) \|\| isIOSChromeUA\(navigator\.userAgent \|\| ''\)\) \{/);
+  assert.match(tenantLandingSource, /setInstallOutcome\('ios-instructions'\);/);
 });
 
-test('iOS instruction copy is browser-neutral — never says "Safari\'s toolbar" or "Safari toolbar" anywhere in the shared steps', () => {
-  const constStart = tenantLandingSource.indexOf('const IOS_ADD_TO_HOME_SCREEN_STEPS =');
-  assert.ok(constStart !== -1);
-  const constLine = tenantLandingSource.slice(constStart, tenantLandingSource.indexOf(';', constStart) + 1);
-  assert.doesNotMatch(constLine, /Safari/i);
-  assert.match(constLine, /Share button/);
+test('source guard: installOutcome === \'ios-instructions\' renders IosInstallInstructionsModal, passing onClose back to setInstallOutcome(\'\') (no navigation/handoff)', () => {
+  assert.match(tenantLandingSource, /import IosInstallInstructionsModal from '\.\/components\/IosInstallInstructionsModal';/);
+  const renderIdx = tenantLandingSource.indexOf("installOutcome === 'ios-instructions' && (");
+  assert.ok(renderIdx !== -1);
+  const renderBlock = tenantLandingSource.slice(renderIdx, renderIdx + 300);
+  assert.match(renderBlock, /<IosInstallInstructionsModal/);
+  assert.match(renderBlock, /onClose=\{\(\) => setInstallOutcome\(''\)\}/);
 });
 
-test('the Safari ios-instructions modal title is browser-neutral (drops "on Safari") while the desktop mac-safari-instructions title correctly keeps it (File > Add to Dock is Safari-only)', () => {
-  const titleStart = tenantLandingSource.indexOf("{installOutcome === 'ios-instructions'");
-  assert.ok(titleStart !== -1);
-  const titleBlock = tenantLandingSource.slice(titleStart, titleStart + 200);
-  assert.match(titleBlock, /`Install \$\{tenantTrust\.name\}`/);
-  assert.match(titleBlock, /`Install \$\{tenantTrust\.name\} on Safari`/);
+test('the mac-safari-instructions modal keeps its own "on Safari" title (File > Add to Dock is Safari-only, unaffected by the iOS popup change)', () => {
+  assert.match(tenantLandingSource, /\{`Install \$\{tenantTrust\.name\} on Safari`\}/);
 });
 
-test('the same IOS_ADD_TO_HOME_SCREEN_STEPS array backs both the Safari modal (installSteps) and the CriOS direct card — no second, possibly-drifted copy of the steps', () => {
-  const occurrences = tenantLandingSource.split('IOS_ADD_TO_HOME_SCREEN_STEPS').length - 1;
-  // 1 declaration + 1 use in installSteps + 1 use in the CriOS card's .map
-  assert.ok(occurrences >= 3, `expected IOS_ADD_TO_HOME_SCREEN_STEPS to be declared once and reused at least twice, found ${occurrences} occurrences`);
+test('IosInstallInstructionsModal.jsx exists and defines the 3-step Share -> Add to Home Screen -> Add copy, browser-neutral (never "Safari toolbar")', () => {
+  const modalSource = fs.readFileSync(
+    path.join(__dirname, '../src/components/IosInstallInstructionsModal.jsx'),
+    'utf8'
+  );
+  assert.match(modalSource, /Tap the Share button/);
+  assert.match(modalSource, /Add to Home Screen/);
+  assert.doesNotMatch(modalSource, /Safari's toolbar|Safari toolbar/i);
+  assert.match(modalSource, /aria-modal="true"/);
+  assert.match(modalSource, /onClose/);
 });
