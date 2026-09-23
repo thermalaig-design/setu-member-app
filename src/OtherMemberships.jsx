@@ -21,6 +21,22 @@ const getSupabase = async () => {
   return supabase;
 };
 
+// iOS Safari/Chrome (both WebKit) block window.open() the instant it fires
+// outside the synchronous call stack of a user gesture — including after an
+// `await` on a Supabase call, which is exactly how handleOpenTrustWebApp
+// below opens a trust's web app on Android. Detecting iOS here lets
+// TrustLinkTile render a real `<a href target="_blank">` for this platform
+// instead (see its own comment), which a normal, non-JS-driven navigation
+// is never subject to that restriction. Deliberately local to this file —
+// Android's own card-tap path (handleOpenTrustWebApp) is untouched and
+// never reads this.
+const isIOSDevice = () => {
+  if (typeof navigator === 'undefined') return false;
+  const ua = navigator.userAgent || '';
+  if (/iPad|iPhone|iPod/.test(ua)) return true;
+  return ua.includes('Macintosh') && typeof document !== 'undefined' && 'ontouchend' in document;
+};
+
 const getMobileVariants = (value) => {
   const digits = String(value || '').replace(/\D/g, '');
   if (!digits) return [];
@@ -557,6 +573,17 @@ const OtherMemberships = ({ onNavigate, variant = 'page' }) => {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [trustCardModalData, setTrustCardModalData] = useState(null);
   const [openingTrustId, setOpeningTrustId] = useState('');
+  // iOS-only: trust_id -> resolved web_app_url ('' once resolved-but-missing,
+  // undefined while still in flight), populated by the prefetch effect below
+  // as soon as trustLinks load — NOT on tap. This is what lets the iOS
+  // TrustLinkTile render a real, synchronous <a href> instead of Android's
+  // async-then-window.open() path (handleOpenTrustWebApp), which iOS Safari/
+  // Chrome silently block as a popup once it runs after an await. Android
+  // never reads this map — handleOpenTrustWebApp keeps doing its own
+  // per-click fetch exactly as before.
+  const [trustWebAppUrls, setTrustWebAppUrls] = useState({});
+  const trustWebAppUrlRequestedRef = useRef(new Set());
+  const isIOS = useMemo(() => isIOSDevice(), []);
 
   // Delete state
   const [deletingId, setDeletingId] = useState(null);
@@ -721,6 +748,52 @@ const OtherMemberships = ({ onNavigate, variant = 'page' }) => {
     }
   };
 
+  // iOS-only prefetch: the same RPC handleOpenTrustWebApp above calls on
+  // tap, called here instead the moment a trust_id is first seen in
+  // trustLinks — well before any user gesture, so its result is already in
+  // trustWebAppUrls by the time a tap needs it (see TrustLinkTile's href).
+  // Kept fully independent from handleOpenTrustWebApp (never shared/
+  // refactored together) so Android's tap-time path is untouched no matter
+  // what changes here. Returns '' (not null/undefined) on any failure or a
+  // missing web_app_url, so callers can tell "resolved, nothing there"
+  // apart from "still in flight" (trustWebAppUrls[id] === undefined).
+  const fetchTrustWebAppUrl = useCallback(async (trustId) => {
+    try {
+      const supabase = await getSupabase();
+      const { data, error } = await supabase.rpc('manage_user_panel_by_trust_details', {
+        p_action: 'view',
+        p_trust_id: trustId,
+      });
+      if (error) throw error;
+      return normalizeText(data?.[0]?.web_app_url);
+    } catch (err) {
+      console.warn('iOS trust web app url prefetch failed:', trustId, err);
+      return '';
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!isIOS) return undefined;
+    const ids = [...new Set(
+      trustLinks
+        .map((link) => normalizeText(link?.trust_id || link?.Trust?.id))
+        .filter(Boolean)
+    )];
+    const pending = ids.filter((id) => !trustWebAppUrlRequestedRef.current.has(id));
+    if (pending.length === 0) return undefined;
+    pending.forEach((id) => trustWebAppUrlRequestedRef.current.add(id));
+
+    let cancelled = false;
+    pending.forEach((id) => {
+      fetchTrustWebAppUrl(id).then((url) => {
+        if (cancelled) return;
+        setTrustWebAppUrls((prev) => ({ ...prev, [id]: url }));
+      });
+    });
+
+    return () => { cancelled = true; };
+  }, [isIOS, trustLinks, fetchTrustWebAppUrl]);
+
   const openTrustIdCard = (link) => {
     const cardData = enrichTrustCardData(link);
     try {
@@ -872,7 +945,7 @@ const OtherMemberships = ({ onNavigate, variant = 'page' }) => {
     );
   };
 
-  const TrustLinkTile = ({ link, onClick, onOpenCard, isLoading }) => {
+  const TrustLinkTile = ({ link, onClick, onOpenCard, isLoading, isIOS, resolvedUrl }) => {
     const trustName = link.Trust?.name || link.organisation_name || '-';
     const legalName = normalizeText(
       link.Trust?.legal_name
@@ -892,6 +965,25 @@ const OtherMemberships = ({ onNavigate, variant = 'page' }) => {
         event.preventDefault();
         onClick?.();
       }
+    };
+
+    // iOS ONLY (isIOS is only ever true here — see isIOSDevice above): the
+    // href is already resolved by the prefetch effect by the time this
+    // renders in the common case, so the <a> below navigates through a
+    // real, synchronous browser click — never blocked as a popup the way
+    // window.open() after an await is on iOS Safari/Chrome. This handler
+    // only intervenes for the two cases where a plain navigation would be
+    // wrong: still resolving (resolvedUrl === undefined) or confirmed
+    // absent (resolvedUrl === '') — both cancel the navigation and surface
+    // a real message, never a silent no-op.
+    const handleIosClick = (event) => {
+      if (resolvedUrl) return;
+      event.preventDefault();
+      alert(
+        resolvedUrl === ''
+          ? 'This trust does not have a web app link yet.'
+          : 'Still preparing this app link — please try again in a moment.'
+      );
     };
 
     const handleOpenCardClick = (event) => {
@@ -932,6 +1024,120 @@ const OtherMemberships = ({ onNavigate, variant = 'page' }) => {
           nameColor: '#f6f2e6',
           legalColor: 'rgba(224,230,241,0.58)',
         };
+
+    // iOS ONLY: a real <a href target="_blank"> so the navigation is a
+    // direct, synchronous result of the tap — the fix for the iOS App
+    // Gallery popup-block symptom this component exists to solve. Same
+    // exact card markup/styles as the Android <div> below (copied, not
+    // shared, so nothing here can ever change what Android renders).
+    // resolvedUrl comes from the prefetch effect keyed on trustLinks, not
+    // from a fetch started by this tap.
+    if (isIOS) {
+      return (
+        <a
+          href={resolvedUrl || '#'}
+          target="_blank"
+          rel="noopener noreferrer"
+          onClick={handleIosClick}
+          className={`other-membership-card${isLightTheme ? ' other-membership-card--light' : ''}`}
+          style={{
+            position: 'relative',
+            background: tile.cardBg,
+            border: `1px solid ${tile.border}`,
+            borderRadius: '18px',
+            padding: '14px 13px 12px',
+            cursor: resolvedUrl ? 'pointer' : 'wait',
+            opacity: resolvedUrl ? 1 : 0.6,
+            minWidth: 0,
+            overflow: 'hidden',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '9px',
+            boxShadow: tile.shadow,
+            textDecoration: 'none',
+            color: 'inherit',
+            transition: 'transform 0.2s cubic-bezier(0.22,1,0.36,1), border-color 0.2s ease, box-shadow 0.2s ease',
+          }}
+          onMouseEnter={(event) => {
+            event.currentTarget.style.transform = 'translateY(-4px) scale(1.015)';
+            event.currentTarget.style.borderColor = tile.borderHover;
+            event.currentTarget.style.boxShadow = tile.shadowHover;
+          }}
+          onMouseLeave={(event) => {
+            event.currentTarget.style.transform = 'translateY(0) scale(1)';
+            event.currentTarget.style.borderColor = tile.border;
+            event.currentTarget.style.boxShadow = tile.shadow;
+          }}
+        >
+          {/* Theme accent line */}
+          <div style={{
+            position: 'absolute', top: 0, left: 0, right: 0, height: '2.5px',
+            background: tile.accentLine,
+            borderRadius: '18px 18px 0 0',
+          }} />
+
+          {/* Soft corner glow */}
+          <div style={{
+            position: 'absolute', top: '-30%', right: '-30%', width: '70%', height: '70%',
+            background: tile.glow,
+            pointerEvents: 'none',
+          }} />
+
+          {/* Row 1: Logo + Portal badge */}
+          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '8px' }}>
+            <div style={{
+              padding: '3px',
+              borderRadius: '13px',
+              background: tile.avatarFrame,
+            }}>
+              <TrustAvatar trust={link.Trust || { name: trustName, icon_url: null }} size={36} />
+            </div>
+            <span style={{
+              fontSize: '7px',
+              fontWeight: 800,
+              color: tile.badgeText,
+              background: tile.badgeBg,
+              border: `1px solid ${tile.badgeBorder}`,
+              borderRadius: '5px',
+              padding: '3px 6px',
+              letterSpacing: '0.07em',
+              textTransform: 'uppercase',
+              flexShrink: 0,
+              marginTop: '2px',
+            }}>Portal</span>
+          </div>
+
+          {/* Row 2: Trust name */}
+          <MarqueeText
+            speed={20}
+            style={{
+              fontSize: '12.5px',
+              lineHeight: 1.3,
+              fontWeight: 800,
+              color: tile.nameColor,
+              letterSpacing: '-0.01em',
+            }}
+          >
+            {trustName}
+          </MarqueeText>
+
+          {/* Row 3: Legal name */}
+          {legalName && (
+            <MarqueeText
+              speed={20}
+              style={{
+                fontSize: '9.5px',
+                lineHeight: 1.4,
+                fontWeight: 500,
+                color: tile.legalColor,
+              }}
+            >
+              {legalName}
+            </MarqueeText>
+          )}
+        </a>
+      );
+    }
 
     return (
       <div
@@ -1170,6 +1376,8 @@ const OtherMemberships = ({ onNavigate, variant = 'page' }) => {
                     onClick={() => handleOpenTrustWebApp(link)}
                     onOpenCard={() => openTrustIdCard(link)}
                     isLoading={openingTrustId === normalizeText(link?.trust_id || link?.Trust?.id)}
+                    isIOS={isIOS}
+                    resolvedUrl={trustWebAppUrls[normalizeText(link?.trust_id || link?.Trust?.id)]}
                   />
                 ))}
               </div>

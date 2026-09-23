@@ -1,4 +1,5 @@
 import React, { useEffect } from 'react';
+import iosInstallStepsImage from '../assets/ios-install-steps.png';
 
 // Shown from TenantLanding.jsx when handleInstallClick resolves
 // installOutcome to 'ios-instructions' — i.e. iOS Safari OR iOS Chrome
@@ -10,40 +11,15 @@ import React, { useEffect } from 'react';
 // confirmation that they finished the steps, which TenantLanding.jsx
 // persists as a separate, self-reported record (see utils/iosA2hsAck.js)
 // and never as Android's verified-install evidence.
-const STEPS = [
-  {
-    label: 'Tap the Share button',
-    icon: (
-      <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M12 3v12" />
-        <path d="M7 8l5-5 5 5" />
-        <path d="M5 13v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6" />
-      </svg>
-    )
-  },
-  {
-    label: 'Choose "Add to Home Screen"',
-    icon: (
-      <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <rect x="3" y="3" width="18" height="18" rx="5" />
-        <path d="M12 8v8" />
-        <path d="M8 12h8" />
-      </svg>
-    )
-  },
-  {
-    label: 'Tap "Add" to confirm',
-    icon: (
-      <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M20 6L9 17l-5-5" />
-      </svg>
-    )
-  }
-];
-
+//
+// ios-install-steps.png (src/assets) is a real, static reference
+// screenshot of the 3-step Share -> Add to Home Screen -> Add flow —
+// deliberately generic/untenanted (it isn't re-rendered per tenant name or
+// URL), so alt text carries the actual instruction copy for screen
+// readers rather than the image's own baked-in labels.
 function IosInstallInstructionsModal({ trustName, accent, palette, onClose, onAcknowledge }) {
   // Background scroll lock while the popup is open — restored on unmount
-  // regardless of how it closes (X, Got it, or backdrop tap).
+  // regardless of how it closes (X, "I've Added It", or backdrop tap).
   useEffect(() => {
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
@@ -56,8 +32,6 @@ function IosInstallInstructionsModal({ trustName, accent, palette, onClose, onAc
       document.removeEventListener('keydown', handleKeyDown);
     };
   }, [onClose]);
-
-  const accentColor = accent?.from || '#2563eb';
 
   return (
     <div
@@ -83,43 +57,33 @@ function IosInstallInstructionsModal({ trustName, accent, palette, onClose, onAc
           ×
         </button>
 
-        <h2 id="ios-install-modal-title" style={styles.title}>Install App</h2>
-        <p style={styles.subtitle}>
-          Follow these steps to add {trustName ? `${trustName} ` : 'the app '}to your Home Screen.
-        </p>
+        <div style={styles.scrollArea}>
+          <h2 id="ios-install-modal-title" style={styles.srOnlyTitle}>
+            Install {trustName || 'the app'}
+          </h2>
+          <img
+            src={iosInstallStepsImage}
+            alt={`Steps to add ${trustName || 'the app'} to your Home Screen: 1) Tap the Share button in your browser's toolbar, 2) Choose "Add to Home Screen", 3) Tap "Add" to confirm`}
+            style={styles.stepsImage}
+          />
+        </div>
 
-        <ol style={styles.stepList}>
-          {STEPS.map((step, index) => (
-            <li key={step.label} className="ios-install-modal-step" style={styles.stepRow}>
-              <span
-                className="ios-install-modal-icon"
-                style={{ ...styles.stepIcon, color: accentColor, borderColor: `${accentColor}33`, animationDelay: `${index * 0.25}s` }}
-              >
-                {step.icon}
-              </span>
-              <span style={styles.stepText}>{step.label}</span>
-            </li>
-          ))}
-        </ol>
-
-        <button
-          type="button"
-          className="ios-install-modal-got-it"
-          style={{ ...styles.gotItBtn, background: `linear-gradient(135deg, ${accent?.from || '#2563eb'}, ${accent?.to || '#1d4ed8'})` }}
-          onClick={onAcknowledge}
-        >
-          I've Added It
-        </button>
+        <div style={styles.footer}>
+          <button
+            type="button"
+            className="ios-install-modal-got-it"
+            style={{ ...styles.gotItBtn, background: `linear-gradient(135deg, ${accent?.from || '#2563eb'}, ${accent?.to || '#1d4ed8'})` }}
+            onClick={onAcknowledge}
+          >
+            I've Added It
+          </button>
+        </div>
       </div>
 
       <style>{`
         @keyframes iosInstallModalIn {
           from { opacity: 0; transform: translateY(16px) scale(0.97); }
           to { opacity: 1; transform: none; }
-        }
-        @keyframes iosInstallStepPulse {
-          0%, 100% { box-shadow: 0 0 0 0 currentColor; opacity: 1; }
-          50% { box-shadow: 0 0 0 6px transparent; opacity: 0.75; }
         }
         .ios-install-modal-overlay {
           animation: iosInstallOverlayIn 0.2s ease;
@@ -130,9 +94,6 @@ function IosInstallInstructionsModal({ trustName, accent, palette, onClose, onAc
         }
         .ios-install-modal-card {
           animation: iosInstallModalIn 0.28s cubic-bezier(0.2, 0.8, 0.3, 1);
-        }
-        .ios-install-modal-icon {
-          animation: iosInstallStepPulse 1.8s ease-in-out infinite;
         }
         .ios-install-modal-close:hover { opacity: 0.7; }
         .ios-install-modal-got-it:active { transform: scale(0.97); }
@@ -156,11 +117,19 @@ const styles = {
     position: 'relative',
     width: '100%',
     maxWidth: '420px',
+    maxHeight: '88vh',
+    display: 'flex',
+    flexDirection: 'column',
     background: '#ffffff',
     borderRadius: '20px 20px 0 0',
-    padding: '28px 24px 24px',
     boxShadow: '0 -12px 40px rgba(15, 23, 42, 0.18)',
-    marginBottom: 0
+    marginBottom: 0,
+    overflow: 'hidden'
+  },
+  scrollArea: {
+    overflowY: 'auto',
+    WebkitOverflowScrolling: 'touch',
+    padding: '16px 16px 8px'
   },
   closeBtn: {
     position: 'absolute',
@@ -177,52 +146,36 @@ const styles = {
     cursor: 'pointer',
     display: 'flex',
     alignItems: 'center',
-    justifyContent: 'center'
-  },
-  title: {
-    margin: '0 0 6px',
-    fontSize: '20px',
-    fontWeight: 800,
-    color: '#0f172a'
-  },
-  subtitle: {
-    margin: '0 0 20px',
-    fontSize: '14px',
-    color: '#64748b',
-    lineHeight: 1.5
-  },
-  stepList: {
-    listStyle: 'none',
-    margin: 0,
-    padding: 0,
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '14px'
-  },
-  stepRow: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '14px'
-  },
-  stepIcon: {
-    flexShrink: 0,
-    width: '44px',
-    height: '44px',
-    borderRadius: '12px',
-    border: '1px solid',
-    display: 'flex',
-    alignItems: 'center',
     justifyContent: 'center',
-    background: '#f8fafc'
+    zIndex: 1
   },
-  stepText: {
-    fontSize: '15px',
-    fontWeight: 600,
-    color: '#1e293b'
+  // Visually hidden — the image already carries its own "Install App"
+  // title/instructions, but a dialog still needs a real accessible name
+  // for aria-labelledby rather than duplicating the image's baked-in text
+  // on screen.
+  srOnlyTitle: {
+    position: 'absolute',
+    width: '1px',
+    height: '1px',
+    padding: 0,
+    margin: '-1px',
+    overflow: 'hidden',
+    clip: 'rect(0, 0, 0, 0)',
+    whiteSpace: 'nowrap',
+    border: 0
+  },
+  stepsImage: {
+    display: 'block',
+    width: '100%',
+    height: 'auto',
+    borderRadius: '14px'
+  },
+  footer: {
+    padding: '12px 24px 24px',
+    borderTop: '1px solid #f1f5f9'
   },
   gotItBtn: {
     width: '100%',
-    marginTop: '24px',
     padding: '14px',
     border: 'none',
     borderRadius: '12px',
