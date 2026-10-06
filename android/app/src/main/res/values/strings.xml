@@ -4,4 +4,8 @@
     <string name="title_activity_main">Setu</string>
     <string name="package_name">com.Setu.app</string>
     <string name="custom_url_scheme">com.Setu.app</string>
+
+    <string name="facebook_app_id">2195701954549189</string>
+    <string name="fb_login_protocol_scheme">fb2195701954549189</string>
+    <string name="facebook_client_token">898ab61b51ed4a3d85e3b002760dc8ba</string>
 </resources>

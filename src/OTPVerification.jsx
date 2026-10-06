@@ -5,6 +5,7 @@ import { verifyOTP } from './services/authService';
 import { fetchDirectoryData } from './services/directoryService';
 import { fetchActiveTrustsByMobile, fetchMemberTrustMemberships, fetchTrustById, fetchTrustByAppSlug } from './services/trustService';
 import { logUserSessionEvent } from './services/sessionAuditService';
+import { trackMetaEvent } from './services/metaEvents';
 import { persistUserSession } from './utils/storageUtils';
 import { setLoginTermsPromptPending } from './utils/legalContent';
 import { useTenant } from './context/TenantContext';
@@ -412,6 +413,11 @@ function OTPVerification() {
         setLoading(false);
         return;
       }
+
+      // Fire-and-forget (not awaited) so login is never slowed or blocked.
+      // TODO: verify-otp / check-phone responses expose no new-user flag yet; once the
+      // backend returns one, send this only for new users.
+      trackMetaEvent('fb_mobile_complete_registration', { fb_registration_method: 'phone_otp' });
 
       if (accountCandidates.length > 1) {
         setError('');

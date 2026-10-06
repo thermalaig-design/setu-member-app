@@ -13,6 +13,7 @@ import {
 } from './utils/productWishlist';
 import { getCartKey, readCartItems, setCartProductQuantity, subscribeCart } from './utils/productCart';
 import { getAppHomePath } from './utils/tenantNavigation';
+import { logMetaViewContent } from './services/metaEvents';
 import {
   isTrustCatalogCacheFresh,
   readTrustCatalogCacheForCandidates,
@@ -1389,6 +1390,7 @@ const ProductDetail = ({ categoryId, productId, onBack }) => {
   const [cartItems, setCartItems] = useState(() => readCartItems());
   const [wishlistPending, setWishlistPending] = useState(false);
   const descriptionRef = useRef(null);
+  const metaViewContentLoggedIdRef = useRef(null);
 
   useEffect(() => {
     let active = true;
@@ -1468,6 +1470,22 @@ const ProductDetail = ({ categoryId, productId, onBack }) => {
     displayAttributes = [],
     selectionAttributes = [],
   } = attributeState;
+
+  // Log Meta ViewContent once per product view (StrictMode re-runs and cache -> network refreshes are ignored).
+  useEffect(() => {
+    const viewedProductId = pickText(product?.id);
+    const viewedProductName = pickText(product?.product_name);
+    if (!viewedProductId || !viewedProductName) return;
+    if (metaViewContentLoggedIdRef.current === viewedProductId) return;
+
+    metaViewContentLoggedIdRef.current = viewedProductId;
+    logMetaViewContent({
+      contentId: viewedProductId,
+      contentType: 'product',
+      contentName: viewedProductName,
+    });
+  }, [product?.id, product?.product_name]);
+
   const visibleBreadcrumbPath = path.slice(-2);
   const activeImage = images[activeImg] || images[0] || null;
   const activeImageUrl = pickText(activeImage?.image_url);
