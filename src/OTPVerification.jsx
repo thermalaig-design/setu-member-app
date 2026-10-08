@@ -318,16 +318,6 @@ function OTPVerification() {
       return false;
     }
 
-    await logUserSessionEvent({
-      user: enrichedUser,
-      actionType: 'login',
-      extra: {
-        source: 'otp',
-        login_method: loginMethod,
-        trust_id: normalizeText(TRUST_ID || authDefaultTrust.id) || null
-      }
-    });
-
     const selectedMemberships = Array.isArray(enrichedUser?.hospital_memberships) ? enrichedUser.hospital_memberships : [];
     const baseTrustId = normalizeText(TRUST_ID || authDefaultTrust.id);
     const baseMembership = selectedMemberships.find((membership) => normalizeText(membership?.trust_id) === baseTrustId) || null;
@@ -347,6 +337,17 @@ function OTPVerification() {
       baseMembershipTrustId: normalizeText(baseMembership?.trust_id),
       fallbackMembershipTrustId: normalizeText(fallbackMembership?.trust_id)
     });
+
+    await logUserSessionEvent({
+      user: enrichedUser,
+      actionType: 'login',
+      extra: {
+        source: 'otp',
+        login_method: loginMethod,
+        trust_id: selectedTrustId || null
+      }
+    });
+
     const selectedTrustName = isTenantAuth
       ? (tenantTrustName || normalizeText(localStorage.getItem('selected_trust_name')))
       : normalizeText(
