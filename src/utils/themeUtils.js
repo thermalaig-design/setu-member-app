@@ -1,3 +1,4 @@
+import { ensureContrast, getContrastRatio } from './colorUtils';
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
 
 const isPlainObject = (value) =>
@@ -915,6 +916,21 @@ export const applyThemeCssVariables = (theme, root = document.documentElement) =
   root.style.setProperty('--page-bg', pageBackground);
   root.style.setProperty('--navbar-bg', navbarBg);
   root.style.setProperty('--navbar-text', navbarTheme.textColor);
+  // Text drawn directly on the page background (not on the navbar). Starts from the
+  // navbar text colour to keep the theme's look, but is corrected for the page background.
+  const pageBgStops = typeof pageBg === 'string'
+    ? []
+    : [pageBg.bg_color_1, String(pageBg.gradient_type || 'none').toLowerCase() !== 'none' ? pageBg.bg_color_2 : null].filter(Boolean);
+  // --page-text-color: names/labels (themed, strong contrast).
+  // --page-strong-color: emphasis such as prices, max-contrast neutral so it always stands out.
+  const pageIsLight = pageBgStops.length > 0
+    && pageBgStops.every((bg) => (getContrastRatio(bg, '#000000') ?? 0) >= (getContrastRatio(bg, '#ffffff') ?? 0));
+  root.style.setProperty('--page-text-color', pageBgStops.reduce((acc, bg) => ensureContrast(acc, bg, 7), navbarTheme.textColor));
+  // Solid navbar colour usable as a border/accent on the page background.
+  root.style.setProperty('--navbar-solid', pageBgStops.reduce((acc, bg) => ensureContrast(acc, bg, 3), navbarTheme.navbarConfig?.bg_color_1 || secondary));
+  // Quick-actions text colour, corrected so it stays readable on the page background (used for prices).
+  root.style.setProperty('--page-price-color', pageBgStops.reduce((acc, bg) => ensureContrast(acc, bg, 4.5), quickActionsTheme.textColor));
+  root.style.setProperty('--page-strong-color', pageBgStops.length === 0 ? 'var(--heading-color)' : (pageIsLight ? '#0B1220' : '#FFFFFF'));
   root.style.setProperty('--navbar-blur', navbarTheme.blurPx);
   root.style.setProperty('--navbar-opacity', navbarTheme.opacity);
   root.style.setProperty('--navbar-accent', `linear-gradient(90deg, ${secondary}, ${primary}, ${secondary})`);
@@ -939,8 +955,18 @@ export const applyThemeCssVariables = (theme, root = document.documentElement) =
   root.style.setProperty('--quick-actions-bg', quickActionsTheme.backgroundStyle);
   root.style.setProperty('--quick-actions-text', quickActionsTheme.textColor);
   root.style.setProperty('--quick-actions-icon-bg', quickActionsTheme.iconBgColor);
+  // Icon glyphs are tinted with the tile's bg_color_1, nudged only if it wouldn't show on the icon box.
+  root.style.setProperty('--quick-actions-icon-color', ensureContrast(quickActionsTheme.quickActionsConfig.bg_color_1, quickActionsTheme.iconBgColor, 3));
   root.style.setProperty('--app-button-bg', appButtonsTheme.backgroundStyle);
-  root.style.setProperty('--app-button-text', appButtonsTheme.textColor);
+  // Button text/icon sit on the app-button background (both gradient stops), so keep them readable.
+  const appButtonBgStops = [
+    appButtonsTheme.appButtonsConfig.bg_color_1,
+    String(appButtonsTheme.appButtonsConfig.gradient_type || 'none').toLowerCase() !== 'none'
+      ? appButtonsTheme.appButtonsConfig.bg_color_2
+      : null
+  ].filter(Boolean);
+  const readableOnAppButton = (color) => appButtonBgStops.reduce((acc, bg) => ensureContrast(acc, bg, 3), color);
+  root.style.setProperty('--app-button-text', readableOnAppButton(appButtonsTheme.textColor));
   root.style.setProperty('--app-button-icon', appButtonsTheme.iconColor);
   const advertisementBgBase = advertisement.bg_color_1 || advertisement.bg_color || accent;
   const advertisementBg2 = advertisement.bg_color_2 || advertisementBgBase;
@@ -956,14 +982,19 @@ export const applyThemeCssVariables = (theme, root = document.documentElement) =
     : withOpacity(advertisementBgBase, advertisement.bg_opacity ?? 1);
 
   root.style.setProperty('--advertisement-bg', advertisementBgStyle);
-  root.style.setProperty('--advertisement-text', advertisement.text_color || secondary);
-  root.style.setProperty('--advertisement-title', advertisement.title_color || advertisement.text_color || secondary);
-  root.style.setProperty('--advertisement-subtitle', advertisement.subtitle_color || advertisement.text_color || secondary);
-  root.style.setProperty('--advertisement-description', advertisement.description_color || advertisement.text_color || secondary);
-  root.style.setProperty('--advertisement-badge-bg', advertisement.badge_bg_color || accentBg);
-  root.style.setProperty('--advertisement-badge-text', advertisement.badge_text_color || primary);
+  // Cards (profile, details, etc.) draw text on --advertisement-card-bg. Admin-picked
+  // text colours can sit in the same hue as that card, so enforce a readable minimum.
+  const adCardBg = advertisement.card_bg_color || '#FFFFFF';
+  const adBadgeBg = advertisement.badge_bg_color || accentBg;
+  const adText = ensureContrast(advertisement.text_color || secondary, adCardBg, 4.5);
+  root.style.setProperty('--advertisement-text', adText);
+  root.style.setProperty('--advertisement-title', ensureContrast(advertisement.title_color || advertisement.text_color || secondary, adCardBg, 4.5));
+  root.style.setProperty('--advertisement-subtitle', ensureContrast(advertisement.subtitle_color || advertisement.text_color || secondary, adCardBg, 3.5));
+  root.style.setProperty('--advertisement-description', ensureContrast(advertisement.description_color || advertisement.text_color || secondary, adCardBg, 4.5));
+  root.style.setProperty('--advertisement-badge-bg', adBadgeBg);
+  root.style.setProperty('--advertisement-badge-text', ensureContrast(advertisement.badge_text_color || primary, adBadgeBg, 4.5));
   root.style.setProperty('--advertisement-badge-dot', advertisement.badge_dot_color || primary);
-  root.style.setProperty('--advertisement-card-bg', advertisement.card_bg_color || '#FFFFFF');
+  root.style.setProperty('--advertisement-card-bg', adCardBg);
   root.style.setProperty('--advertisement-card-border', advertisement.card_border_color || advertisement.border_color_1 || primary);
   root.style.setProperty('--advertisement-card-shadow', advertisement.card_shadow_color || secondary);
 

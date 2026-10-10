@@ -379,13 +379,24 @@ const QuickActionIcon = memo(({ src, alt }) => {
     return <HelpCircle className="h-[18px] w-[18px]" style={{ color: 'var(--body-text-color)' }} />;
   }
 
+  // The image is used as a mask so the glyph takes the theme colour; the <img>
+  // stays (invisible) only to detect load failures and give the mask its alt text.
+  const maskValue = `url("${resolvedSrc}") center / contain no-repeat`;
   return (
-    <img
-      src={resolvedSrc}
-      alt={alt}
-      className="h-[18px] w-[18px] object-contain"
-      onError={() => setFailedSrc(resolvedSrc)}
-    />
+    <span
+      role="img"
+      aria-label={alt}
+      className="relative inline-block h-[18px] w-[18px]"
+      style={{ backgroundColor: 'var(--quick-actions-icon-color)', WebkitMask: maskValue, mask: maskValue }}
+    >
+      <img
+        src={resolvedSrc}
+        alt=""
+        aria-hidden="true"
+        className="absolute inset-0 h-full w-full opacity-0"
+        onError={() => setFailedSrc(resolvedSrc)}
+      />
+    </span>
   );
 }, (prevProps, nextProps) => prevProps.src === nextProps.src && prevProps.alt === nextProps.alt);
 
@@ -2906,7 +2917,35 @@ const Home = ({ onNavigate, onLogout }) => {
                 boxShadow: 'none',
               }}
             >
-              <Plus className="h-[22px] w-[22px]" style={{ color: navbarTextColor }} />
+              <svg
+                className="plus-spark-icon h-[22px] w-[22px]"
+                viewBox="0 0 24 24"
+                fill="none"
+                strokeWidth="2"
+                strokeLinecap="round"
+                aria-hidden="true"
+                style={{ color: navbarTextColor }}
+              >
+                <path d="M5 12h14M12 5v14" stroke="currentColor" opacity="0.4" />
+                <g className="plus-spark-arms" stroke="currentColor">
+                  <path pathLength="100" d="M12 12H5" />
+                  <path pathLength="100" d="M12 12h7" />
+                  <path pathLength="100" d="M12 12V5" />
+                  <path pathLength="100" d="M12 12v7" />
+                </g>
+              </svg>
+              <style>{`
+                .plus-spark-icon { overflow: visible; }
+                .plus-spark-arms { filter: drop-shadow(0 0 2px currentColor); }
+                .plus-spark-arms path { stroke-dasharray: 100 200; stroke-dashoffset: 100; animation: plus-spark-run 2s ease-in-out infinite; }
+                @keyframes plus-spark-run {
+                  0% { stroke-dashoffset: 100; }
+                  45% { stroke-dashoffset: 0; }
+                  55% { stroke-dashoffset: 0; }
+                  100% { stroke-dashoffset: -100; }
+                }
+                @media (prefers-reduced-motion: reduce) { .plus-spark-arms path { animation: none; stroke-dashoffset: 0; } }
+              `}</style>
             </button>
             {ff('feature_notifications') ? (
               <div className="relative">

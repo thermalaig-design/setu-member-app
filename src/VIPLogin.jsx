@@ -362,6 +362,7 @@ function VIPLogin({ onNavigate, onLogout }) {
     });
     localStorage.removeItem('isLoggedIn');
     localStorage.removeItem('user');
+    localStorage.removeItem('setu_session_token');
     clearLoginTermsPromptPending();
     sessionStorage.clear();
     setShowTermsModal(false);

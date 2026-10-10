@@ -203,18 +203,19 @@ function Swatch({ paletteIdx = 0, iconName = 'Shirt', size = '100%', radius = 0 
 
 const Price = ({ price, size = 'md' }) => {
   const theme = useAppTheme();
+  const primaryColor = theme?.primaryColor || '--brand-navy';
   const navbarTheme = getNavbarThemeStyles(theme);
   const navbarTextColor = navbarTheme?.textColor || 'var(--navbar-text)';
   if (!price) return null;
   const big = size === 'lg';
   return (
     <div className="ws-price-row">
-      <span style={{ fontSize: big ? 20 : 14, fontWeight: 600, color: `${navbarTextColor}` }}>
+      <span style={{ fontSize: big ? 20 : 14, fontWeight: 700, color: 'var(--page-price-color, ' + primaryColor + ')' }}>
         ₹{price.price_after_discount.toLocaleString('en-IN')}
       </span>
       {price.discount_pct > 0 ? (
         <>
-          <span style={{ fontSize: big ? 14 : 12, color: T.inkFaint, textDecoration: 'line-through' }}>
+          <span style={{ fontSize: big ? 14 : 12, color: 'color-mix(in srgb, var(--page-text-color, var(--body-text-color)) 62%, transparent)', textDecoration: 'line-through' }}>
             ₹{price.mrp.toLocaleString('en-IN')}
           </span>
           <span style={{ fontSize: big ? 13 : 11, color: T.clay, fontWeight: 600 }}>
@@ -1363,6 +1364,7 @@ const ZoomableImageModal = ({ imageUrl, imageAlt, onClose }) => {
 const ProductDetail = ({ categoryId, productId, onBack }) => {
   const navigate = useNavigate();
   const theme = useAppTheme();
+  const primaryColor = theme?.primary || 'var(--brand-red)';
   const navbarTheme = getNavbarThemeStyles(theme);
   const navbarTextColor = navbarTheme?.textColor || 'var(--navbar-text)';
   const heroDragStartXRef = useRef(null);
@@ -2417,6 +2419,7 @@ const ProductDetail = ({ categoryId, productId, onBack }) => {
           gap: 6px;
           flex-wrap: wrap;
         }
+        
 
         .ws-pdp-hero {
           width: 100%;
@@ -2533,7 +2536,7 @@ const ProductDetail = ({ categoryId, productId, onBack }) => {
           font-family: 'Playfair Display', serif;
           font-size: 21px;
           font-weight: 600;
-          color: ${navbarTextColor};
+          color: var(--page-text-color, ${navbarTextColor});
           line-height: 1.25;
         }
 
@@ -2546,6 +2549,7 @@ const ProductDetail = ({ categoryId, productId, onBack }) => {
         .ws-pdp-price-block {
           margin-top: 16px;
           padding-bottom: 16px;
+          color: ${primaryColor};
           border-bottom: 1px solid ${T.line};
         }
 
@@ -2633,9 +2637,9 @@ const ProductDetail = ({ categoryId, productId, onBack }) => {
         }
 
         .ws-spec-tab--active {
-          border: 2px solid ${THEME.buttonBg};
-          color: ${THEME.buttonBg};
-          box-shadow: 0 6px 14px color-mix(in srgb, ${THEME.buttonBg} 12%, transparent);
+          border: 1px solid var(--page-price-color, ${THEME.buttonBg});
+          color: var(--page-price-color, ${THEME.buttonBg});
+          box-shadow: 0 6px 14px color-mix(in srgb, var(--page-price-color, ${THEME.buttonBg}) 14%, transparent);
         }
 
         .ws-spec-table {
@@ -2651,7 +2655,7 @@ const ProductDetail = ({ categoryId, productId, onBack }) => {
         }
 
         .ws-spec-key {
-          color: ${THEME.buttonBg};
+          color: var(--page-text-color, ${THEME.text});
           font-size: 13px;
           font-weight: 800;
           line-height: 1.35;
@@ -2659,7 +2663,7 @@ const ProductDetail = ({ categoryId, productId, onBack }) => {
         }
 
         .ws-spec-value {
-          color: color-mix(in srgb, ${THEME.surface} 78%, ${THEME.text} 22%);
+          color: color-mix(in srgb, var(--page-text-color, ${THEME.text}) 82%, transparent);
           font-size: 13px;
           font-weight: 600;
           line-height: 1.45;
@@ -2669,7 +2673,7 @@ const ProductDetail = ({ categoryId, productId, onBack }) => {
 
         .ws-description-text {
           margin: 0;
-          color: ${T.inkFaint};
+          color: color-mix(in srgb, var(--page-text-color, ${THEME.text}) 78%, transparent);
           font-size: 13px;
           line-height: 1.6;
           font-weight: 500;

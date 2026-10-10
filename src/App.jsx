@@ -53,6 +53,7 @@ import NominationDetails from './NominationDetails';
 import AddCommunity from './AddCommunity';
 import TrustIdCard from './TrustIdCard';
 import AppVersionUpdatePrompt from './components/AppVersionUpdatePrompt';
+import PageTrackingListener from './components/PageTrackingListener';
 import TenantLanding from './TenantLanding';
 import { useTenant, getTenantSlugFromPath } from './context/TenantContext';
 import { getCurrentNotificationContext, matchesNotificationForContext } from './services/notificationAudience';
@@ -474,6 +475,7 @@ const HospitalTrusteeApp = () => {
     const resetTrust = resolveDefaultThemeTrust();
     localStorage.removeItem('isLoggedIn');
     localStorage.removeItem('user');
+    localStorage.removeItem('setu_session_token');
     localStorage.removeItem(LAST_VISITED_ROUTE_KEY);
     clearLoginTermsPromptPending();
     if (resetTrust.id) {
@@ -1133,6 +1135,7 @@ const HospitalTrusteeApp = () => {
       }}
     >
       <AppVersionUpdatePrompt trustId={resolvedThemeTrustId} />
+      <PageTrackingListener />
       <Routes>
         <Route
           path="/login"

@@ -453,7 +453,7 @@ export function OrderHistoryContent({ variant = 'page' } = {}) {
         <section className="order-history-section">
           <div className="order-history-section-head">
             <div>
-              <h3 className="order-history-section-title" style={{ color: navbarTextColor }}>
+              <h3 className="order-history-section-title" style={{ color: 'var(--page-text-color)' }}>
                 Recent Orders
               </h3>
               <p className="order-history-section-copy">
@@ -545,14 +545,14 @@ export function OrderHistoryContent({ variant = 'page' } = {}) {
                     <div className="order-history-card-top">
                       <div className="min-w-0">
                         {hasProductSummary ? (
-                          <p className="order-history-card-product" style={{ color: navbarTextColor }}>
+                          <p className="order-history-card-product" style={{ color: 'var(--body-text-color)' }}>
                             {productSummary}
                             {remainingCount > 0 ? ` +${remainingCount} more` : ''}
                           </p>
                         ) : null}
                         <p
                           className={hasProductSummary ? 'order-history-card-id order-history-card-id--secondary' : 'order-history-card-id'}
-                          style={hasProductSummary ? undefined : { color: navbarTextColor }}
+                          style={hasProductSummary ? undefined : { color: 'var(--body-text-color)' }}
                         >
                           {hasProductSummary ? `Order #${order.id}` : order.id}
                         </p>
@@ -702,7 +702,7 @@ export function OrderHistoryContent({ variant = 'page' } = {}) {
           font-weight: 800;
           letter-spacing: 0.12em;
           text-transform: uppercase;
-          color: color-mix(in srgb, var(--surface-color) 52%, ${navbarTextColor} 100%);
+          color: color-mix(in srgb, var(--surface-color) 52%, var(--body-text-color) 100%);
         }
         .order-history-summary-value {
           font-size: 18px;
@@ -1004,7 +1004,7 @@ export function OrderHistoryContent({ variant = 'page' } = {}) {
           font-weight: 800;
           letter-spacing: 0.12em;
           text-transform: uppercase;
-          color: color-mix(in srgb, var(--surface-color) 52%, ${navbarTextColor} 100%);
+          color: color-mix(in srgb, var(--surface-color) 52%, var(--body-text-color) 100%);
         }
         .order-history-meta-value {
           display: block;

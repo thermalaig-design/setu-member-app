@@ -734,8 +734,8 @@ const Profile = ({ onNavigate, onProfileUpdate }) => {
                 </div>
                 <button onClick={() => document.getElementById('photo-upload').click()}
                   className="absolute -bottom-1 -right-1 p-2 rounded-full shadow-sm active:scale-95 transition-all"
-                  style={{ background: 'var(--surface-color)', border: '1px solid color-mix(in srgb, var(--brand-navy) 14%, transparent)' }}>
-                  <Pencil className="h-3.5 w-3.5" style={{ color: 'var(--app-button-icon)' }} />
+                  style={{ background: 'var(--app-button-bg)', border: '1px solid color-mix(in srgb, var(--app-button-text) 24%, transparent)' }}>
+                  <Pencil className="h-3.5 w-3.5" style={{ color: 'var(--app-button-text)' }} />
                 </button>
                 <input id="photo-upload" type="file" accept="image/*" className="hidden" onChange={handlePhotoChange} />
               </div>

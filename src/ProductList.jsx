@@ -1095,12 +1095,12 @@ const Price = ({ price, size = 'md' }) => {
 
   return (
     <div className="ws-price-row">
-      <span style={{ fontSize: big ? 20 : 14, fontWeight: 600, color: 'var(--surface-color)' }}>
+      <span style={{ fontSize: big ? 20 : 14, fontWeight: 700, color: 'var(--page-price-color, var(--body-text-color))' }}>
         ₹{Number.isFinite(salePrice) ? salePrice.toLocaleString('en-IN') : ''}
       </span>
       {discountPct > 0 ? (
         <>
-          <span style={{ fontSize: big ? 14 : 12, color: T.inkFaint, textDecoration: 'line-through' }}>
+          <span style={{ fontSize: big ? 14 : 12, color: 'color-mix(in srgb, var(--page-text-color, var(--body-text-color)) 62%, transparent)', textDecoration: 'line-through' }}>
             ₹{Number.isFinite(mrp) ? mrp.toLocaleString('en-IN') : ''}
           </span>
           <span style={{ fontSize: big ? 13 : 11, color: T.clay, fontWeight: 600 }}>
@@ -1676,14 +1676,14 @@ const ProductList = ({ categoryId, onBack, onOpenProduct }) => {
         .ws-circle-row { display: flex; gap: 22px; padding: 20px 18px 6px; overflow-x: auto; }
         .ws-circle-item { background: none; border: none; display: flex; flex-direction: column; align-items: center; gap: 8px; cursor: pointer; flex-shrink: 0; }
         .ws-circle-avatar { width: 84px; height: 84px; border-radius: 999px; overflow: hidden; }
-        .ws-circle-label { font-size: 13px; color: ${navbarTextColor}; }
+        .ws-circle-label { font-size: 13px; color: var(--page-text-color, ${navbarTextColor}); }
 
         .ws-section { padding: 22px 18px 4px; }
         .ws-section-title { font-family: 'Playfair Display', serif; font-size: 18px; font-weight: 600; margin-bottom: 12px; }
         .ws-grid { display: grid; gap: 10px; }
         .ws-tile { background: none; border: none; padding: 0; cursor: pointer; display: flex; flex-direction: column; gap: 8px; text-align: left; }
         .ws-tile-img { width: 100%; overflow: hidden; }
-        .ws-tile-label { font-size: 13px; color: ${navbarTextColor}; line-height: 1.3; }
+        .ws-tile-label { font-size: 13px; color: var(--page-text-color, ${navbarTextColor}); line-height: 1.3; }
 
         .ws-brand-row { display: flex; gap: 16px; overflow-x: auto; padding-bottom: 4px; }
         .ws-brand-item { flex-shrink: 0; }
@@ -1711,7 +1711,7 @@ const ProductList = ({ categoryId, onBack, onOpenProduct }) => {
           border: 1px solid ${T.line};
           border-radius: 999px;
           background: ${T.paper};
-          color: ${navbarTextColor};
+          color: var(--body-text-color);
         }
         .ws-plp-search input {
           flex: 1;
@@ -1720,7 +1720,7 @@ const ProductList = ({ categoryId, onBack, onOpenProduct }) => {
           outline: none;
           background: transparent;
           font: inherit;
-          color: ${navbarTextColor};
+          color: var(--body-text-color);
         }
         .ws-plp-search input::placeholder { color: ${T.inkSoft}; }
         .ws-plp-search-clear {
@@ -1923,7 +1923,7 @@ const ProductList = ({ categoryId, onBack, onOpenProduct }) => {
           cursor: pointer;
           color: inherit;
         }
-        .ws-plp-name { font-size: 15px; color: ${navbarTextColor}; line-height: 1.3; }
+        .ws-plp-name { font-size: 15px; font-weight: 500; color: var(--page-text-color, ${navbarTextColor}); line-height: 1.3; }
         .ws-plp-code { margin-top: 2px; font-size: 11px; color: ${T.inkSoft}; line-height: 1.25; }
         .ws-price-row { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; }
         .ws-sheet-overlay { position: fixed; inset: 0; background: rgba(28,27,25,0.4); z-index: 20; display: flex; align-items: flex-end; max-width: 430px; margin: 0 auto; }
@@ -1946,7 +1946,7 @@ const ProductList = ({ categoryId, onBack, onOpenProduct }) => {
         .ws-radio { width: 16px; height: 16px; border-radius: 999px; border: 1.5px solid ${T.inkFaint}; display: inline-block; }
         .ws-radio-on { border-color: currentColor; background: radial-gradient(circle, currentColor 0 5px, transparent 6px); }
 
-        .ws-btn-primary { background: ${navbarTextColor}; color: white; border: none; border-radius: 4px; padding: 13px; font-size: 14px; font-weight: 600; cursor: pointer; flex: 1; display: flex; align-items: center; justify-content: center; }
+        .ws-btn-primary { background: var(--app-button-bg); color: var(--app-button-text); border: none; border-radius: 4px; padding: 13px; font-size: 14px; font-weight: 600; cursor: pointer; flex: 1; display: flex; align-items: center; justify-content: center; }
         .ws-btn-outline { background: ${T.bg}; color: ${T.ink}; border: 1px solid ${T.ink}; border-radius: 4px; padding: 13px; font-size: 14px; font-weight: 600; cursor: pointer; flex: 1; }
 
         .ws-pdp-hero { width: 100%; aspect-ratio: 4/5; }

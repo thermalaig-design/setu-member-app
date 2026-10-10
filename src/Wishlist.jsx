@@ -1661,7 +1661,7 @@ function Wishlist() {
         .wishlist-qty-btn {
           border: 0;
           background: color-mix(in srgb, var(--brand-navy) 4%, ${T.surface});
-          color: ${navbarTextColor};
+          color: var(--body-text-color);
           font-size: 18px;
           font-weight: 700;
           cursor: pointer;
