@@ -147,3 +147,42 @@ export const colorToHex = (color, fallback = '#4B5563') => {
   return `#${toHex(parsed.r)}${toHex(parsed.g)}${toHex(parsed.b)}`;
 };
 
+
+const relativeLuminance = ({ r, g, b }) => {
+  const [lr, lg, lb] = [r, g, b].map((channel) => {
+    const c = clamp(channel, 0, 255) / 255;
+    return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  });
+  return 0.2126 * lr + 0.7152 * lg + 0.0722 * lb;
+};
+
+export const getContrastRatio = (colorA, colorB) => {
+  const a = parseColorToRgba(colorA);
+  const b = parseColorToRgba(colorB);
+  if (!a || !b) return null;
+  const [light, dark] = [relativeLuminance(a), relativeLuminance(b)].sort((x, y) => y - x);
+  return (light + 0.05) / (dark + 0.05);
+};
+
+// Returns `fg` unchanged when it already reads on `bg`; otherwise darkens or
+// lightens it (keeping its hue as long as possible) until `minRatio` is met.
+// Colours that can't be parsed or are translucent are returned untouched.
+export const ensureContrast = (fg, bg, minRatio = 4.5) => {
+  const fgRgb = parseColorToRgba(fg);
+  const bgRgb = parseColorToRgba(bg);
+  if (!fgRgb || !bgRgb || bgRgb.a < 1 || fgRgb.a < 1) return fg;
+  if (getContrastRatio(fg, bg) >= minRatio) return fg;
+
+  const target = relativeLuminance(bgRgb) > 0.5 ? { r: 0, g: 0, b: 0 } : { r: 255, g: 255, b: 255 };
+  const toHex = (c) => `#${[c.r, c.g, c.b].map((v) => clamp(Math.round(v), 0, 255).toString(16).padStart(2, '0')).join('')}`;
+  for (let step = 1; step <= 10; step += 1) {
+    const t = step / 10;
+    const mixed = toHex({
+      r: fgRgb.r + (target.r - fgRgb.r) * t,
+      g: fgRgb.g + (target.g - fgRgb.g) * t,
+      b: fgRgb.b + (target.b - fgRgb.b) * t
+    });
+    if (getContrastRatio(mixed, bg) >= minRatio) return mixed;
+  }
+  return toHex(target);
+};

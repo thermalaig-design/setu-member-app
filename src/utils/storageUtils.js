@@ -176,6 +176,7 @@ export const clearTenantUserSession = () => {
   try {
     localStorage.removeItem(USER_STORAGE_KEY);
     localStorage.removeItem(LOGGED_IN_STORAGE_KEY);
+    localStorage.removeItem('setu_session_token');
     localStorage.removeItem('selected_trust_id');
     localStorage.removeItem('selected_trust_name');
     localStorage.removeItem('last_selected_trust_id');

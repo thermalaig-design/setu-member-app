@@ -1687,7 +1687,7 @@ function Cart() {
         .cart-qty-btn {
           border: 0;
           background:color-mix(in srgb, var(--brand-navy) 4%, ${T.surface});
-          color: ${navbarTextColor};
+          color: var(--body-text-color);
           font-size: 18px;
           font-weight: 700;
           cursor: pointer;
@@ -1705,7 +1705,7 @@ function Cart() {
           align-items: center;
           justify-content: center;
           min-width: 0;
-          color: ${navbarTextColor};
+          color: var(--body-text-color);
           font-size: 14px;
           font-weight: 700;
           letter-spacing: 0.02em;

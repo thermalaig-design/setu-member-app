@@ -343,6 +343,8 @@ export function CategoriesProductsContent({
   const theme = useAppTheme();
   const navbarTheme = getNavbarThemeStyles(theme);
   const navbarTextColor = navbarTheme?.textColor || 'var(--navbar-text)';
+  
+  const primaryColor = theme?.primary || 'var(--brand-red)';
 
   const [rpcResult, setRpcResult] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -716,7 +718,7 @@ export function CategoriesProductsContent({
 
         .ws-circle-label {
           font-size: 13px;
-          color: ${navbarTextColor};
+          color: var(--page-text-color, ${navbarTextColor});
           text-align: center;
           line-height: 1.2;
           max-width: 92px;
@@ -730,7 +732,7 @@ export function CategoriesProductsContent({
           font-size: 16px;
           font-weight: 700;
           margin-bottom: 12px;
-          color: ${navbarTextColor};
+          color: var(--page-text-color, ${navbarTextColor});
           cursor: pointer;
           outline: none;
           width: max-content;
@@ -767,7 +769,7 @@ export function CategoriesProductsContent({
 
         .ws-tile-label {
           font-size: 13px;
-          color: ${navbarTextColor};
+          color: var(--page-text-color, ${navbarTextColor});
           line-height: 1.25;
         }
 

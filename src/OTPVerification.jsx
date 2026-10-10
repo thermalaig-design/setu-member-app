@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useBackNavigation } from './hooks';
-import { verifyOTP } from './services/authService';
+import { verifyOTP, completeSetuLogin } from './services/authService';
 import { fetchDirectoryData } from './services/directoryService';
 import { fetchActiveTrustsByMobile, fetchMemberTrustMemberships, fetchTrustById, fetchTrustByAppSlug } from './services/trustService';
 import { logUserSessionEvent } from './services/sessionAuditService';
@@ -116,6 +116,7 @@ function OTPVerification() {
     : (user ? [user] : []);
   const [otpVerified, setOtpVerified] = useState(false);
   const [verifiedLoginMethod, setVerifiedLoginMethod] = useState('otp');
+  const [loginProof, setLoginProof] = useState('');
   const [selectedAccountId, setSelectedAccountId] = useState(accountCandidates[0]?.members_id || accountCandidates[0]?.id || '');
   const phoneNumber = location.state?.phoneNumber || '';
   const isOtpFlowAllowed = sessionStorage.getItem(OTP_FLOW_KEY) === 'normal';
@@ -158,7 +159,9 @@ function OTPVerification() {
     return accountCandidates.find((account) => String(account?.members_id || account?.id || '') === selectedId) || accountCandidates[0];
   };
 
-  const completeLogin = async (selectedUser, loginMethod = 'otp') => {
+  // `proof` is passed explicitly on the single-account path, where the
+  // loginProof state set a moment earlier has not re-rendered yet.
+  const completeLogin = async (selectedUser, loginMethod = 'otp', proof = loginProof) => {
     const allAccountMemberIds = Array.from(new Set(
       (Array.isArray(accountCandidates) ? accountCandidates : [])
         .map((account) => account?.members_id || account?.id || null)
@@ -338,6 +341,28 @@ function OTPVerification() {
       fallbackMembershipTrustId: normalizeText(fallbackMembership?.trust_id)
     });
 
+    // Server-verified session token (used later for User Panel auto-login).
+    // Never fabricated client-side: on failure the SETU login proceeds without
+    // it and the User Panel falls back to its normal login page.
+    try { localStorage.removeItem('setu_session_token'); } catch { /* ignore */ }
+    const sessionMemberId = normalizeText(
+      selectedUser?.members_id || selectedUser?.member_id || selectedUser?.id
+    );
+    if (proof && sessionMemberId) {
+      try {
+        const sessionResult = await completeSetuLogin({
+          loginProof: proof,
+          memberId: sessionMemberId,
+          trustId: selectedTrustId || null
+        });
+        if (sessionResult?.setuSessionToken) {
+          localStorage.setItem('setu_session_token', sessionResult.setuSessionToken);
+        }
+      } catch (err) {
+        console.warn('[OTP] complete-login failed:', err?.message || err);
+      }
+    }
+
     await logUserSessionEvent({
       user: enrichedUser,
       actionType: 'login',
@@ -408,6 +433,7 @@ function OTPVerification() {
         return;
       }
       setVerifiedLoginMethod(result?.loginMethod === 'secret_code' ? 'secret_code' : 'otp');
+      setLoginProof(result.loginProof || '');
 
       if (!user) {
         setError('User data not found. Please go back and try again.');
@@ -429,7 +455,11 @@ function OTPVerification() {
         return;
       }
 
-      await completeLogin(accountCandidates[0] || user, result?.loginMethod === 'secret_code' ? 'secret_code' : 'otp');
+      await completeLogin(
+        accountCandidates[0] || user,
+        result?.loginMethod === 'secret_code' ? 'secret_code' : 'otp',
+        result.loginProof || ''
+      );
     } catch (err) {
       console.error('[OTP] Verify error:', err);
       setError(

@@ -178,7 +178,8 @@ const Sidebar = ({ isOpen, onClose, onNavigate, currentPage, onLogout }) => {
   const secondary = theme.secondary || 'var(--brand-navy)';
   const accent = theme.accent || 'var(--app-accent)';
   const sidebarTextColor = getThemeToken(theme, 'sidebar.text_color', 'var(--sidebar-text)');
-  const sidebarActiveTextColor = getThemeToken(theme, 'sidebar.active_text_color', primary);
+  const sidebarButtonColor = getThemeToken(theme, 'sidebar.button_color', primary);
+  const sidebarActiveTextColor = getThemeToken(theme, 'sidebar.active_text_color', sidebarButtonColor);
   const sidebarMutedTextColor = getThemeToken(
     theme,
     'sidebar.muted_text_color',
@@ -1138,6 +1139,7 @@ const Sidebar = ({ isOpen, onClose, onNavigate, currentPage, onLogout }) => {
               });
               localStorage.removeItem('user');
               localStorage.removeItem('isLoggedIn');
+              localStorage.removeItem('setu_session_token');
               localStorage.removeItem('lastVisitedRoute');
               localStorage.removeItem('selected_trust_id');
               localStorage.removeItem('selected_trust_name');
