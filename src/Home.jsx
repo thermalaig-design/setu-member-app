@@ -2918,16 +2918,16 @@ const Home = ({ onNavigate, onLogout }) => {
               }}
             >
               <svg
-                className="plus-spark-icon h-[22px] w-[22px]"
+                className="plus-spark-icon h-7 w-7"
                 viewBox="0 0 24 24"
                 fill="none"
-                strokeWidth="2"
+                strokeWidth="2.2"
                 strokeLinecap="round"
                 aria-hidden="true"
                 style={{ color: navbarTextColor }}
               >
-                <path d="M5 12h14M12 5v14" stroke="currentColor" opacity="0.4" />
-                <g className="plus-spark-arms" stroke="currentColor">
+                <path d="M5 12h14M12 5v14" stroke="currentColor" />
+                <g className="plus-spark-arms">
                   <path pathLength="100" d="M12 12H5" />
                   <path pathLength="100" d="M12 12h7" />
                   <path pathLength="100" d="M12 12V5" />
@@ -2936,15 +2936,16 @@ const Home = ({ onNavigate, onLogout }) => {
               </svg>
               <style>{`
                 .plus-spark-icon { overflow: visible; }
-                .plus-spark-arms { filter: drop-shadow(0 0 2px currentColor); }
-                .plus-spark-arms path { stroke-dasharray: 100 200; stroke-dashoffset: 100; animation: plus-spark-run 2s ease-in-out infinite; }
+                .plus-spark-arms { stroke: color-mix(in srgb, currentColor 30%, #ffffff); stroke-width: 2.6; filter: drop-shadow(0 0 2px currentColor) drop-shadow(0 0 4px currentColor); }
+                .plus-spark-arms path { stroke-dasharray: 100 200; stroke-dashoffset: 100; opacity: 0; animation: plus-spark-run 2.2s ease-in-out infinite; }
                 @keyframes plus-spark-run {
-                  0% { stroke-dashoffset: 100; }
-                  45% { stroke-dashoffset: 0; }
-                  55% { stroke-dashoffset: 0; }
-                  100% { stroke-dashoffset: -100; }
+                  0% { stroke-dashoffset: 100; opacity: 0; }
+                  8% { opacity: 1; }
+                  45% { stroke-dashoffset: 0; opacity: 1; }
+                  85% { stroke-dashoffset: -100; opacity: 0.8; }
+                  100% { stroke-dashoffset: -100; opacity: 0; }
                 }
-                @media (prefers-reduced-motion: reduce) { .plus-spark-arms path { animation: none; stroke-dashoffset: 0; } }
+                @media (prefers-reduced-motion: reduce) { .plus-spark-arms { display: none; } }
               `}</style>
             </button>
             {ff('feature_notifications') ? (
