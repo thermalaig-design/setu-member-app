@@ -454,7 +454,7 @@ export function CategoriesProductsContent({
       } catch (loadError) {
         if (!active || controller.signal.aborted) return;
         if (!hasCachedPayload) {
-          if (loadError?.name !== 'AbortError') {
+          if (loadError?.name !== 'AbortError' && loadError?.code !== 'EMPTY_CATALOG') {
             setError(loadError?.message || 'Failed to load categories');
           }
           setRpcResult(null);
