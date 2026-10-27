@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react';
+import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Plus, X, Menu, Home as HomeIcon,
@@ -10,6 +10,7 @@ import { useAppTheme } from './context/ThemeContext';
 import { applyOpacity } from './utils/colorUtils';
 import { getNavbarThemeStyles, getThemeToken } from './utils/themeUtils';
 import { fetchActiveTrustsByMobile } from './services/trustService';
+import { getStoredMembershipForTrust } from './utils/trustMembershipLinks';
 import { isFeatureVisible } from './services/featureFlags';
 import { useFeatureFlags } from './hooks/useFeatureFlags';
 import { getAppHomePath } from './utils/tenantNavigation';
@@ -23,14 +24,12 @@ const getSupabase = async () => {
 };
 
 // iOS Safari/Chrome (both WebKit) block window.open() the instant it fires
-// outside the synchronous call stack of a user gesture — including after an
-// `await` on a Supabase call, which is exactly how handleOpenTrustWebApp
-// below opens a trust's web app on Android. Detecting iOS here lets
-// TrustLinkTile render a real `<a href target="_blank">` for this platform
-// instead (see its own comment), which a normal, non-JS-driven navigation
-// is never subject to that restriction. Deliberately local to this file —
-// Android's own card-tap path (handleOpenTrustWebApp) is untouched and
-// never reads this.
+// outside the synchronous call stack of a user gesture (e.g. after an
+// `await`). Detecting iOS here lets TrustLinkTile render a real
+// `<a href target="_blank">` for this platform (see its own comment), which a
+// normal, non-JS-driven navigation is never subject to that restriction.
+// Deliberately local to this file — Android's own card-tap path
+// (handleOpenTrustWebApp) never reads this.
 const isIOSDevice = () => {
   if (typeof navigator === 'undefined') return false;
   const ua = navigator.userAgent || '';
@@ -574,16 +573,12 @@ const OtherMemberships = ({ onNavigate, variant = 'page' }) => {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [trustCardModalData, setTrustCardModalData] = useState(null);
   const [openingTrustId, setOpeningTrustId] = useState('');
-  // iOS-only: trust_id -> resolved web_app_url ('' once resolved-but-missing,
-  // undefined while still in flight), populated by the prefetch effect below
-  // as soon as trustLinks load — NOT on tap. This is what lets the iOS
-  // TrustLinkTile render a real, synchronous <a href> instead of Android's
-  // async-then-window.open() path (handleOpenTrustWebApp), which iOS Safari/
-  // Chrome silently block as a popup once it runs after an await. Android
-  // never reads this map — handleOpenTrustWebApp keeps doing its own
-  // per-click fetch exactly as before.
+  // iOS-only: trust_id -> web_app_url from the stored active-trust membership
+  // ('' when that trust has none, undefined before the effect below first runs),
+  // populated as soon as trustLinks load — NOT on tap. This is what lets the iOS
+  // TrustLinkTile render a real, synchronous <a href> for iOS Safari/Chrome.
+  // Android never reads this map — handleOpenTrustWebApp looks the URL up on tap.
   const [trustWebAppUrls, setTrustWebAppUrls] = useState({});
-  const trustWebAppUrlRequestedRef = useRef(new Set());
   const isIOS = useMemo(() => isIOSDevice(), []);
 
   // Delete state
@@ -724,7 +719,7 @@ const OtherMemberships = ({ onNavigate, variant = 'page' }) => {
     navigate('/add-community');
   };
 
-  const handleOpenTrustWebApp = async (link) => {
+  const handleOpenTrustWebApp = (link) => {
     const trustId = normalizeText(link?.trust_id || link?.Trust?.id);
     if (!trustId || openingTrustId) return;
 
@@ -734,14 +729,7 @@ const OtherMemberships = ({ onNavigate, variant = 'page' }) => {
     });
     setOpeningTrustId(trustId);
     try {
-      const supabase = await getSupabase();
-      const { data, error } = await supabase.rpc('manage_user_panel_by_trust_details', {
-        p_action: 'view',
-        p_trust_id: trustId,
-      });
-      if (error) throw error;
-
-      const webAppUrl = normalizeText(data?.[0]?.web_app_url);
+      const webAppUrl = normalizeText(getStoredMembershipForTrust(trustId)?.web_app_url);
       if (!webAppUrl) {
         throw new Error('This trust does not have a web app link yet.');
       }
@@ -755,51 +743,27 @@ const OtherMemberships = ({ onNavigate, variant = 'page' }) => {
     }
   };
 
-  // iOS-only prefetch: the same RPC handleOpenTrustWebApp above calls on
-  // tap, called here instead the moment a trust_id is first seen in
-  // trustLinks — well before any user gesture, so its result is already in
-  // trustWebAppUrls by the time a tap needs it (see TrustLinkTile's href).
-  // Kept fully independent from handleOpenTrustWebApp (never shared/
-  // refactored together) so Android's tap-time path is untouched no matter
-  // what changes here. Returns '' (not null/undefined) on any failure or a
-  // missing web_app_url, so callers can tell "resolved, nothing there"
-  // apart from "still in flight" (trustWebAppUrls[id] === undefined).
-  const fetchTrustWebAppUrl = useCallback(async (trustId) => {
-    try {
-      const supabase = await getSupabase();
-      const { data, error } = await supabase.rpc('manage_user_panel_by_trust_details', {
-        p_action: 'view',
-        p_trust_id: trustId,
-      });
-      if (error) throw error;
-      return normalizeText(data?.[0]?.web_app_url);
-    } catch (err) {
-      console.warn('iOS trust web app url prefetch failed:', trustId, err);
-      return '';
-    }
-  }, []);
-
+  // iOS-only prefetch: reads each trust's web_app_url from the stored
+  // active-trust membership the moment a trust_id is seen in trustLinks — well
+  // before any user gesture, so it is already in trustWebAppUrls by the time a
+  // tap needs it (see TrustLinkTile's href). No network request. Kept
+  // independent from handleOpenTrustWebApp so Android's tap-time path is
+  // untouched. Stores '' (not null/undefined) for a missing web_app_url, so
+  // callers can tell "nothing there" apart from "not read yet"
+  // (trustWebAppUrls[id] === undefined). Re-runs when trustLinks change, so a
+  // url that arrives with a membership refresh is picked up.
   useEffect(() => {
-    if (!isIOS) return undefined;
-    const ids = [...new Set(
-      trustLinks
-        .map((link) => normalizeText(link?.trust_id || link?.Trust?.id))
-        .filter(Boolean)
-    )];
-    const pending = ids.filter((id) => !trustWebAppUrlRequestedRef.current.has(id));
-    if (pending.length === 0) return undefined;
-    pending.forEach((id) => trustWebAppUrlRequestedRef.current.add(id));
-
-    let cancelled = false;
-    pending.forEach((id) => {
-      fetchTrustWebAppUrl(id).then((url) => {
-        if (cancelled) return;
-        setTrustWebAppUrls((prev) => ({ ...prev, [id]: url }));
-      });
+    if (!isIOS) return;
+    const next = {};
+    trustLinks.forEach((link) => {
+      const id = normalizeText(link?.trust_id || link?.Trust?.id);
+      if (id) next[id] = normalizeText(getStoredMembershipForTrust(id)?.web_app_url);
     });
-
-    return () => { cancelled = true; };
-  }, [isIOS, trustLinks, fetchTrustWebAppUrl]);
+    setTrustWebAppUrls((prev) => {
+      const changed = Object.keys(next).some((id) => prev[id] !== next[id]);
+      return changed ? { ...prev, ...next } : prev;
+    });
+  }, [isIOS, trustLinks]);
 
   const openTrustIdCard = (link) => {
     trackAction('trust_id_card_opened', {

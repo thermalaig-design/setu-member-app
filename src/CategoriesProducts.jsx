@@ -16,6 +16,9 @@ import {
   Droplet,
   Palette,
   Gem,
+  Smartphone,
+  ShoppingBag,
+  Watch,
 } from 'lucide-react';
 import { useAppTheme } from './context/ThemeContext';
 import { buildCategoryView, getCardRowPattern, splitIntoRows } from './utils/categoryDisplay';
@@ -23,6 +26,9 @@ import { getNavbarThemeStyles } from './utils/themeUtils';
 import { readWishlistItems, subscribeWishlist } from './utils/productWishlist';
 import { readCartItems, subscribeCart } from './utils/productCart';
 import { getAppHomePath } from './utils/tenantNavigation';
+import { buildSampleCategoryView } from './utils/sampleCategories';
+import { dismissCoachMark, isCoachMarkDismissed } from './utils/appManagerAccess';
+import { AddProductsCoachMark, HowToSheet } from './components/CatalogOnboarding';
 import {
   enrichPayloadWithPrices,
   fetchProductCategoryTree,
@@ -55,6 +61,9 @@ const ICONS = {
   Droplet,
   Palette,
   Gem,
+  Smartphone,
+  ShoppingBag,
+  Watch,
 };
 
 const normalizeText = (value) => {
@@ -83,7 +92,10 @@ function CategoryArt({
   iconName = 'Shirt',
   colors,
   tall = false,
+  sample = false,
 }) {
+  const theme = useAppTheme();
+  const primaryColor = theme?.primary || 'var(--brand-navy)';
   const imageRef = useRef(null);
   const [imageLoaded, setImageLoaded] = useState(false);
   const [imageFailed, setImageFailed] = useState(false);
@@ -131,6 +143,36 @@ function CategoryArt({
       checkCachedImage();
     }
   }, [imageUrl]);
+
+  if (sample) {
+    const isCircle = variant === 'circle';
+    return (
+      <div
+        className={`relative flex items-center justify-center ${frameClasses}`}
+        style={{
+          aspectRatio: frameAspectRatio,
+          background: 'var(--surface-color)',
+          border: `1.5px ${isCircle ? 'dashed' : 'solid'} color-mix(in srgb, ${primaryColor} 30%, transparent)`,
+          borderRadius: isCircle ? '999px' : '0.9rem',
+          margin: frameAspectRatio === '1 / 1' ? '0 auto' : undefined,
+        }}
+      >
+        {!isCircle ? (
+          <span
+            className="absolute left-2 top-2 rounded-md px-1.5 py-0.5 text-[10px] font-semibold"
+            style={{ background: 'color-mix(in srgb, #f59e0b 22%, var(--surface-color))', color: '#92400e' }}
+          >
+            Sample
+          </span>
+        ) : null}
+        <Icon
+          className={isCircle ? 'h-7 w-7' : 'h-10 w-10'}
+          strokeWidth={1.5}
+          style={{ color: primaryColor }}
+        />
+      </div>
+    );
+  }
 
   return (
     <div
@@ -253,27 +295,43 @@ function EmptyState({ title, description, onRetry }) {
   );
 }
 
-function CircleSlider({ entries, onOpen }) {
+function CircleSlider({ entries, onOpen, title, badge }) {
   return (
-    <div className="ws-circle-row no-scrollbar">
-      {entries.map((entry) => (
-        <button
-          key={entry.id}
-          className="ws-circle-item"
-          type="button"
-          onClick={() => onOpen(entry.id)}
-        >
-          <CategoryArt
-            variant="circle"
-            label={entry.label}
-            imageUrl={entry.imageUrl}
-            iconName={entry.icon}
-            colors={entry.colors}
-          />
-          <span className="ws-circle-label">{entry.label}</span>
-        </button>
-      ))}
-    </div>
+    <>
+      {title ? (
+        <div className="ws-section-title flex items-center gap-2 px-4 pt-4">
+          {title}
+          {badge ? (
+            <span
+              className="rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider"
+              style={{ background: SKELETON_BG, color: THEME.text }}
+            >
+              {badge}
+            </span>
+          ) : null}
+        </div>
+      ) : null}
+      <div className="ws-circle-row no-scrollbar">
+        {entries.map((entry) => (
+          <button
+            key={entry.id}
+            className="ws-circle-item"
+            type="button"
+            onClick={() => onOpen(entry.id)}
+          >
+            <CategoryArt
+              variant="circle"
+              label={entry.label}
+              imageUrl={entry.imageUrl}
+              iconName={entry.icon}
+              colors={entry.colors}
+              sample={entry.sample}
+            />
+            <span className="ws-circle-label">{entry.label}</span>
+          </button>
+        ))}
+      </div>
+    </>
   );
 }
 
@@ -322,6 +380,7 @@ function CardGrid({ section, onOpen }) {
                     iconName={item.icon}
                     colors={item.colors}
                     tall={tall}
+                    sample={item.sample}
                   />
                   <span className="ws-tile-label">{item.label}</span>
                 </button>
@@ -338,6 +397,10 @@ export function CategoriesProductsContent({
   variant = 'page',
   selectedTrustId: selectedTrustIdProp = '',
 } = {}) {
+  const [guide, setGuide] = useState(null);
+  const [coachDismissed, setCoachDismissed] = useState(() =>
+    isCoachMarkDismissed(getTrustCandidates(selectedTrustIdProp)[0])
+  );
   const isPageVariant = variant === 'page';
   const navigate = useNavigate();
   const theme = useAppTheme();
@@ -429,6 +492,12 @@ export function CategoriesProductsContent({
   const hasVisibleContent = sliderEntries.length > 0 || cardSections.length > 0;
   const showLoading = loading && !hasVisibleContent;
   const showEmpty = !loading && !error && !hasVisibleContent;
+  const showPreview = showEmpty;
+  const sampleView = useMemo(() => buildSampleCategoryView(), []);
+  const dismissCoach = () => {
+    dismissCoachMark(getTrustCandidates(selectedTrustIdProp)[0]);
+    setCoachDismissed(true);
+  };
 
   useEffect(() => {
     if (typeof window === 'undefined') return undefined;
@@ -621,15 +690,40 @@ export function CategoriesProductsContent({
             </div>
           ) : null}
 
-          {showEmpty ? (
-            <div className="px-4 pt-4">
-              <EmptyState
-                title="No product categories available"
-                description="There are no active product categories for this trust yet."
-                onRetry={() => setReloadToken((value) => value + 1)}
+          {showPreview ? (
+            <>
+              <CircleSlider
+                title="Popular categories"
+                badge="Preview"
+                entries={sampleView.sliderEntries}
+                onOpen={() => setGuide('category')}
               />
-            </div>
+              {sampleView.cardSections.map((section) => (
+                <CardGrid key={section.id} section={section} onOpen={() => setGuide('category')} />
+              ))}
+              <div className="px-4 pb-6 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setGuide('category')}
+                  className="w-full rounded-2xl py-3 text-sm font-bold"
+                  style={{ background: THEME.buttonBg, color: THEME.buttonText }}
+                >
+                  Learn how to add your products
+                </button>
+              </div>
+              {!coachDismissed && !guide ? (
+                <AddProductsCoachMark
+                  onDismiss={dismissCoach}
+                  onLearn={() => {
+                    dismissCoach();
+                    setGuide('category');
+                  }}
+                />
+              ) : null}
+            </>
           ) : null}
+
+          <HowToSheet guide={guide} onClose={() => setGuide(null)} onSwitchGuide={setGuide} />
 
           {!showLoading && !error ? (
             <>

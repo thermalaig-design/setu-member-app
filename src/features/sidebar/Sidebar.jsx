@@ -7,7 +7,7 @@ import { Capacitor } from '@capacitor/core';
 import { Share } from '@capacitor/share';
 import { getProfile, updateMemberPrivacy } from '../../services/api';
 import { fetchFeatureFlags, isFeatureVisible } from '../../services/featureFlags';
-import { fetchShareAppLinksByTrustId } from '../../services/trustService';
+import { buildShareAppLinksFromMembership, getStoredMembershipForTrust } from '../../utils/trustMembershipLinks';
 import { logUserSessionEvent } from '../../services/sessionAuditService';
 import { trackAction } from '../../services/pageTrackingService';
 import { useTrustDataVersion } from '../../hooks/useTrustDataVersion';
@@ -454,31 +454,16 @@ const Sidebar = ({ isOpen, onClose, onNavigate, currentPage, onLogout }) => {
   useEffect(() => {
     if (!isOpen) return;
 
-    let isCancelled = false;
+    try {
+      const fallbackTrustId = import.meta.env.VITE_DEFAULT_TRUST_ID || '';
+      const trustId = String(selectedTrustId || localStorage.getItem('selected_trust_id') || fallbackTrustId).trim();
 
-    const loadShareLinks = async () => {
-      try {
-        const fallbackTrustId = import.meta.env.VITE_DEFAULT_TRUST_ID || '';
-        const trustId = String(selectedTrustId || localStorage.getItem('selected_trust_id') || fallbackTrustId).trim();
-
-        if (!trustId) {
-          if (!isCancelled) setShareAppLinks(null);
-          return;
-        }
-
-        const links = await fetchShareAppLinksByTrustId(trustId);
-        if (!isCancelled) setShareAppLinks(links || null);
-      } catch {
-        if (!isCancelled) setShareAppLinks(null);
-      }
-    };
-
-    setShareAppLinks(null);
-    loadShareLinks();
-
-    return () => {
-      isCancelled = true;
-    };
+      setShareAppLinks(
+        trustId ? buildShareAppLinksFromMembership(getStoredMembershipForTrust(trustId)) : null
+      );
+    } catch {
+      setShareAppLinks(null);
+    }
   }, [isOpen, selectedTrustId]);
 
   // Load member trusts when sidebar opens (reg_members based payload from login)

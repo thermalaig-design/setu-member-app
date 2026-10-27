@@ -164,18 +164,19 @@ const dedupeDirectoryMembers = (rows = []) => {
 const directoryRpcCache = new Map();
 const DIRECTORY_RPC_CACHE_TTL_MS = 5 * 60 * 1000;
 
-export const getDirectoryViewRoles = async (trustId = null) => {
+export const getDirectoryViewRoles = async (trustId = null, { includeInactive = false } = {}) => {
   const normalizedTrustId = normalizeDirectoryText(trustId);
   if (!normalizedTrustId) {
     return { success: true, data: [] };
   }
 
   try {
-    const { data, error } = await supabase
+    let query = supabase
       .from('directory_view_roles')
       .select('id, trust_id, role, status, created_at')
-      .eq('trust_id', normalizedTrustId)
-      .eq('status', 'active')
+      .eq('trust_id', normalizedTrustId);
+    if (!includeInactive) query = query.eq('status', 'active');
+    const { data, error } = await query
       .order('created_at', { ascending: true })
       .order('role', { ascending: true });
 

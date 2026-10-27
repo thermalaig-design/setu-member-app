@@ -120,6 +120,13 @@ const mapActiveTrustResponseToMemberships = (payload = {}) => {
       member_id: payload?.member_id || null,
       qr_code: trust?.qr_code || null,
       trust_status: trust?.trust_status ?? null,
+      version: trust?.version ?? null,
+      web_app_url: trust?.web_app_url || null,
+      instagram_link: trust?.instagram_link || null,
+      facebook_link: trust?.facebook_link || null,
+      whatsapp_link: trust?.whatsapp_link || null,
+      linkedin_link: trust?.linkedin_link || null,
+      youtube_url: trust?.youtube_url || null,
       source: 'active_trusts_by_mobile'
     }))
     .sort((a, b) => {
@@ -408,42 +415,6 @@ export const syncTenantMembershipName = async ({ regMemberId, name }) => {
   if (error) {
     console.warn('Error syncing tenant membership name:', error);
   }
-};
-
-export const fetchShareAppLinksByTrustId = async (trustId) => {
-  const normalizedTrustId = String(trustId || '').trim();
-  if (!normalizedTrustId) return null;
-
-  const { data, error } = await supabase.rpc(
-    'manage_user_panel_by_trust_details',
-    {
-      p_action: 'view',
-      p_trust_id: normalizedTrustId
-    }
-  );
-
-  if (error) {
-    console.warn('Error fetching user panel links:', error);
-    return null;
-  }
-
-  const row = Array.isArray(data) ? data[0] : data;
-  if (!row) return null;
-
-  return {
-    trust_id: row.id || normalizedTrustId,
-    name: row.name || null,
-    subscription_type: row.subscription_type || null,
-    icon_url: row.icon_url || null,
-    web_app_url: row.web_app_url || null,
-    play_store_link: row.web_app_url || null,
-    app_store_link: row.web_app_url || null,
-    instagram_link: row.instagram_link || null,
-    facebook_link: row.facebook_link || null,
-    whatsapp_link: row.whatsapp_link || null,
-    linkedin_link: row.linkedin_link || null,
-    youtube_url: row.youtube_url || null,
-  };
 };
 
 export const fetchTrustHelpUrl = async (trustId) => {

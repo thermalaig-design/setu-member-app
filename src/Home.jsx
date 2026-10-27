@@ -2911,6 +2911,7 @@ const Home = ({ onNavigate, onLogout }) => {
               type="button"
               onClick={() => onNavigate('user-panel')}
               aria-label="User Panel"
+              data-coach="add-products"
               className="w-10 h-10 rounded-2xl flex items-center justify-center transition-all active:scale-95"
               style={{
                 background: 'color-mix(in srgb, var(--navbar-bg) 72%, var(--surface-color))',

@@ -52,6 +52,13 @@ const compactMembership = (membership = {}) => ({
   membership_number: membership?.membership_number || membership?.['Membership number'] || null,
   qr_code: membership?.qr_code || null,
   trust_status: membership?.trust_status ?? null,
+  version: membership?.version ?? null,
+  web_app_url: membership?.web_app_url || null,
+  instagram_link: membership?.instagram_link || null,
+  facebook_link: membership?.facebook_link || null,
+  whatsapp_link: membership?.whatsapp_link || null,
+  linkedin_link: membership?.linkedin_link || null,
+  youtube_url: membership?.youtube_url || null,
   source: membership?.source || null,
 });
 
