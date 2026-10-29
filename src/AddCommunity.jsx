@@ -1,10 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { AlertTriangle, ChevronDown, Home as HomeIcon, Menu, Rocket, Upload, X } from 'lucide-react';
+import { AlertTriangle, Home as HomeIcon, Menu, Rocket, Upload, X } from 'lucide-react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAppTheme } from './context/ThemeContext';
 import Sidebar from './features/sidebar/Sidebar';
 import { getNavbarThemeStyles, getThemeToken } from './utils/themeUtils';
-import { applyOpacity } from './utils/colorUtils';
 import { getAppHomePath } from './utils/tenantNavigation';
 import { fetchFeatureFlags } from './services/featureFlags';
 import { trackAction } from './services/pageTrackingService';
@@ -57,30 +56,184 @@ const LAUNCH_STARS = [
   { top: '86%', left: '46%', size: '3px', delay: '0.3s', duration: '2.4s' },
 ];
 
-const FieldLabel = ({ children, required = false }) => (
-  <div className="mb-2">
-    <label className="block text-[15px] font-extrabold tracking-[0.01em]" style={{ color: 'var(--advertisement-title)' }}>
-      {children}
-      {required ? <span style={{ color: 'var(--brand-red)' }}> *</span> : null}
-    </label>
-  </div>
-);
+const LOGO_MAX_BYTES = 2 * 1024 * 1024;
+const LOGO_ACCEPTED_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
+const DESCRIPTION_MAX_LENGTH = 240;
 
-const textInputStyle = {
-  width: '100%',
-  borderRadius: '18px',
-  border: '1px solid var(--advertisement-card-border)',
-  background: 'color-mix(in srgb, var(--advertisement-card-bg) 96%, black 4%)',
-  color: 'var(--advertisement-title)',
-  outline: 'none',
-  fontSize: '16px',
-  lineHeight: 1.4,
-  boxShadow: '0 10px 24px color-mix(in srgb, var(--advertisement-card-shadow) 20%, transparent)',
+// Form card styles (dark card, gold accent). Everything is scoped under `.la-`
+// so it cannot leak into the rest of the app.
+const LAUNCH_FORM_CSS = `
+.la-card{
+  --la-card:#16161e; --la-field:#1c1c26; --la-field-hover:#21212c;
+  --la-border:rgba(255,255,255,.09); --la-border-strong:rgba(255,255,255,.18);
+  --la-text:#f2efe8; --la-label:#d9d4c7; --la-muted:#8d8999;
+  --la-gold:#d9a441; --la-gold-hi:#ecc272; --la-ring:rgba(217,164,65,.22);
+  --la-err:#ff7b7b; --la-err-bg:rgba(255,92,92,.10); --la-err-border:rgba(255,92,92,.45);
+  --la-ok:#4fd1a1;
+  width:100%; max-width:460px; margin:0 auto; padding:32px 28px 28px; box-sizing:border-box;
+  color:var(--la-text); background:var(--la-card); border:1px solid var(--la-border); border-radius:20px;
+  box-shadow:0 24px 64px rgba(0,0,0,.45);
+  font-family:Inter,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  -webkit-font-smoothing:antialiased;
+}
+.la-card *{box-sizing:border-box}
+.la-field{margin-bottom:20px}
+.la-row{display:flex; justify-content:space-between; align-items:baseline; margin-bottom:8px}
+.la-lbl{font-size:13px; font-weight:600; color:var(--la-label); letter-spacing:.1px}
+.la-req{color:var(--la-gold); margin-left:2px}
+.la-opt{font-size:12px; color:var(--la-muted); font-weight:500}
+.la-wrap{position:relative}
+.la-control{
+  display:block; width:100%; height:50px; padding:0 16px; font:inherit; font-size:15px; color:var(--la-text);
+  background:var(--la-field); border:1px solid var(--la-border); border-radius:12px; outline:none;
+  transition:border-color .18s, box-shadow .18s, background .18s;
+}
+.la-control::placeholder{color:#656172}
+.la-control:hover{background:var(--la-field-hover); border-color:var(--la-border-strong)}
+.la-control:focus{border-color:var(--la-gold); box-shadow:0 0 0 4px var(--la-ring); background:var(--la-field-hover)}
+textarea.la-control{height:auto; min-height:120px; padding:14px 16px; resize:vertical; line-height:1.5}
+.la-control.has-status{padding-right:48px}
+.la-select{position:relative}
+.la-select-btn{display:flex; align-items:center; text-align:left; cursor:pointer; padding-right:44px}
+.la-select-btn:disabled{cursor:wait; opacity:.7}
+.la-select-btn span{overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+.la-chev{position:absolute; right:16px; top:50%; width:16px; height:16px; color:var(--la-muted); pointer-events:none; transform:translateY(-50%); transition:transform .18s}
+.la-select.open .la-chev{transform:translateY(-50%) rotate(180deg)}
+.la-select.open .la-select-btn{border-color:var(--la-gold); box-shadow:0 0 0 4px var(--la-ring); background:var(--la-field-hover)}
+.la-menu{
+  position:absolute; left:0; right:0; top:calc(100% + 6px); z-index:20; margin:0; padding:6px; list-style:none;
+  max-height:240px; overflow-y:auto; background:var(--la-field); border:1px solid var(--la-border-strong);
+  border-radius:12px; box-shadow:0 18px 40px rgba(0,0,0,.55); animation:la-fade .15s ease-out;
+}
+.la-option{
+  display:flex; align-items:center; justify-content:space-between; gap:10px; padding:11px 12px;
+  border-radius:8px; font-size:14.5px; color:var(--la-text); cursor:pointer;
+}
+.la-option.active{background:rgba(217,164,65,.14)}
+.la-option[aria-selected="true"]{color:var(--la-gold-hi); font-weight:600}
+.la-option svg{flex:none; color:var(--la-gold)}
+.la-hint{margin:8px 0 0; font-size:12px; color:var(--la-muted); line-height:1.45}
+.la-status{position:absolute; right:14px; top:50%; transform:translateY(-50%); width:22px; height:22px; display:none}
+.la-status svg{display:none}
+.la-spinner{
+  display:none; width:18px; height:18px; margin:2px; border-radius:50%;
+  border:2px solid rgba(255,255,255,.15); border-top-color:var(--la-gold); animation:la-spin .7s linear infinite;
+}
+.la-field[data-state="checking"] .la-status,
+.la-field[data-state="valid"] .la-status,
+.la-field[data-state="invalid"] .la-status{display:block}
+.la-field[data-state="checking"] .la-spinner{display:block}
+.la-field[data-state="valid"] .la-ico-ok{display:block}
+.la-field[data-state="invalid"] .la-ico-err{display:block}
+.la-field[data-state="invalid"] .la-control{
+  border-color:var(--la-err); box-shadow:0 0 0 4px rgba(255,92,92,.14); animation:la-shake .35s;
+}
+.la-field[data-state="valid"] .la-control{border-color:rgba(79,209,161,.7)}
+.la-msg{display:none; margin-top:10px; padding:11px 13px; border-radius:10px; font-size:13px; line-height:1.45}
+.la-line{display:flex; gap:9px; align-items:flex-start; font-weight:600}
+.la-line svg{flex:none; margin-top:1px}
+.la-field[data-state="invalid"] .la-msg.err{
+  display:block; color:#ffc2c2; background:var(--la-err-bg); border:1px solid var(--la-err-border);
+  animation:la-fade .25s ease-out;
+}
+.la-field[data-state="valid"] .la-msg.ok{
+  display:block; padding:2px 2px 0; color:var(--la-ok); background:none; border:0; font-weight:600;
+}
+.la-suggest{display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin-top:10px; padding-left:27px}
+.la-suggest span{font-size:12px; color:#e6a9a9; font-weight:500}
+.la-chip{
+  padding:5px 11px; font:inherit; font-size:12.5px; font-weight:600; color:var(--la-gold-hi);
+  background:rgba(217,164,65,.1); border:1px solid rgba(217,164,65,.35); border-radius:999px; cursor:pointer;
+  transition:background .15s, transform .1s;
+}
+.la-chip:hover{background:rgba(217,164,65,.2)}
+.la-chip:active{transform:scale(.96)}
+.la-drop{
+  display:flex; align-items:center; gap:14px; padding:14px; cursor:pointer;
+  background:var(--la-field); border:1.5px dashed var(--la-border-strong); border-radius:12px;
+  transition:border-color .18s, background .18s;
+}
+.la-drop:hover,.la-drop.drag{border-color:var(--la-gold); background:var(--la-field-hover)}
+.la-drop.bad{border-color:var(--la-err)}
+.la-thumb{
+  width:52px; height:52px; flex:none; border-radius:10px; overflow:hidden; display:grid; place-items:center;
+  color:var(--la-gold); background:rgba(217,164,65,.1); border:1px solid rgba(217,164,65,.2);
+}
+.la-thumb img{width:100%; height:100%; object-fit:cover}
+.la-drop-text{flex:1; min-width:0}
+.la-drop-text b{display:block; font-size:14px; font-weight:600; color:var(--la-text); white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+.la-drop-text small{display:block; margin-top:2px; font-size:12px; color:var(--la-muted)}
+.la-drop-text small.e{color:var(--la-err)}
+.la-btn-sm{
+  padding:7px 14px; font:inherit; font-size:12.5px; font-weight:600; color:var(--la-text);
+  background:transparent; border:1px solid var(--la-border-strong); border-radius:8px; cursor:pointer;
+  transition:background .15s;
+}
+.la-btn-sm:hover{background:rgba(255,255,255,.06)}
+.la-file{display:none}
+.la-count{margin-top:8px; font-size:12px; color:var(--la-muted); text-align:right; font-variant-numeric:tabular-nums}
+.la-count.warn{color:var(--la-gold-hi)}
+.la-launch{
+  width:100%; height:52px; margin-top:8px; display:flex; justify-content:center; align-items:center; gap:10px;
+  font:inherit; font-size:15px; font-weight:700; letter-spacing:.2px; color:#1a1409;
+  background:linear-gradient(135deg,var(--la-gold-hi),var(--la-gold)); border:0; border-radius:12px; cursor:pointer;
+  box-shadow:0 10px 24px rgba(217,164,65,.25);
+  transition:transform .15s, box-shadow .2s, opacity .2s, filter .2s;
+}
+.la-launch:hover:enabled{transform:translateY(-1px); box-shadow:0 14px 30px rgba(217,164,65,.36)}
+.la-launch:active:enabled{transform:translateY(0)}
+.la-launch:disabled{opacity:.4; cursor:not-allowed; box-shadow:none; filter:saturate(.5)}
+.la-launch .la-spinner{border-color:rgba(26,20,9,.25); border-top-color:#1a1409; margin:0}
+.la-launch.loading .la-spinner{display:block}
+.la-foot{margin:16px 0 0; text-align:center; font-size:12px; color:var(--la-muted)}
+@keyframes la-spin{to{transform:rotate(360deg)}}
+@keyframes la-shake{25%{transform:translateX(-4px)}75%{transform:translateX(4px)}}
+@keyframes la-fade{from{opacity:0; transform:translateY(-4px)}to{opacity:1; transform:none}}
+@media (max-width:420px){ .la-card{padding:26px 20px 22px} }
+@media (prefers-reduced-motion:reduce){ .la-card *{animation:none!important; transition:none!important} }
+`;
+
+// Deterministic "Try:" suggestions for a taken name (no randomness, so they stay stable across renders).
+const buildNameSuggestions = (name) => {
+  const base = normalizeText(name);
+  if (!base) return [];
+  const suffix = 10 + ([...base].reduce((sum, char) => sum + char.charCodeAt(0), 0) % 90);
+  return [`${base}app`, `${base}-hq`, `${base}${suffix}`];
 };
 
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const normalizeText = (value) => String(value || '').trim();
+
+const normalizeAppName = (value = '') => normalizeText(value).toLowerCase();
+
+// Escapes LIKE wildcards so a name such as "100%_App" is matched literally by ilike.
+const escapeLikePattern = (value) => String(value).replace(/[\\%_]/g, (char) => `\\${char}`);
+
+// Names nobody may take, whatever the casing, spacing or punctuation:
+// "Setu AI", "setuai", "SetuAi", "SETU-AI" all collapse to "setuai".
+// "Setu" is blocked only as the whole name; "Setu AI" is also blocked as a
+// prefix, so "Setu AI Pro" is reserved too (while "Setup" / "Setu Store" are not).
+const RESERVED_APP_NAMES = ['setu', 'setuai'];
+const RESERVED_APP_PREFIXES = ['setuai'];
+
+const isReservedAppName = (value = '') => {
+  const collapsed = String(value || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  return RESERVED_APP_NAMES.includes(collapsed)
+    || RESERVED_APP_PREFIXES.some((prefix) => collapsed.startsWith(prefix));
+};
+
+// Apps the signed-in member already belongs to (same localStorage `user` this
+// page already reads/writes in addTrustToUserMemberships).
+const readOwnAppNames = () => {
+  try {
+    const parsedUser = JSON.parse(localStorage.getItem('user') || '{}') || {};
+    const memberships = Array.isArray(parsedUser?.hospital_memberships) ? parsedUser.hospital_memberships : [];
+    return memberships.map((m) => normalizeAppName(m?.trust_name)).filter(Boolean);
+  } catch {
+    return [];
+  }
+};
 
 const waitForTenantAppSlug = async (supabase, trustId) => {
   const normalizedTrustId = normalizeText(trustId);
@@ -206,7 +359,11 @@ const AddCommunity = ({ onNavigateBack, variant = 'page' }) => {
     description: '',
     sampleAppId: '',
   });
-  const [isFocused, setIsFocused] = useState('');
+  const [typeOpen, setTypeOpen] = useState(false);
+  const [typeActiveIndex, setTypeActiveIndex] = useState(-1);
+  const typeSelectRef = useRef(null);
+  const [logoError, setLogoError] = useState('');
+  const [logoDragging, setLogoDragging] = useState(false);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [sampleApps, setSampleApps] = useState([]);
   const [pageTitle, setPageTitle] = useState(DEFAULT_PAGE_TITLE);
@@ -229,7 +386,6 @@ const AddCommunity = ({ onNavigateBack, variant = 'page' }) => {
   const muted = 'var(--advertisement-subtitle)';
   const heading = 'var(--advertisement-title)';
   const cardBg = 'var(--advertisement-card-bg)';
-  const accentTint = 'color-mix(in srgb, var(--advertisement-card-bg) 78%, var(--app-accent-bg))';
   const pageShellBg = getThemeToken(theme, 'page.background', 'var(--page-bg, var(--app-page-bg))');
 
   const handleBack = () => {
@@ -248,31 +404,50 @@ const AddCommunity = ({ onNavigateBack, variant = 'page' }) => {
     if (key === 'trustName') setNameCheck({ status: 'idle', checkedValue: '' });
   };
 
-  // Real-time "is this name already taken" check, run when the Trust Name
-  // field loses focus — mirrors the Trust.name UNIQUE constraint (a plain
-  // case-sensitive exact match) so it warns for the same names the actual
-  // create_trust_via_whatsapp call would reject, without waiting for submit.
-  const checkTrustNameAvailability = async () => {
+  // Case-insensitive: "SetuAi", "setuai" and "SETUAI" all count as the same name.
+  // The DB's Trust.name UNIQUE constraint is case-sensitive, so this client-side
+  // check is the only place such variants get caught.
+  const isAppNameTaken = async (trustName) => {
+    if (isReservedAppName(trustName)) return true;
+    if (readOwnAppNames().includes(normalizeAppName(trustName))) return true;
+    const { supabase } = await import('./services/supabaseClient.js');
+    const { data, error } = await supabase
+      .from('Trust')
+      .select('id')
+      .ilike('name', escapeLikePattern(trustName))
+      .limit(1);
+    if (error) throw error;
+    return Boolean(data?.length);
+  };
+
+  // Live "is this name already taken" check: runs shortly after the user stops
+  // typing, so the status icon and message update without waiting for blur/submit.
+  const isAppNameTakenRef = useRef(isAppNameTaken);
+  isAppNameTakenRef.current = isAppNameTaken;
+  useEffect(() => {
     const trustName = String(form.trustName || '').trim();
     if (!trustName) {
       setNameCheck({ status: 'idle', checkedValue: '' });
-      return;
+      return undefined;
     }
     setNameCheck({ status: 'checking', checkedValue: trustName });
-    try {
-      const { supabase } = await import('./services/supabaseClient.js');
-      const { data, error } = await supabase
-        .from('Trust')
-        .select('id')
-        .eq('name', trustName)
-        .limit(1);
-      if (error) throw error;
-      setNameCheck({ status: data?.length ? 'taken' : 'available', checkedValue: trustName });
-    } catch (err) {
-      console.warn('[AddCommunity] Name availability check failed:', err?.message || err);
-      setNameCheck({ status: 'idle', checkedValue: '' });
-    }
-  };
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      try {
+        const taken = await isAppNameTakenRef.current(trustName);
+        if (cancelled) return;
+        setNameCheck({ status: taken ? 'taken' : 'available', checkedValue: trustName });
+      } catch (err) {
+        if (cancelled) return;
+        console.warn('[AddCommunity] Name availability check failed:', err?.message || err);
+        setNameCheck({ status: 'idle', checkedValue: '' });
+      }
+    }, 350);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [form.trustName]);
 
   // Sample apps double as the "Type" picker: each row's `name` is the
   // keyword create_trust_via_whatsapp forwards to apply_sample_app_theme(),
@@ -378,9 +553,17 @@ const AddCommunity = ({ onNavigateBack, variant = 'page' }) => {
     };
   }, []);
 
-  const handleLogoUpload = (event) => {
-    const file = event.target.files?.[0];
+  const applyLogoFile = (file) => {
     if (!file) return;
+    if (!LOGO_ACCEPTED_TYPES.includes(file.type)) {
+      setLogoError('Only JPG, PNG or WebP files are allowed');
+      return;
+    }
+    if (file.size > LOGO_MAX_BYTES) {
+      setLogoError('File must be smaller than 2 MB');
+      return;
+    }
+    setLogoError('');
     setLogoFile(file);
     const nextPreview = URL.createObjectURL(file);
     setLogoPreview((previous) => {
@@ -388,6 +571,92 @@ const AddCommunity = ({ onNavigateBack, variant = 'page' }) => {
       return nextPreview;
     });
   };
+
+  const handleLogoInputChange = (event) => {
+    applyLogoFile(event.target.files?.[0]);
+    // Reset so picking the same file again still fires onChange.
+    event.target.value = '';
+  };
+
+  const handleLogoDragOver = (event) => {
+    event.preventDefault();
+    setLogoDragging(true);
+  };
+
+  const handleLogoDragLeave = (event) => {
+    event.preventDefault();
+    setLogoDragging(false);
+  };
+
+  const handleLogoDrop = (event) => {
+    event.preventDefault();
+    setLogoDragging(false);
+    applyLogoFile(event.dataTransfer?.files?.[0]);
+  };
+
+  // Custom "Type" dropdown (replaces the native <select>, whose option list can't be themed).
+  const openTypeMenu = () => {
+    if (sampleApps.length === 0) return;
+    setTypeActiveIndex(Math.max(0, sampleApps.findIndex((app) => app.id === form.sampleAppId)));
+    setTypeOpen(true);
+  };
+
+  const chooseType = (appId) => {
+    setForm((prev) => ({ ...prev, sampleAppId: appId }));
+    setTypeOpen(false);
+  };
+
+  const handleTypeKeyDown = (event) => {
+    const lastIndex = sampleApps.length - 1;
+    if (lastIndex < 0) return;
+    switch (event.key) {
+      case 'ArrowDown':
+        event.preventDefault();
+        if (!typeOpen) openTypeMenu();
+        else setTypeActiveIndex((index) => Math.min(index + 1, lastIndex));
+        break;
+      case 'ArrowUp':
+        event.preventDefault();
+        if (!typeOpen) openTypeMenu();
+        else setTypeActiveIndex((index) => Math.max(index - 1, 0));
+        break;
+      case 'Home':
+      case 'End':
+        if (!typeOpen) break;
+        event.preventDefault();
+        setTypeActiveIndex(event.key === 'Home' ? 0 : lastIndex);
+        break;
+      case 'Enter':
+      case ' ':
+        event.preventDefault();
+        if (!typeOpen) openTypeMenu();
+        else if (typeActiveIndex >= 0) chooseType(sampleApps[typeActiveIndex].id);
+        break;
+      case 'Escape':
+        if (!typeOpen) break;
+        event.preventDefault();
+        setTypeOpen(false);
+        break;
+      case 'Tab':
+        setTypeOpen(false);
+        break;
+      default:
+        break;
+    }
+  };
+
+  useEffect(() => {
+    if (!typeOpen) return undefined;
+    const closeOnOutsidePress = (event) => {
+      if (!typeSelectRef.current?.contains(event.target)) setTypeOpen(false);
+    };
+    document.addEventListener('mousedown', closeOnOutsidePress);
+    document.addEventListener('touchstart', closeOnOutsidePress);
+    return () => {
+      document.removeEventListener('mousedown', closeOnOutsidePress);
+      document.removeEventListener('touchstart', closeOnOutsidePress);
+    };
+  }, [typeOpen]);
 
   const handleSubmit = async (event) => {
     event.preventDefault();
@@ -419,6 +688,16 @@ const AddCommunity = ({ onNavigateBack, variant = 'page' }) => {
     if (!memberMobile) {
       setSubmitError('Member identity not found. Please login again and retry.');
       return;
+    }
+
+    // Re-check at submit so a duplicate is blocked even if the blur check never ran or hasn't finished.
+    try {
+      if (await isAppNameTaken(trustName)) {
+        setNameCheck({ status: 'taken', checkedValue: trustName });
+        return;
+      }
+    } catch (err) {
+      console.warn('[AddCommunity] Name availability check failed:', err?.message || err);
     }
 
     const selectedSampleApp = sampleApps.find((app) => app.id === form.sampleAppId) || null;
@@ -566,6 +845,16 @@ const AddCommunity = ({ onNavigateBack, variant = 'page' }) => {
   const hasTrustName = String(form.trustName || '').trim().length > 0;
   const hasType = Boolean(form.sampleAppId);
   const isNameTaken = nameCheck.status === 'taken' && nameCheck.checkedValue === form.trustName.trim();
+  // Drives the name field's look (spinner / green tick / red alert) via data-state.
+  const nameFieldState = nameCheck.checkedValue === form.trustName.trim()
+    ? ({ checking: 'checking', available: 'valid', taken: 'invalid' }[nameCheck.status] || '')
+    : '';
+  // No "Try:" suggestions for reserved (Setu-related) names; they'd only be more variants of the same name.
+  const nameSuggestions = isNameTaken && !isReservedAppName(form.trustName)
+    ? buildNameSuggestions(form.trustName)
+    : [];
+  const selectedType = sampleApps.find((app) => app.id === form.sampleAppId) || null;
+  const selectedPurpose = selectedType?.purpose;
   useEffect(() => {
     if (isHomeVariant) return undefined;
     if (isMenuOpen) {
@@ -635,184 +924,185 @@ const AddCommunity = ({ onNavigateBack, variant = 'page' }) => {
       )}
 
       <div className={isHomeVariant ? 'space-y-5' : 'px-4 pt-5 pb-10 space-y-5'}>
-        <section
-          className="rounded-[28px] border p-5"
-          style={{
-            background: cardBg,
-            borderColor: panelBorder,
-            boxShadow: '0 10px 24px color-mix(in srgb, var(--advertisement-card-shadow) 28%, transparent)',
-          }}
-        >
-          <form className="space-y-5" onSubmit={handleSubmit}>
-            <div>
-              <FieldLabel required>Your App Name</FieldLabel>
+        <style>{LAUNCH_FORM_CSS}</style>
+        <form className="la-card" onSubmit={handleSubmit} noValidate>
+          <div className="la-field" data-state={nameFieldState}>
+            <div className="la-row">
+              <label className="la-lbl" htmlFor="la-app-name">Your App Name<span className="la-req">*</span></label>
+            </div>
+            <div className="la-wrap">
               <input
+                id="la-app-name"
                 type="text"
+                className="la-control has-status"
+                placeholder="e.g. Sunrise Community"
+                autoComplete="off"
+                spellCheck={false}
+                aria-describedby="la-name-err"
                 value={form.trustName}
                 onChange={handleChange('trustName')}
-                onFocus={() => setIsFocused('trustName')}
-                onBlur={() => { setIsFocused(''); checkTrustNameAvailability(); }}
-                className="px-4 py-4 font-semibold placeholder:font-medium"
-                style={{
-                  ...textInputStyle,
-                  borderColor: nameCheck.status === 'taken' && nameCheck.checkedValue === form.trustName.trim()
-                    ? 'var(--brand-red)'
-                    : (isFocused === 'trustName' ? 'var(--app-button-icon)' : panelBorder),
-                  boxShadow: isFocused === 'trustName'
-                    ? `0 0 0 3px ${applyOpacity(theme.primary || '#d4a017', 0.18)}, 0 10px 24px color-mix(in srgb, var(--advertisement-card-shadow) 28%, transparent)`
-                    : textInputStyle.boxShadow,
-                }}
               />
-              {nameCheck.checkedValue === form.trustName.trim() && nameCheck.status === 'checking' && (
-                <p className="mt-2 text-xs" style={{ color: muted }}>Checking availability…</p>
-              )}
-              {nameCheck.checkedValue === form.trustName.trim() && nameCheck.status === 'taken' && (
-                <p className="mt-2 text-xs font-semibold" style={{ color: 'var(--brand-red)' }}>
-                  This name is already taken. Please choose another name.
-                </p>
-              )}
-              {nameCheck.checkedValue === form.trustName.trim() && nameCheck.status === 'available' && (
-                <p className="mt-2 text-xs font-semibold" style={{ color: 'var(--brand-green, #2e9e5b)' }}>
-                  This name is available.
-                </p>
-              )}
-            </div>
-
-            <div>
-              <FieldLabel>Organisation Name</FieldLabel>
-              <input
-                type="text"
-                value={form.legalName}
-                onChange={handleChange('legalName')}
-                onFocus={() => setIsFocused('legalName')}
-                onBlur={() => setIsFocused('')}
-                className="px-4 py-4 font-medium placeholder:font-medium"
-                style={{
-                  ...textInputStyle,
-                  borderColor: isFocused === 'legalName' ? 'var(--app-button-icon)' : panelBorder,
-                  boxShadow: isFocused === 'legalName'
-                    ? `0 0 0 3px ${applyOpacity(theme.primary || '#d4a017', 0.18)}, 0 10px 24px color-mix(in srgb, var(--advertisement-card-shadow) 28%, transparent)`
-                    : textInputStyle.boxShadow,
-                }}
-              />
-            </div>
-
-            <div>
-              <FieldLabel required>Type</FieldLabel>
-              <div className="relative">
-                <select
-                  required
-                  value={form.sampleAppId}
-                  onChange={handleChange('sampleAppId')}
-                  onFocus={() => setIsFocused('sampleAppId')}
-                  onBlur={() => setIsFocused('')}
-                  className="w-full appearance-none px-4 py-4 pr-11 font-medium"
-                  style={{
-                    ...textInputStyle,
-                    borderColor: isFocused === 'sampleAppId' ? 'var(--app-button-icon)' : panelBorder,
-                    boxShadow: isFocused === 'sampleAppId'
-                      ? `0 0 0 3px ${applyOpacity(theme.primary || '#d4a017', 0.18)}, 0 10px 24px color-mix(in srgb, var(--advertisement-card-shadow) 28%, transparent)`
-                      : textInputStyle.boxShadow,
-                  }}
-                >
-                  {sampleApps.length === 0 ? (
-                    <option value="">Loading...</option>
-                  ) : (
-                    sampleApps.map((app) => (
-                      <option key={app.id} value={app.id}>
-                        {getSampleAppLabel(app)}
-                      </option>
-                    ))
-                  )}
-                </select>
-                <ChevronDown
-                  className="pointer-events-none absolute right-4 top-1/2 h-4 w-4 -translate-y-1/2"
-                  style={{ color: muted }}
-                />
+              <div className="la-status">
+                <div className="la-spinner" />
+                <svg className="la-ico-ok" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#4fd1a1" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10" /><path d="m8 12 3 3 5-6" /></svg>
+                <svg className="la-ico-err" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#ff7b7b" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10" /><path d="M12 8v4M12 16h.01" /></svg>
               </div>
-              {(() => {
-                const selectedPurpose = sampleApps.find((app) => app.id === form.sampleAppId)?.purpose;
-                return selectedPurpose ? (
-                  <p className="mt-2 text-xs" style={{ color: muted }}>
-                    {selectedPurpose}
-                  </p>
-                ) : null;
-              })()}
             </div>
+            <div className="la-msg err" id="la-name-err" role="alert" aria-live="polite">
+              <div className="la-line">
+                <AlertTriangle width={16} height={16} strokeWidth={2.4} color="#ff7b7b" aria-hidden="true" />
+                <span>This app name is already in use. Please choose another name.</span>
+              </div>
+              {nameSuggestions.length > 0 ? (
+                <div className="la-suggest">
+                  <span>Try:</span>
+                  {nameSuggestions.map((suggestion) => (
+                    <button
+                      key={suggestion}
+                      type="button"
+                      className="la-chip"
+                      onClick={() => setForm((prev) => ({ ...prev, trustName: suggestion }))}
+                    >
+                      {suggestion}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+            <div className="la-msg ok"><div className="la-line"><span>Great, this name is available.</span></div></div>
+          </div>
 
-            <div>
-              <FieldLabel>Logo Upload</FieldLabel>
+          <div className="la-field">
+            <div className="la-row">
+              <label className="la-lbl" htmlFor="la-org">Organisation Name</label>
+              <span className="la-opt">Optional</span>
+            </div>
+            <input
+              id="la-org"
+              type="text"
+              className="la-control"
+              placeholder="e.g. Sunrise Welfare Trust"
+              autoComplete="organization"
+              value={form.legalName}
+              onChange={handleChange('legalName')}
+            />
+          </div>
+
+          <div className="la-field">
+            <div className="la-row">
+              <label className="la-lbl" htmlFor="la-type">Type<span className="la-req">*</span></label>
+            </div>
+            <div className={`la-select${typeOpen ? ' open' : ''}`} ref={typeSelectRef}>
+              <button
+                id="la-type"
+                type="button"
+                className="la-control la-select-btn"
+                role="combobox"
+                aria-haspopup="listbox"
+                aria-expanded={typeOpen}
+                aria-controls="la-type-list"
+                aria-activedescendant={typeOpen && typeActiveIndex >= 0 ? `la-type-opt-${typeActiveIndex}` : undefined}
+                disabled={sampleApps.length === 0}
+                onClick={() => (typeOpen ? setTypeOpen(false) : openTypeMenu())}
+                onKeyDown={handleTypeKeyDown}
+              >
+                <span>{sampleApps.length === 0 ? 'Loading...' : (selectedType ? getSampleAppLabel(selectedType) : 'Select a type')}</span>
+              </button>
+              <svg className="la-chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m3 6 5 5 5-5" /></svg>
+              {typeOpen ? (
+                <ul className="la-menu" id="la-type-list" role="listbox" aria-labelledby="la-type">
+                  {sampleApps.map((app, index) => (
+                    <li
+                      key={app.id}
+                      id={`la-type-opt-${index}`}
+                      role="option"
+                      aria-selected={app.id === form.sampleAppId}
+                      className={`la-option${index === typeActiveIndex ? ' active' : ''}`}
+                      onMouseEnter={() => setTypeActiveIndex(index)}
+                      onMouseDown={(event) => event.preventDefault()}
+                      onClick={() => chooseType(app.id)}
+                    >
+                      <span>{getSampleAppLabel(app)}</span>
+                      {app.id === form.sampleAppId ? (
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m5 12 5 5 9-10" /></svg>
+                      ) : null}
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+            </div>
+            {selectedPurpose ? <p className="la-hint">{selectedPurpose}</p> : null}
+          </div>
+
+          <div className="la-field">
+            <div className="la-row">
+              <span className="la-lbl">Logo</span>
+              <span className="la-opt">Optional · max 2 MB</span>
+            </div>
+            <label
+              className={`la-drop${logoDragging ? ' drag' : ''}${logoError ? ' bad' : ''}`}
+              htmlFor="la-logo"
+              onDragEnter={handleLogoDragOver}
+              onDragOver={handleLogoDragOver}
+              onDragLeave={handleLogoDragLeave}
+              onDrop={handleLogoDrop}
+            >
+              <div className="la-thumb">
+                {logoPreview ? (
+                  <img src={logoPreview} alt="Logo preview" />
+                ) : (
+                  <Upload width={22} height={22} aria-hidden="true" />
+                )}
+              </div>
+              <div className="la-drop-text">
+                <b>{logoFile ? logoFile.name : 'Upload your logo'}</b>
+                <small className={logoError ? 'e' : ''}>
+                  {logoError
+                    || (logoFile
+                      ? `${Math.round(logoFile.size / 1024)} KB · click to replace`
+                      : 'JPG, PNG or WebP · drag & drop')}
+                </small>
+              </div>
+              <span className="la-btn-sm">{logoFile ? 'Change' : 'Choose'}</span>
               <input
                 ref={fileInputRef}
+                id="la-logo"
                 type="file"
-                accept="image/*"
-                className="hidden"
-                onChange={handleLogoUpload}
+                className="la-file"
+                accept="image/jpeg,image/png,image/webp"
+                onChange={handleLogoInputChange}
               />
-              <button
-                type="button"
-                onClick={() => fileInputRef.current?.click()}
-                className="w-full flex items-center justify-between gap-3 px-4 py-4 text-left transition-all active:scale-[0.99]"
-                style={textInputStyle}
-              >
-                <div className="flex items-center gap-3 min-w-0">
-                  <div
-                    className="flex h-10 w-10 items-center justify-center rounded-xl flex-shrink-0"
-                    style={{ background: accentTint, color: heading }}
-                  >
-                    <Upload className="h-4 w-4" />
-                  </div>
-                  <div className="min-w-0">
-                    <p className="truncate font-medium" style={{ color: logoFile ? 'var(--advertisement-title)' : muted }}>
-                      {logoFile ? logoFile.name : 'Logo'}
-                    </p>
-                    <p className="mt-0.5 text-xs" style={{ color: muted }}>
-                      JPG, PNG, or WebP
-                    </p>
-                  </div>
-                </div>
-                <span className="text-xs font-bold" style={{ color: heading }}>
-                  Choose
-                </span>
-              </button>
-            </div>
+            </label>
+          </div>
 
-            <div>
-              <FieldLabel>Description</FieldLabel>
-              <textarea
-                value={form.description}
-                onChange={handleChange('description')}
-                onFocus={() => setIsFocused('description')}
-                onBlur={() => setIsFocused('')}
-                rows={5}
-                className="resize-none px-4 py-4 font-medium placeholder:font-medium"
-                style={{
-                  ...textInputStyle,
-                  borderColor: isFocused === 'description' ? 'var(--app-button-icon)' : panelBorder,
-                  boxShadow: isFocused === 'description'
-                    ? `0 0 0 3px ${applyOpacity(theme.primary || '#d4a017', 0.18)}, 0 10px 24px color-mix(in srgb, var(--advertisement-card-shadow) 28%, transparent)`
-                    : textInputStyle.boxShadow,
-                }}
-              />
-              <div className="mt-2 flex items-center justify-between text-[11px]" style={{ color: muted }}>
-                <span>{form.description.length}/240</span>
-              </div>
+          <div className="la-field">
+            <div className="la-row">
+              <label className="la-lbl" htmlFor="la-desc">Description</label>
+              <span className="la-opt">Optional</span>
             </div>
+            <textarea
+              id="la-desc"
+              className="la-control"
+              maxLength={DESCRIPTION_MAX_LENGTH}
+              placeholder="What does your app do? Describe it in a line or two."
+              value={form.description}
+              onChange={handleChange('description')}
+            />
+            <div className={`la-count${form.description.length > 210 ? ' warn' : ''}`}>
+              {form.description.length} / {DESCRIPTION_MAX_LENGTH}
+            </div>
+          </div>
 
-            <button
-              type="submit"
-              disabled={!hasTrustName || !hasType || submitting || isNameTaken}
-              className="w-full rounded-[20px] px-5 py-4 text-sm font-extrabold transition-all active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-60"
-              style={{
-                color: 'var(--app-button-text)',
-                background: 'var(--app-button-bg)',
-                boxShadow: '0 16px 34px color-mix(in srgb, var(--app-button-icon) 22%, transparent)',
-              }}
-            >
-              {submitting ? 'Launching...' : 'Launch'}
-            </button>
-          </form>
-        </section>
+          <button
+            type="submit"
+            className={`la-launch${submitting ? ' loading' : ''}`}
+            disabled={!hasTrustName || !hasType || submitting || isNameTaken || nameCheck.status === 'checking'}
+          >
+            <span className="la-spinner" />
+            <span>{submitting ? 'Launching…' : 'Launch'}</span>
+          </button>
+          <p className="la-foot">By launching, you agree to our Terms and Privacy Policy.</p>
+        </form>
 
       </div>
 

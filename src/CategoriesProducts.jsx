@@ -29,6 +29,8 @@ import { getAppHomePath } from './utils/tenantNavigation';
 import { buildSampleCategoryView } from './utils/sampleCategories';
 import { dismissCoachMark, isCoachMarkDismissed } from './utils/appManagerAccess';
 import { AddProductsCoachMark, HowToSheet } from './components/CatalogOnboarding';
+import CategoriesLoading from './CategoriesLoading';
+import useDelayedLoading from './utils/Usedelayedloading';
 import {
   enrichPayloadWithPrices,
   fetchProductCategoryTree,
@@ -237,24 +239,6 @@ function CategoryArt({
           </div>
         </div>
       ) : null}
-    </div>
-  );
-}
-
-function LoadingBubble() {
-  return (
-    <div className="flex flex-col items-center gap-2">
-      <div className="ws-skeleton h-[92px] w-[92px] rounded-full" />
-      <div className="ws-skeleton h-4 w-16 rounded-full" />
-    </div>
-  );
-}
-
-function LoadingCard() {
-  return (
-    <div className="flex flex-col">
-      <div className="ws-skeleton aspect-[0.95/1.18] rounded-[1.45rem]" />
-      <div className="ws-skeleton mt-2 h-4 w-3/4 rounded-full" />
     </div>
   );
 }
@@ -491,6 +475,7 @@ export function CategoriesProductsContent({
   );
   const hasVisibleContent = sliderEntries.length > 0 || cardSections.length > 0;
   const showLoading = loading && !hasVisibleContent;
+  const showLoader = useDelayedLoading(showLoading, 300);
   const showEmpty = !loading && !error && !hasVisibleContent;
   const showPreview = showEmpty;
   const sampleView = useMemo(() => buildSampleCategoryView(), []);
@@ -660,25 +645,7 @@ export function CategoriesProductsContent({
         )}
 
         <div className="ws-scroll" ref={scrollRef}>
-          {showLoading ? (
-            <>
-              <div className="ws-circle-row no-scrollbar">
-                <LoadingBubble />
-                <LoadingBubble />
-                <LoadingBubble />
-              </div>
-              <div className="ws-section">
-                <div className="ws-section-title">Loading categories</div>
-                <div className="ws-card-rows">
-                  <div className="ws-grid" style={{ gridTemplateColumns: 'repeat(3, minmax(0, 1fr))' }}>
-                    <LoadingCard />
-                    <LoadingCard />
-                    <LoadingCard />
-                  </div>
-                </div>
-              </div>
-            </>
-          ) : null}
+          {showLoader ? <CategoriesLoading /> : null}
 
           {!showLoading && error ? (
             <div className="px-4 pt-4">

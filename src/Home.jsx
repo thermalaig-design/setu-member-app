@@ -1530,6 +1530,42 @@ const Home = ({ onNavigate, onLogout }) => {
     };
   }, [selectedTrustId, trustInfo?.id]);
 
+  // "Home trust" = where the user came from: the pinned tenant on a PWA /
+  // slug route, otherwise the default trust. Derived on every render rather
+  // than stored, so it can never go stale or leak between PWA windows. The
+  // Trust List chips follow THIS trust's feature_trustlist flag, so landing on
+  // another trust whose flag is off cannot strand the user without chips.
+  const [mountTrustId] = useState(selectedTrustId);
+  const homeTrustId = normalizeTrustId(pinnedTenantTrustId)
+    || normalizeTrustId(defaultTrust?.id)
+    || normalizeTrustId(import.meta.env.VITE_DEFAULT_TRUST_ID || '')
+    || normalizeTrustId(mountTrustId);
+  const isViewingHomeTrust = !homeTrustId || homeTrustId === normalizeTrustId(selectedTrustId);
+
+  // null = not known yet; the chips stay visible until the flag says otherwise.
+  const [homeTrustListOn, setHomeTrustListOn] = useState(null);
+  useEffect(() => {
+    // On the home trust itself ff() already covers it.
+    if (!homeTrustId || isViewingHomeTrust) return undefined;
+    let cancelled = false;
+    const loadHomeFlag = async (force = false) => {
+      const result = await fetchFeatureFlags(homeTrustId, { force });
+      if (!cancelled && result.success) {
+        setHomeTrustListOn(isFeatureVisible(result.flags, 'feature_trustlist'));
+      }
+    };
+    loadHomeFlag(true);
+    const handleFocus = () => loadHomeFlag(true);
+    const handleVisibility = () => { if (document.visibilityState === 'visible') loadHomeFlag(true); };
+    window.addEventListener('focus', handleFocus);
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => {
+      cancelled = true;
+      window.removeEventListener('focus', handleFocus);
+      document.removeEventListener('visibilitychange', handleVisibility);
+    };
+  }, [homeTrustId, isViewingHomeTrust]);
+
   const handleTrustSelect = async (trustId) => {
     const normalizedId = normalizeTrustId(trustId);
     const isApiAuthoritative = hasAuthoritativeApiMemberships();
@@ -2670,7 +2706,8 @@ const Home = ({ onNavigate, onLogout }) => {
     );
   };
 
-  const shouldShowTrustSelector = trustList.length > 0 && ff('feature_trustlist');
+  const trustListAllowed = isViewingHomeTrust ? ff('feature_trustlist') : homeTrustListOn !== false;
+  const shouldShowTrustSelector = trustList.length > 0 && trustListAllowed;
   const showTrustSelector = shouldShowTrustSelector;
   const surfaceColor = getThemeToken(theme, 'accent_bg', null)
     || theme?.accentBg

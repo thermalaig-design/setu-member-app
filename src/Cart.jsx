@@ -545,6 +545,7 @@ function Cart() {
   const [wishlistItems, setWishlistItems] = useState(() => readWishlistItems());
   const [isCartLoading, setIsCartLoading] = useState(true);
   const [removalPrompt, setRemovalPrompt] = useState(null);
+  const [clearPromptOpen, setClearPromptOpen] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
   const [attributeMenu, setAttributeMenu] = useState(null);
   const [variantOptionsByItemKey, setVariantOptionsByItemKey] = useState({});
@@ -978,8 +979,13 @@ function Cart() {
     navigate(`/categories-products/list/${encodeURIComponent(categoryId)}/detail/${encodeURIComponent(productId)}`);
   };
 
-  const handleClearCart = async () => {
+  const handleClearCart = () => {
     closeAttributeMenu();
+    setClearPromptOpen(true);
+  };
+
+  const confirmClearCart = async () => {
+    setClearPromptOpen(false);
     try {
       const updated = await clearCartItems();
       setItems(updated);
@@ -1349,6 +1355,46 @@ function Cart() {
               <button type="button" className="cart-modal-btn cart-modal-btn--remove" onClick={confirmRemoveFromCart}>
                 <Trash2 className="h-4 w-4" />
                 {titleCaseText('Remove From Cart')}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {clearPromptOpen ? (
+        <div className="cart-modal-overlay" onClick={() => setClearPromptOpen(false)}>
+          <div
+            className="cart-modal"
+            onClick={(event) => event.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="cart-clear-modal-title"
+            aria-describedby="cart-clear-modal-copy"
+          >
+            <div className="cart-modal-accent" />
+            <button type="button" className="cart-modal-close" onClick={() => setClearPromptOpen(false)} aria-label="Close">
+              <X size={18} />
+            </button>
+            <div className="cart-modal-header">
+              <div className="cart-modal-badge">
+                <Trash2 size={18} />
+              </div>
+              <div className="cart-modal-headings">
+                <h2 id="cart-clear-modal-title" className="cart-modal-title">
+                  {titleCaseText('Clear Cart?')}
+                </h2>
+                <p id="cart-clear-modal-copy" className="cart-modal-copy">
+                  {titleCaseText('All items will be removed from your cart.')}
+                </p>
+              </div>
+            </div>
+            <div className="cart-modal-actions cart-modal-actions--pair">
+              <button type="button" className="cart-modal-btn cart-modal-btn--ghost" onClick={() => setClearPromptOpen(false)}>
+                {titleCaseText('Cancel')}
+              </button>
+              <button type="button" className="cart-modal-btn cart-modal-btn--wishlist" onClick={confirmClearCart}>
+                <Trash2 className="h-4 w-4" />
+                {titleCaseText('Clear Cart')}
               </button>
             </div>
           </div>
@@ -1998,12 +2044,18 @@ function Cart() {
           pointer-events: none;
           animation: cartToastIn 0.18s ease-out;
         }
+        .cart-modal-actions--pair {
+          grid-template-columns: 1fr 1fr;
+        }
         @media (min-width: 420px) {
           .cart-modal-actions {
             grid-template-columns: 1fr 1fr;
           }
           .cart-modal-btn--ghost {
             grid-column: 1 / -1;
+          }
+          .cart-modal-actions--pair .cart-modal-btn--ghost {
+            grid-column: auto;
           }
         }
         @keyframes cartModalIn {

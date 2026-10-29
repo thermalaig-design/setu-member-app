@@ -1,11 +1,10 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { ArrowLeft, ExternalLink, Home as HomeIcon } from 'lucide-react';
+import { CornerUpLeft, ExternalLink } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { Capacitor } from '@capacitor/core';
 import { Browser } from '@capacitor/browser';
 import { useAppTheme } from '../context/ThemeContext';
 import { getNavbarThemeStyles } from '../utils/themeUtils';
-import { getAppHomePath } from '../utils/tenantNavigation';
 import { getUserPanelToken } from '../services/authService';
 import BottomNav from './BottomNav';
 
@@ -303,26 +302,18 @@ const PersistentUserPanel = ({ isActive, onNavigate }) => {
         }}
       >
         <div className="h-[3px]" style={{ background: 'var(--navbar-accent)' }} />
-        <div className="px-4 pt-4 pb-4 flex items-center justify-between">
+        <div className="relative px-4 pt-4 pb-4 flex items-center justify-between">
           <button
             type="button"
             onClick={() => navigate(-1)}
-            className="p-2 rounded-xl transition-colors"
+            className="p-2 rounded-xl transition-colors flex items-center gap-1.5"
             style={{ color: navbarTheme?.textColor, background: 'transparent' }}
-            aria-label="Back"
+            aria-label="Back to app"
           >
-            <ArrowLeft className="h-5 w-5" />
+            <CornerUpLeft className="h-5 w-5" />
+            <span className="text-xs font-semibold">Back to app</span>
           </button>
-          <h1 className="text-lg font-extrabold tracking-wide" style={{ color: navbarTheme?.textColor }}>App Manager</h1>
-          <button
-            type="button"
-            onClick={() => navigate(getAppHomePath())}
-            className="p-2 rounded-xl transition-colors"
-            style={{ color: navbarTheme?.textColor, background: 'transparent' }}
-            aria-label="Home"
-          >
-            <HomeIcon className="h-5 w-5" />
-          </button>
+          <h1 className="absolute left-1/2 -translate-x-1/2 text-lg font-extrabold tracking-wide" style={{ color: navbarTheme?.textColor }}>App Manager</h1>
         </div>
       </div>
 

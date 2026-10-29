@@ -6,8 +6,11 @@ import './App.css'
 import App from './App.jsx'
 import { NavigationProvider } from './context/ImprovedNavigationProvider'
 import { TenantProvider } from './context/TenantContext'
+import { restoreStandaloneScope } from './utils/tenantNavigation'
 
-createRoot(document.getElementById('root')).render(
+const redirectingToScope = restoreStandaloneScope()
+
+if (!redirectingToScope) createRoot(document.getElementById('root')).render(
   <StrictMode>
     <BrowserRouter>
       <TenantProvider>

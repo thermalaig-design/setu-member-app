@@ -93,3 +93,47 @@ export const getAppHomePath = () => {
   const slug = readWindowTenantSlug();
   return slug ? `/app/${slug}/` : '/';
 };
+
+// In-app SPA routes (/user-panel, /notices, …) drop the slug, so they sit
+// outside the manifest scope '/app/<slug>/'. Navigating there with pushState
+// is fine, but a reload loads that URL as a fresh document and Android shows
+// the out-of-scope toolbar (X / title / domain / menu) over the installed PWA.
+// So on such a load, remember the route, bounce through the in-scope start
+// URL (a real document load, so no toolbar), then put the route back with
+// replaceState — which Chrome does not treat as a navigation. Returns true
+// when a redirect was started and the app should not render yet.
+const SCOPE_RESTORE_KEY = 'scope_restore_target';
+
+export const restoreStandaloneScope = () => {
+  if (!isStandaloneDisplay()) return false;
+  const slug = readWindowTenantSlug();
+  if (!slug) return false;
+
+  const scopePath = `/app/${slug}/`;
+  const { pathname, search, hash } = window.location;
+
+  try {
+    if (pathname.startsWith(scopePath)) {
+      const target = window.sessionStorage.getItem(SCOPE_RESTORE_KEY);
+      if (!target) return false;
+      window.sessionStorage.removeItem(SCOPE_RESTORE_KEY);
+      if (target.startsWith('/') && !target.startsWith('//')) {
+        window.history.replaceState(window.history.state, '', target);
+      }
+      return false;
+    }
+
+    // Another tenant's URL, or '/app/<slug>' missing its trailing slash.
+    if (pathname.toLowerCase() === `/app/${slug}`) {
+      window.location.replace(`${scopePath}${search}${hash}`);
+      return true;
+    }
+    if (pathname.startsWith('/app/')) return false;
+
+    window.sessionStorage.setItem(SCOPE_RESTORE_KEY, `${pathname}${search}${hash}`);
+    window.location.replace(scopePath);
+    return true;
+  } catch {
+    return false;
+  }
+};

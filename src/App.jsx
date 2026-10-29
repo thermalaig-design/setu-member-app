@@ -3,6 +3,8 @@ import { Routes, Route, useNavigate, useLocation, useParams, Navigate } from 're
 import { LocalNotifications } from '@capacitor/local-notifications';
 import { ThemeContext } from './context/ThemeContext';
 import { GalleryProvider } from './context/GalleryContext';
+import ConnectionLostPage from './components/ConnectionLostPage';
+import { isConnectionFailed, subscribeConnectionStatus } from './utils/connectionStatus';
 import Login from './Login';
 import VIPLogin from './VIPLogin';
 import Home from './Home';
@@ -389,6 +391,8 @@ const HospitalTrusteeApp = () => {
     ? defaultThemeTrust.id
     : (activeTrustId || defaultThemeTrust.id);
   const { theme: appTheme, refreshTheme } = useTheme(resolvedThemeTrustId);
+  const [connectionLost, setConnectionLost] = useState(isConnectionFailed());
+  useEffect(() => subscribeConnectionStatus(setConnectionLost), []);
   const notificationLightColorRef = useRef('');
   const pushInitCleanupRef = useRef(null);
   const pushInitAttemptedRef = useRef(false);
@@ -1678,6 +1682,7 @@ const HospitalTrusteeApp = () => {
         >
           {appContent}
         </div>
+        {connectionLost ? <ConnectionLostPage /> : null}
       </GalleryProvider>
     </ThemeContext.Provider>
   );

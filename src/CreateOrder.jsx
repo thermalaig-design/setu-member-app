@@ -25,9 +25,9 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-
 const T = {
   page: 'var(--page-bg, var(--app-page-bg))',
   surface: 'var(--surface-color)',
-  text: 'var(--surface-color)',
-  muted: 'color-mix(in srgb, var(--surface-color) 64%, var(--surface-color))',
-  line: 'color-mix(in srgb, var(--surface-color) 12%, transparent)',
+  text: 'var(--body-text-color)',
+  muted: 'color-mix(in srgb, var(--body-text-color) 62%, var(--surface-color))',
+  line: 'color-mix(in srgb, var(--body-text-color) 12%, transparent)',
 };
 
 const normalizeText = (value) => {
@@ -582,7 +582,7 @@ function CreateOrder() {
         } catch (paymentError) {
           setError(
             paymentError?.code === 'PAYMENT_CANCELLED'
-              ? 'Payment was cancelled. Your order is saved — tap Pay now to try again.'
+              ? 'Payment was cancelled. Your order is saved — tap Pay to try again.'
               : paymentError?.message || 'Payment was not completed. Please try again.'
           );
           return;
@@ -642,6 +642,7 @@ function CreateOrder() {
   };
 
   const isCheckoutDataLoading = isCartLoading || isCustomerDetailsLoading || isTrustSettingsLoading;
+  const isSubmitButtonDisabled = isCheckoutDataLoading || isSubmitting;
 
   const successPopup = showSuccessPopup && typeof document !== 'undefined'
     ? createPortal(
@@ -764,7 +765,7 @@ function CreateOrder() {
               <ShoppingBag className="h-7 w-7" style={{ color: '#fff' }} />
             </div>
             <div>
-              <p className="text-xl font-extrabold" style={{ color: 'var(--surface-color)' }}>
+              <p className="text-xl font-extrabold" style={{ color: T.text }}>
                 Loading your cart
               </p>
               <p className="mt-2 text-sm leading-6" style={{ color: T.muted }}>
@@ -778,7 +779,7 @@ function CreateOrder() {
               <ShoppingBag className="h-7 w-7" style={{ color: '#fff' }} />
             </div>
             <div>
-              <p className="text-xl font-extrabold" style={{ color: 'var(--surface-color)' }}>
+              <p className="text-xl font-extrabold" style={{ color: T.text }}>
                 Your cart is empty
               </p>
               <p className="mt-2 text-sm leading-6" style={{ color: T.muted }}>
@@ -790,8 +791,8 @@ function CreateOrder() {
               onClick={() => navigate('/cart')}
               className="min-h-[46px] rounded-2xl px-5 text-sm font-extrabold transition-transform active:scale-[0.99]"
               style={{
-                background: `linear-gradient(135deg, ${applyOpacity(theme.accent, 0.85)}, ${theme.accentBg})`,
-                color: '#fff',
+                background: 'var(--app-button-bg)',
+                color: 'var(--app-button-text)',
               }}
             >
               Go to cart
@@ -806,7 +807,7 @@ function CreateOrder() {
                     <p className="text-xs font-bold uppercase tracking-[0.24em]" style={{ color: theme.primary }}>
                       Customer Details
                     </p>
-                    <h2 className="mt-1 text-xl font-extrabold" style={{ color: 'var(--surface-color)' }}>
+                    <h2 className="mt-1 text-xl font-extrabold" style={{ color: T.text }}>
                       Your profile details
                     </h2>
                   </div>
@@ -845,7 +846,7 @@ function CreateOrder() {
                           <span className="block h-4 w-2/3 rounded-full animate-pulse" style={skeletonLineStyle} />
                         </div>
                       ) : (
-                        <p className="mt-0.5 truncate text-sm font-semibold" style={{ color: 'var(--surface-color)' }}>
+                        <p className="mt-0.5 truncate text-sm font-semibold" style={{ color: T.text }}>
                           {customerInfo.fullName || 'Not available'}<br/>
                           {customerInfo.mobile || 'Not available'}<br/>
                           {customerInfo.email || null}
@@ -878,7 +879,7 @@ function CreateOrder() {
                         <p className="text-xs font-bold uppercase tracking-[0.24em]" style={{ color: theme.primary }}>
                           Order summary
                         </p>
-                        <h2 className="mt-1 text-xl font-extrabold" style={{ color: 'var(--surface-color)' }}>
+                        <h2 className="mt-1 text-xl font-extrabold" style={{ color: T.text }}>
                           Review your order
                         </h2>
                       </>
@@ -922,7 +923,7 @@ function CreateOrder() {
                       >
                         <div className="flex items-start justify-between gap-3">
                           <div className="min-w-0 flex-1">
-                            <p className="truncate text-sm font-extrabold" style={{ color: 'var(--surface-color)' }}>
+                            <p className="truncate text-sm font-extrabold" style={{ color: T.text }}>
                               {item.product_name}
                             </p>
                             {item.category_name ? (
@@ -935,7 +936,7 @@ function CreateOrder() {
                             <p className="text-[11px] font-bold uppercase tracking-[0.18em]" style={{ color: theme.primary }}>
                               Qty {pricing.quantity}
                             </p>
-                            <p className="mt-1 text-sm font-extrabold" style={{ color: 'var(--surface-color)' }}>
+                            <p className="mt-1 text-sm font-extrabold" style={{ color: T.text }}>
                               {formatCurrency(pricing.totalAmount)}
                             </p>
                           </div>
@@ -996,31 +997,31 @@ function CreateOrder() {
                     <>
                       <div className="flex items-center justify-between gap-3 py-1 text-sm" style={{ color: T.muted }}>
                         <span>Products</span>
-                        <strong style={{ color: 'var(--surface-color)' }}>{summary.distinctItems}</strong>
+                        <strong style={{ color: T.text }}>{summary.distinctItems}</strong>
                       </div>
                       <div className="flex items-center justify-between gap-3 py-1 text-sm" style={{ color: T.muted }}>
                         <span>Total quantity</span>
-                        <strong style={{ color: 'var(--surface-color)' }}>{summary.totalQuantity}</strong>
+                        <strong style={{ color: T.text }}>{summary.totalQuantity}</strong>
                       </div>
                       <div className="flex items-center justify-between gap-3 py-1 text-sm" style={{ color: T.muted }}>
                         <span>Subtotal</span>
-                        <strong style={{ color: 'var(--surface-color)' }}>{formatCurrency(summary.subtotal)}</strong>
+                        <strong style={{ color: T.text }}>{formatCurrency(summary.subtotal)}</strong>
                       </div>
                       <div className="flex items-center justify-between gap-3 py-1 text-sm" style={{ color: T.muted }}>
                         <span>Taxes</span>
-                        <strong style={{ color: 'var(--surface-color)' }}>{formatCurrency(summary.taxAmount)}</strong>
+                        <strong style={{ color: T.text }}>{formatCurrency(summary.taxAmount)}</strong>
                       </div>
                       {hasDeliveryCharge ? (
                         <div className="flex items-center justify-between gap-3 py-1 text-sm" style={{ color: T.muted }}>
                           <span>Delivery</span>
-                          <strong style={{ color: 'var(--surface-color)' }}>{formatCurrency(summary.transportAmount)}</strong>
+                          <strong style={{ color: T.text }}>{formatCurrency(summary.transportAmount)}</strong>
                         </div>
                       ) : null}
                       <div className="mt-2 flex items-center justify-between gap-3 border-t pt-3" style={{ borderColor: T.line }}>
                         <span className="text-sm font-semibold" style={{ color: T.muted }}>
                           Grand total
                         </span>
-                        <strong className="text-lg" style={{ color: 'var(--surface-color)' }}>
+                        <strong className="text-lg" style={{ color: T.text }}>
                           {formatCurrency(summary.totalAmount)}
                         </strong>
                       </div>
@@ -1040,7 +1041,7 @@ function CreateOrder() {
                   </div>
                 ) : null}
 
-                <div className="mt-5 grid gap-3">
+                <div className="mt-5 grid grid-cols-2 gap-3">
                   <button
                     type="button"
                     onClick={() => navigate('/cart')}
@@ -1056,24 +1057,20 @@ function CreateOrder() {
                   <button
                     type="submit"
                     form="create-order-form"
-                    className="min-h-[50px] rounded-2xl px-4 text-sm font-extrabold transition-transform active:scale-[0.99]"
+                    disabled={isSubmitButtonDisabled}
+                    className="min-h-[50px] rounded-2xl px-4 text-sm font-extrabold transition-all active:scale-[0.99] disabled:cursor-not-allowed disabled:active:scale-100"
                     style={{
-                      background: `linear-gradient(135deg, ${applyOpacity(theme.accent, 0.85)}, ${theme.accentBg})`,
-                      color: '#fff',
+                      background: 'var(--app-button-bg)',
+                      color: 'var(--app-button-text)',
+                      opacity: isSubmitButtonDisabled ? 0.5 : 1,
                     }}
                   >
-                    {isTrustSettingsLoading
-                      ? 'Loading trust settings...'
-                      : isCustomerDetailsLoading
-                        ? 'Loading profile...'
-                        : isSubmitting
-                          ? 'Processing...'
-                          : 'Pay now'}
+                    {isSubmitting ? 'Processing...' : selectedTrustPaymentGateway === true ? 'Pay' : 'Confirm'}
                   </button>
                 </div>
 
                 <p className="mt-3 text-center text-[11px] leading-5" style={{ color: T.muted }}>
-                  By tapping Pay now, you confirm the order details above.
+                  By tapping {selectedTrustPaymentGateway === true ? 'Pay' : 'Confirm'}, you confirm the order details above.
                 </p>
               </div>
             </aside>

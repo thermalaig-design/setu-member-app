@@ -1226,7 +1226,7 @@ function Wishlist() {
           font-size: 14px;
           font-weight: 700;
           line-height: 1.35;
-          color: var(--surface-color);
+          color: ${primaryColor};
           display: -webkit-box;
           -webkit-line-clamp: 2;
           -webkit-box-orient: vertical;

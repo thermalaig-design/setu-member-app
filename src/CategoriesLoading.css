@@ -1,0 +1,206 @@
+/* ---------- Tokens ---------- */
+.cl-root {
+  --cl-bg: #eaf2fb;
+  --cl-skeleton: #dce5ef;
+  --cl-veil: rgba(234, 242, 251, 0.4);
+  --cl-gold: #c9a04b;
+  --cl-track: #eef2f7;
+  --cl-card: #ffffff;
+  --cl-text: #1e2a3a;
+  --cl-muted: #5a6a80;
+
+  position: relative;
+  flex: 1;
+  min-height: 100%;
+  overflow: hidden;
+  background: var(--cl-bg);
+  font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  color: var(--cl-text);
+}
+
+/* ---------- Skeleton ---------- */
+.cl-skeleton {
+  padding: 18px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  animation: cl-breathe 2.4s ease-in-out infinite;
+}
+
+.cl-sk {
+  background: var(--cl-skeleton);
+}
+
+.cl-circles {
+  display: flex;
+  gap: 16px;
+  overflow: hidden;
+}
+
+.cl-circle-item {
+  width: 76px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 9px;
+}
+
+.cl-circle {
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+}
+
+.cl-line {
+  height: 10px;
+  border-radius: 5px;
+}
+
+.cl-heading {
+  width: 90px;
+  height: 16px;
+  border-radius: 8px;
+  margin-top: 4px;
+}
+
+.cl-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: -4px;
+}
+
+.cl-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
+.cl-tile-img {
+  aspect-ratio: 1 / 1;
+  border-radius: 14px;
+}
+
+.cl-banners {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.cl-banner {
+  height: 150px;
+  border-radius: 16px;
+}
+
+/* ---------- Veil ---------- */
+.cl-veil {
+  position: absolute;
+  inset: 0;
+  background: var(--cl-veil);
+}
+
+/* ---------- Centered loader ---------- */
+.cl-center {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 18px;
+  animation: cl-fade-in 0.4s ease-out both;
+}
+
+.cl-card {
+  width: 96px;
+  height: 96px;
+  border-radius: 28px;
+  background: var(--cl-card);
+  box-shadow: 0 10px 30px rgba(30, 51, 80, 0.12), 0 1px 3px rgba(30, 51, 80, 0.08);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.cl-spinner {
+  position: relative;
+  width: 56px;
+  height: 56px;
+}
+
+.cl-spinner svg {
+  position: absolute;
+  inset: 0;
+}
+
+.cl-track circle {
+  fill: none;
+  stroke: var(--cl-track);
+  stroke-width: 4;
+}
+
+.cl-rotor {
+  animation: cl-rotate 1.8s linear infinite;
+}
+
+.cl-arc {
+  fill: none;
+  stroke: var(--cl-gold);
+  stroke-width: 4;
+  stroke-linecap: round;
+  animation: cl-dash 1.5s ease-in-out infinite;
+}
+
+.cl-text {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  text-align: center;
+}
+
+.cl-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--cl-text);
+}
+
+.cl-subtitle {
+  font-size: 13px;
+  color: var(--cl-muted);
+}
+
+/* ---------- Animations ---------- */
+@keyframes cl-breathe {
+  0%, 100% { opacity: 0.75; }
+  50% { opacity: 0.6; }
+}
+
+@keyframes cl-rotate {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes cl-dash {
+  0%   { stroke-dasharray: 1 200;   stroke-dashoffset: 0; }
+  50%  { stroke-dasharray: 100 200; stroke-dashoffset: -30; }
+  100% { stroke-dasharray: 100 200; stroke-dashoffset: -124; }
+}
+
+@keyframes cl-fade-in {
+  from { opacity: 0; transform: translate(-50%, -46%); }
+  to   { opacity: 1; transform: translate(-50%, -50%); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cl-skeleton,
+  .cl-center,
+  .cl-rotor,
+  .cl-arc {
+    animation: none !important;
+  }
+  .cl-arc {
+    stroke-dasharray: 60 200;
+  }
+}
