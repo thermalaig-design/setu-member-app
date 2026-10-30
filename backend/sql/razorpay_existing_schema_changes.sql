@@ -1,4 +1,8 @@
 -- #2: allow Razorpay methods and the pending-row placeholder.
+-- Drop the legacy name too: CHECK constraints apply together, so leaving
+-- this older constraint would still reject Razorpay and other new modes.
+ALTER TABLE public.product_payments
+  DROP CONSTRAINT IF EXISTS product_payments_mode_check;
 ALTER TABLE public.product_payments
   DROP CONSTRAINT IF EXISTS product_payments_payment_mode_check;
 ALTER TABLE public.product_payments

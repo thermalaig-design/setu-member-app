@@ -206,6 +206,7 @@ const ContactUs = ({ onNavigateBack }) => {
                   {contact.contact_number && (
                     <a
                       href={`tel:${contact.contact_number}`}
+                      data-track="call_click"
                       className="flex items-start gap-3 rounded-2xl p-3 transition-all"
                       style={{ background: 'color-mix(in srgb, var(--advertisement-card-bg) 78%, var(--app-page-bg))' }}
                     >

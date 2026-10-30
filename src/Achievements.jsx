@@ -212,7 +212,7 @@ const AchievementSummaryCard = ({ item, featured = false, showTimelineDot = fals
       <div className={featured ? 'p-4 sm:p-5' : 'p-3.5 sm:p-4'}>
         <button
           type="button"
-          onClick={() => onOpenDetail?.(item)}
+          data-track="achievement_open" onClick={() => onOpenDetail?.(item)}
           className="w-full text-left"
           aria-label={`Open achievement details for ${item.name}`}
         >
@@ -256,7 +256,7 @@ const AchievementSummaryCard = ({ item, featured = false, showTimelineDot = fals
           <div className="mt-4">
             <button
               type="button"
-              onClick={() => onOpenDetail?.(item)}
+              data-track="achievement_open" onClick={() => onOpenDetail?.(item)}
               className="group w-full overflow-hidden rounded-2xl border text-left transition-transform active:scale-[0.99]"
               style={{
                 borderColor: 'var(--advertisement-card-border)',
@@ -290,7 +290,7 @@ const AchievementSummaryCard = ({ item, featured = false, showTimelineDot = fals
 
         <button
           type="button"
-          onClick={() => onOpenDetail?.(item)}
+          data-track="achievement_open" onClick={() => onOpenDetail?.(item)}
           className="w-full text-left"
           aria-label={`Open achievement details for ${item.name}`}
         >

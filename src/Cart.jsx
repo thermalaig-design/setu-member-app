@@ -1,3 +1,4 @@
+import { track } from './services/analytics';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Check, ChevronDown, ChevronLeft, Heart, Home as HomeIcon, ShoppingCart, Trash2, X } from 'lucide-react';
@@ -680,6 +681,7 @@ function Cart() {
         attributeValues: item.attribute_values || [],
       });
       setItems(updated);
+      track('cart_quantity_update', { product_id: String(item.id), quantity: Number(nextQuantity) });
       return updated;
     } catch (cartError) {
       showToast(cartError?.message || 'Unable To Update Cart');
@@ -905,6 +907,7 @@ function Cart() {
     closeAttributeMenu();
     try {
       const updated = await removeCartProduct(item.id, item.trust_id, { item });
+      track('remove_from_cart', { product_id: String(item.id) });
       setItems(updated);
       showToast(toastLabel);
       return updated;
@@ -945,6 +948,7 @@ function Cart() {
       }
 
       setItems(result?.cartItems || []);
+      track('cart_move_to_wishlist', { product_id: String(item.id) });
       showToast(result?.alreadyInWishlist ? 'Already In Wishlist – Removed From Cart' : 'Moved To Wishlist');
     } catch (cartError) {
       showToast(cartError?.message || 'Unable To Move To Wishlist');
@@ -976,6 +980,7 @@ function Cart() {
       return;
     }
 
+    track('product_open', { product_id: productId, category_id: categoryId, source: 'cart' });
     navigate(`/categories-products/list/${encodeURIComponent(categoryId)}/detail/${encodeURIComponent(productId)}`);
   };
 
@@ -988,6 +993,7 @@ function Cart() {
     setClearPromptOpen(false);
     try {
       const updated = await clearCartItems();
+      track('cart_clear');
       setItems(updated);
     } catch (cartError) {
       showToast(cartError?.message || 'Unable To Clear Cart');

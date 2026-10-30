@@ -7,6 +7,14 @@ import App from './App.jsx'
 import { NavigationProvider } from './context/ImprovedNavigationProvider'
 import { TenantProvider } from './context/TenantContext'
 import { restoreStandaloneScope } from './utils/tenantNavigation'
+import { track } from './services/analytics'
+
+// data-track="event_name" wale element (ya parent) par click hone par event bhejo
+document.addEventListener('click', (e) => {
+  const el = e.target instanceof Element ? e.target.closest('[data-track]') : null
+  const name = el?.getAttribute('data-track')
+  if (name) track(name, { screen_name: window.location.pathname })
+}, true) // capture: stopPropagation wale handlers ke baad bhi chale
 
 const redirectingToScope = restoreStandaloneScope()
 

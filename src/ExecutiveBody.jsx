@@ -412,6 +412,7 @@ export const ExecutiveBodyContent = ({ onNavigate, variant = 'page' }) => {
           <Search className="h-4 w-4" style={{ color: 'var(--advertisement-card-bg)' }} />
           <input
             type="text"
+            data-track="search_click"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder={tab === 'committee' ? 'Search committees or members' : 'Search by name, role, membership, mobile'}

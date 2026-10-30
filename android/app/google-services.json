@@ -1,13 +1,13 @@
 {
   "project_info": {
-    "project_number": "441473774407",
-    "project_id": "mah-setu",
-    "storage_bucket": "mah-setu.firebasestorage.app"
+    "project_number": "859091249211",
+    "project_id": "setu-ai-33ea9",
+    "storage_bucket": "setu-ai-33ea9.firebasestorage.app"
   },
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:441473774407:android:4be8597084d368a6111262",
+        "mobilesdk_app_id": "1:859091249211:android:3aa2cdc65ee50e14f6141e",
         "android_client_info": {
           "package_name": "com.Setu.app"
         }
@@ -15,7 +15,7 @@
       "oauth_client": [],
       "api_key": [
         {
-          "current_key": "AIzaSyDAsiqBgq9vN-TDMEERsXl1Tek9BDiUknE"
+          "current_key": "AIzaSyBWlmuMT3-Gaurugy6gg58yv_6w-LX0AOw"
         }
       ],
       "services": {

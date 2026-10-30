@@ -1,3 +1,4 @@
+import { track } from './services/analytics';
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
@@ -706,6 +707,7 @@ const OtherMemberships = ({ onNavigate, variant = 'page' }) => {
     setDeletingId(id);
     try {
       await deleteOtherMembership(id);
+      track('membership_remove');
       setOtherMems(prev => prev.filter(m => m.id !== id));
     } catch (err) {
       alert('Failed to delete: ' + (err?.message || 'Unknown error'));
@@ -727,6 +729,7 @@ const OtherMemberships = ({ onNavigate, variant = 'page' }) => {
     const trustId = normalizeText(link?.trust_id || link?.Trust?.id);
     if (!trustId || openingTrustId) return;
 
+    track('membership_app_open', { trust_id: trustId });
     trackAction('app_clicked', {
       trust_id: trustId,
       trust_name: normalizeText(link?.Trust?.name || link?.organisation_name),
@@ -770,6 +773,7 @@ const OtherMemberships = ({ onNavigate, variant = 'page' }) => {
   }, [isIOS, trustLinks]);
 
   const openTrustIdCard = (link) => {
+    track('trust_id_card_open');
     trackAction('trust_id_card_opened', {
       trust_id: normalizeText(link?.trust_id || link?.Trust?.id),
       trust_name: normalizeText(link?.Trust?.name || link?.organisation_name),

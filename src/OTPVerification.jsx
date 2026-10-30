@@ -6,6 +6,7 @@ import { fetchDirectoryData } from './services/directoryService';
 import { fetchActiveTrustsByMobile, fetchMemberTrustMemberships, fetchTrustById, fetchTrustByAppSlug } from './services/trustService';
 import { logUserSessionEvent } from './services/sessionAuditService';
 import { trackMetaEvent } from './services/metaEvents';
+import { track, trackLogin } from './services/analytics';
 import { getSystemInfoMetadata } from './services/systemInfoService';
 import { persistUserSession } from './utils/storageUtils';
 import { setLoginTermsPromptPending } from './utils/legalContent';
@@ -444,6 +445,7 @@ function OTPVerification() {
         trustId: normalizeText(authDefaultTrust.id)
       });
       if (!result.success) {
+        track('api_error', { screen_name: 'otp_verification', code: 'otp_verify_failed' });
         setError(result.message || 'Invalid OTP. Please try again.');
         setLoading(false);
         return;
@@ -461,6 +463,7 @@ function OTPVerification() {
       // TODO: verify-otp / check-phone responses expose no new-user flag yet; once the
       // backend returns one, send this only for new users.
       trackMetaEvent('fb_mobile_complete_registration', { fb_registration_method: 'phone_otp' });
+      trackLogin();
 
       if (accountCandidates.length > 1) {
         setError('');
@@ -478,6 +481,7 @@ function OTPVerification() {
       );
     } catch (err) {
       console.error('[OTP] Verify error:', err);
+      track('api_error', { screen_name: 'otp_verification', code: 'otp_verify_exception' });
       setError(
         otpVerified
           ? 'Failed to continue with selected account. Please try again.'

@@ -900,6 +900,7 @@ export const NoticesContent = ({ onNavigate, variant = 'page' }) => {
               key={notice.id}
               role="button"
               tabIndex={0}
+              data-track="notice_open"
               onClick={() => openNoticeDetail(notice.id)}
               onKeyDown={(event) => {
                 if (event.target !== event.currentTarget) return;

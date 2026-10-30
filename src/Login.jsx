@@ -4,6 +4,7 @@ import { useBackNavigation } from './hooks';
 import { useTrustDataVersion } from './hooks/useTrustDataVersion';
 import { checkPhoneNumber } from './services/authService';
 import { fetchTrustById } from './services/trustService';
+import { track } from './services/analytics';
 import { useTenant } from './context/TenantContext';
 import { getAppHomePath, readWindowTenantSlug } from './utils/tenantNavigation';
 import { resolveTenantAuthSlug } from './utils/tenantAuthSelection';
@@ -162,6 +163,7 @@ function Login() {
     try {
       const checkResult = await checkPhoneNumber(phoneNumber);
       if (!checkResult.success) {
+        track('api_error', { screen_name: 'login', code: 'check_phone_failed' });
         setError(checkResult.message);
         setLoading(false);
         return;
@@ -178,6 +180,7 @@ function Login() {
       });
     } catch (err) {
       console.error('[Login] Error checking phone:', err);
+      track('api_error', { screen_name: 'login', code: 'check_phone_exception' });
       setError('Failed to verify phone number. Please try again.');
     } finally {
       setLoading(false);

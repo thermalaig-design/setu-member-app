@@ -1,3 +1,4 @@
+import { track } from './services/analytics';
 import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
@@ -285,6 +286,7 @@ export function OrderHistoryContent({ variant = 'page' } = {}) {
   };
 
   const openOrder = (order) => {
+    track('order_open', { order_id: String(order.id) });
     navigate(`/order-history/${encodeURIComponent(order.id)}`, { state: { order } });
   };
 

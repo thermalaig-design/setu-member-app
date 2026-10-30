@@ -1,3 +1,4 @@
+import { track } from './services/analytics';
 import { useGalleryContext } from './context/GalleryContext';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -350,6 +351,7 @@ export function GalleryContent({ onNavigate, variant = 'page' }) {
 
   const handleAlbumClick = async (albumId) => {
     const aid = String(albumId);
+    track('gallery_album_open', { album_id: aid });
     setSelectedAlbumId(aid);
     setCurrentPage(1);
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -366,7 +368,7 @@ export function GalleryContent({ onNavigate, variant = 'page' }) {
     void loadAlbumPageRef.current(selectedAlbumId, currentPage);
   }, [currentPage, selectedAlbumId]);
 
-  const openLightbox = (image) => { setSelectedImage(image); setIsPlaying(true); };
+  const openLightbox = (image) => { track('gallery_image_open'); setSelectedImage(image); setIsPlaying(true); };
   const closeLightbox = () => { setSelectedImage(null); setIsPlaying(false); };
   const goToPrevious = () => {
     const idx = filteredImages.findIndex((img) => img.id === selectedImage.id);

@@ -1,3 +1,4 @@
+import { track } from './services/analytics';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Check, ChevronDown, FileText, HomeIcon, Menu, Plus, ShieldCheck, X } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
@@ -242,6 +243,7 @@ const NominationDetails = ({ onNavigate }) => {
       if (error) throw error;
       await refreshNominations();
       setNominationForm({ family_member_id: '' });
+      track('nomination_save');
       setMessage({ type: 'success', text: 'Nominee saved successfully.' });
     } catch (error) {
       setMessage({ type: 'error', text: error?.message || 'Unable to update nominee.' });
@@ -316,6 +318,7 @@ const NominationDetails = ({ onNavigate }) => {
         .in('id', targetIds);
       if (error) throw error;
       await refreshNominations();
+      track('nomination_remove');
       setMessage({ type: 'success', text: 'Nomination removed.' });
     } catch (error) {
       setMessage({ type: 'error', text: error?.message || 'Unable to remove nomination.' });

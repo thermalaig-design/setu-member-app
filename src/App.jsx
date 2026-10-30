@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useLayoutEffect } from 'react';
-import { Routes, Route, useNavigate, useLocation, useParams, Navigate } from 'react-router-dom';
+import { Routes, Route, useNavigate, useLocation, useParams, Navigate, matchPath } from 'react-router-dom';
 import { LocalNotifications } from '@capacitor/local-notifications';
 import { ThemeContext } from './context/ThemeContext';
 import { GalleryProvider } from './context/GalleryContext';
@@ -82,6 +82,36 @@ import {
   useTheme,
   useInAppUpdate
 } from './hooks';
+
+
+import { trackScreen } from './services/analytics';
+
+// Dynamic IDs (event/order/product/tenant slug etc.) screen name mein na jayein
+const TRACKED_ROUTE_PATTERNS = [
+  '/notices/:noticeId',
+  '/facilities/:facilityId',
+  '/events/:eventId',
+  '/achievements/:achievementId',
+  '/categories-products/list/:categoryId/detail/:productId',
+  '/categories-products/list/:categoryId',
+  '/order-history/:orderId',
+  '/app/:appSlug/*',
+  '/app/:appSlug',
+];
+
+const getScreenName = (pathname) => {
+  const matched = TRACKED_ROUTE_PATTERNS.find((pattern) => matchPath(pattern, pathname));
+  const name = (matched || pathname).replace(/^\/+/, '').replace(/\/\*$/, '').replace(/:/g, '');
+  return name || 'home';
+};
+
+const RouteTracker = () => {
+  const { pathname } = useLocation();
+  useEffect(() => {
+    trackScreen(getScreenName(pathname));
+  }, [pathname]);
+  return null;
+};
 
 const LAST_THEME_CACHE_KEY = 'last_theme_cache_v3';
 const LEGACY_LAST_THEME_CACHE_KEYS = ['last_theme_cache_v2', 'last_theme_cache_v1'];
@@ -1141,6 +1171,7 @@ const HospitalTrusteeApp = () => {
     >
       <AppVersionUpdatePrompt trustId={resolvedThemeTrustId} />
       <PageTrackingListener />
+      <RouteTracker />
       <Routes>
         <Route
           path="/login"

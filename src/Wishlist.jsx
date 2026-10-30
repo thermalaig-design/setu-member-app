@@ -1,3 +1,4 @@
+import { track } from './services/analytics';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Check, ChevronLeft, Heart, Home as HomeIcon, ShoppingCart, Sparkles, Trash2, X } from 'lucide-react';
@@ -569,6 +570,9 @@ function Wishlist() {
         ignoreStoredPurchaseRef: true,
       });
       setCartItems(updated);
+      const previousQuantity = Number(cartItemsByKey.get(getCartKey(productId, item.trust_id))?.quantity || 0);
+      const event = Number(nextQuantity) === 0 ? 'remove_from_cart' : previousQuantity === 0 ? 'add_to_cart' : 'cart_quantity_update';
+      track(event, { product_id: String(productId), quantity: Number(nextQuantity), source: 'wishlist' });
       return updated;
     } catch (cartError) {
       showToast(cartError?.message || 'Unable To Update Cart');
@@ -735,6 +739,7 @@ function Wishlist() {
   };
 
   const handleBuyNow = async (item) => {
+    track('order_click', { product_id: String(resolveWishlistProductId(item)), source: 'wishlist' });
     const { options, selected } = getItemVariantState(item);
     if (!isVariantSelectionComplete(options, selected)) {
       openVariantSheet(item, 'buy');
@@ -796,6 +801,8 @@ function Wishlist() {
       closeVariantSheet();
     }
 
+    // Removal is optimistic; record the click, not server-confirmed success.
+    track('wishlist_remove_click', { product_id: String(resolveWishlistProductId(removeConfirmItem)) });
     removeWishlistProduct(resolveWishlistMutationIdentifier(removeConfirmItem), removeConfirmItem.trust_id);
     setItems(readWishlistItems(removeConfirmItem.trust_id));
     closeRemoveConfirm();
@@ -810,6 +817,7 @@ function Wishlist() {
       return;
     }
 
+    track('product_open', { product_id: productId, category_id: categoryId, source: 'wishlist' });
     navigate(`/categories-products/list/${encodeURIComponent(categoryId)}/detail/${encodeURIComponent(productId)}`);
   };
 

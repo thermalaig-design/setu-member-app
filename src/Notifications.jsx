@@ -480,6 +480,7 @@ const Notifications = ({ onNavigate }) => {
           {notifications.map((notification) => (
             <div
               key={notification.id}
+              data-track="notification_open"
               onClick={() => handleNotificationClick(notification)}
               className={`relative rounded-2xl p-5 shadow-sm border hover:shadow-md transition-all cursor-pointer ${!notification.is_read ? 'border-l-4 border-l-indigo-600' : ''
                 }`}

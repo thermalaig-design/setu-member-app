@@ -1,3 +1,4 @@
+import { track } from './services/analytics';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowUpDown, Building, Check, Home as HomeIcon, Mail, Menu, Search, User, Users, X } from 'lucide-react';
@@ -479,6 +480,7 @@ export const DirectoryContent = ({ onNavigate, variant = 'page' }) => {
 
   const openMemberDetails = (item) => {
     if (item?.Privacy === true) return;
+    track('member_open');
     const resolvedPhotoUrl = resolveMemberPhotoUrl(item);
     const memberData = {
       'S. No.': item?.['S. No.'] || item?.id || 'N/A',
@@ -565,6 +567,7 @@ export const DirectoryContent = ({ onNavigate, variant = 'page' }) => {
           <Search className="h-4 w-4" style={{ color: 'var(--advertisement-card-bg)' }} />
           <input
             type="text"
+            data-track="search_click"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search by name, company, role, membership, mobile"

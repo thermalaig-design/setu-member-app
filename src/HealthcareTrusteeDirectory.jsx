@@ -1106,6 +1106,7 @@ const HealthcareTrusteeDirectory = ({ onNavigate }) => {
                 </div>
                 <input
                   type="text"
+                  data-track="search_click"
                   placeholder={`Name, Membership No., Mobile - ${selectedDirectory === 'trustee' ? (activeTab === 'trustees' ? 'Trustees' : activeTab === 'patrons' ? 'Patrons' : 'Members') : (directoryTitleMap[selectedDirectory] || 'Members')}...`}
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
@@ -1387,6 +1388,7 @@ const HealthcareTrusteeDirectory = ({ onNavigate }) => {
                           {(item.mobile || item.Mobile) && (
                             <a
                               href={`tel:${(item.mobile || item.Mobile).replace(/\s+/g, '').split(',')[0]}`}
+                              data-track="call_click"
                               onClick={(e) => e.stopPropagation()}
                               className="inline-flex items-center gap-1.5 mt-2 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
                               style={{ background: 'color-mix(in srgb, var(--surface-color) 82%, var(--app-accent-bg))', border: '1px solid color-mix(in srgb, var(--brand-navy) 12%, transparent)', color: 'var(--body-text-color)' }}
@@ -1478,6 +1480,7 @@ const HealthcareTrusteeDirectory = ({ onNavigate }) => {
                             {item.Mobile && item.Mobile !== 'N/A' && (
                               <a
                                 href={`tel:${item.Mobile.replace(/\s+/g, '').split(',')[0]}`}
+                                data-track="call_click"
                                 onClick={(e) => e.stopPropagation()}
                                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
                                 style={{ background: 'var(--brand-red-light)', color: 'var(--brand-red-dark)', border: '1px solid rgba(192,36,26,0.15)' }}

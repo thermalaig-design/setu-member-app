@@ -1,3 +1,4 @@
+import { track } from './services/analytics';
 import React, { useState, useEffect, useRef } from 'react';
 import {
   User, Mail, Calendar, MapPin, Briefcase, Pencil, Save,
@@ -599,6 +600,7 @@ const Profile = ({ onNavigate, onProfileUpdate }) => {
     try {
       const response = await saveProfile(profileData, photoFile);
       if (!response?.success) throw new Error(response?.message || 'Failed to save');
+      track('profile_save');
 
       const user = JSON.parse(localStorage.getItem('user') || '{}');
       const selectedMembership = getSelectedMembershipFromUser(user);
@@ -745,6 +747,7 @@ const Profile = ({ onNavigate, onProfileUpdate }) => {
               </div>
                 <button
                 onClick={() => {
+                  if (!isEditMode) track('profile_edit');
                   setIsEditMode((prev) => !prev);
                   if (isEditMode) setMessage({ type: '', text: '' });
                 }}

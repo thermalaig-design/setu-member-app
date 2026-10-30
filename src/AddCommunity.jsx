@@ -1,3 +1,4 @@
+import { track } from './services/analytics';
 import React, { useEffect, useRef, useState } from 'react';
 import { AlertTriangle, Home as HomeIcon, Menu, Rocket, Upload, X } from 'lucide-react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
@@ -720,6 +721,7 @@ const AddCommunity = ({ onNavigateBack, variant = 'page' }) => {
 
     const selectedSampleApp = sampleApps.find((app) => app.id === form.sampleAppId) || null;
 
+    track('community_create_start');
     trackAction('app_creation_started', { sample_app_id: form.sampleAppId, sample_app_name: selectedSampleApp?.name || null });
     setSubmitting(true);
     // Show the launch animation immediately. After the install link is ready,
@@ -845,6 +847,7 @@ const AddCommunity = ({ onNavigateBack, variant = 'page' }) => {
       return;
     }
 
+    track('community_create_success', { trust_id: nextTrustId });
     trackAction('app_launched', { new_trust_id: nextTrustId, app_slug: tenantTrust.app_slug });
     setLaunchCycle((prev) => prev + 1);
     await delay(LAUNCH_ANIMATION_MS);

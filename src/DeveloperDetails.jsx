@@ -370,7 +370,7 @@ const DeveloperDetails = ({ onNavigateBack, onNavigate }) => {
                 {copiedEmail ? <><Check className="h-3 w-3" /> Done</> : <><Copy className="h-3 w-3" /> Copy</>}
               </button>
             </a>
-            <a href={`tel:+91${PHONE}`} className="contact-row flex items-center gap-3 px-5 py-4 transition-colors">
+            <a href={`tel:+91${PHONE}`} data-track="call_click" className="contact-row flex items-center gap-3 px-5 py-4 transition-colors">
               <div className="w-10 h-10 bg-gradient-to-br from-emerald-400 to-teal-500 rounded-xl flex items-center justify-center flex-shrink-0 shadow-sm">
                 <Phone className="h-4 w-4 text-white" />
               </div>

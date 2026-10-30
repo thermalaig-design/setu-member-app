@@ -23,6 +23,7 @@ import {
 import { useAppTheme } from './context/ThemeContext';
 import { buildCategoryView, getCardRowPattern, splitIntoRows } from './utils/categoryDisplay';
 import { getNavbarThemeStyles } from './utils/themeUtils';
+import { track } from './services/analytics';
 import { readWishlistItems, subscribeWishlist } from './utils/productWishlist';
 import { readCartItems, subscribeCart } from './utils/productCart';
 import { getAppHomePath } from './utils/tenantNavigation';
@@ -545,6 +546,7 @@ export function CategoriesProductsContent({
         const categoryId = normalizeText(itemOrId.categoryId);
         const productId = normalizeText(itemOrId.productId);
         if (!categoryId || !productId) return;
+        track('product_open', { product_id: productId, category_id: categoryId });
         navigate(`/categories-products/list/${encodeRouteId(categoryId)}/detail/${encodeRouteId(productId)}`);
         return;
       }

@@ -1,3 +1,4 @@
+import { track } from './analytics';
 import { api } from './api';
 
 const RAZORPAY_CHECKOUT_SRC = 'https://checkout.razorpay.com/v1/checkout.js';
@@ -134,6 +135,19 @@ export const openRazorpayCheckout = async ({
   const order = await createPaymentOrder({ trustId, purchaseIds });
 
   return new Promise((resolve, reject) => {
+    let paymentReported = false;
+    const completePayment = (status, paymentId) => {
+      // Only server-confirmed paid orders count as purchases, including retry payments.
+      if (status === 'paid' && !paymentReported) {
+        paymentReported = true;
+        track('purchase', {
+          transaction_id: order.order_id,
+          currency: order.currency,
+          value: Number(order.total_amount),
+        });
+      }
+      resolve({ status, orderId: order.order_id, paymentId });
+    };
     const checkout = new window.Razorpay({
       key: order.key_id,
       amount: order.amount,
@@ -152,12 +166,12 @@ export const openRazorpayCheckout = async ({
           if (status === 'processing') {
             status = await pollOrderStatus(order.order_id, STATUS_POLL_ATTEMPTS);
           }
-          resolve({ status, orderId: order.order_id, paymentId });
+          completePayment(status, paymentId);
         } catch (verifyError) {
           // Money may have moved even though verify failed; ask the server before giving up.
           const status = await pollOrderStatus(order.order_id, 3);
           if (status === 'paid' || status === 'processing') {
-            resolve({ status, orderId: order.order_id, paymentId });
+            completePayment(status, paymentId);
           } else {
             reject(verifyError);
           }

@@ -14,6 +14,7 @@ import { useAppTheme } from './context/ThemeContext';
 import { getProfile } from './services/api';
 import { resolveOrderHistoryMemberId } from './services/orderHistoryService';
 import { openRazorpayCheckout } from './services/paymentService';
+import { track } from './services/analytics';
 import { supabase } from './services/supabaseClient';
 import { applyOpacity } from './utils/colorUtils';
 import { clearCartItems, getCartItemPricing, getCartSummary, readCartItems, refreshCartCache, subscribeCart } from './utils/productCart';
@@ -599,6 +600,7 @@ function CreateOrder() {
         // Ignore cart cleanup issues and continue to the success modal.
       }
 
+      track('generate_lead', { lead_type: 'order' });
       setShowSuccessPopup(true);
     } catch (err) {
       console.error('Checkout purchase save failed:', err);

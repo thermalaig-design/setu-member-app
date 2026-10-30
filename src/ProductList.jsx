@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import { useAppTheme } from './context/ThemeContext';
 import { supabase } from './services/supabaseClient';
+import { track } from './services/analytics';
 import { colorToHex } from './utils/colorUtils';
 import { getNavbarThemeStyles } from './utils/themeUtils';
 import {
@@ -1504,7 +1505,10 @@ const ProductList = ({ categoryId, onBack, onOpenProduct }) => {
             const imgs = resolveProductImages(p);
             const fallbackSeed = hashString(`${p.id}:${p.product_name}`);
             const fallbackIcon = pickFallbackIcon(`${p.id}:${p.product_name}`);
-            const openProduct = () => onOpenProduct?.(p.id);
+            const openProduct = () => {
+              track('product_open', { product_id: pickText(p.id), category_id: pickText(categoryId) });
+              onOpenProduct?.(p.id);
+            };
             const wishlistProductPriceId = resolveWishlistProductPriceId(p, { price });
             const wishlistIdentityId = wishlistProductPriceId || p.id;
             const wishlistKey = getWishlistKey(wishlistIdentityId, categoryPayload?.trustId);
@@ -1542,6 +1546,7 @@ const ProductList = ({ categoryId, onBack, onOpenProduct }) => {
                   return;
                 }
 
+                track(result.wished ? 'add_to_wishlist' : 'remove_from_wishlist', { product_id: pickText(p.id) });
                 showWishlistToast(result.wished ? 'Added to wishlist' : 'Removed from wishlist');
               } finally {
                 setWishlistPending(wishlistKey, false);

@@ -836,6 +836,7 @@ export const EventsContent = ({ onNavigate, variant = 'page' }) => {
             return (
               <div
                 key={event.id}
+                data-track="event_open"
                 onClick={() => openEventDetail(event.id)}
                 role="button"
                 tabIndex={0}

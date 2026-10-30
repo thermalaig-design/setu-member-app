@@ -1,3 +1,4 @@
+import { track } from './services/analytics';
 import React, { useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
@@ -171,6 +172,7 @@ const MyFamily = ({ onNavigate }) => {
         : await updateFamilyMember(formState.id, payload);
       const saved = response?.member;
       if (!saved?.id) throw new Error('Failed to save family member.');
+      track(isCreate ? 'family_member_add' : 'family_member_update');
 
       if (isCreate) {
         setMembers((prev) => [saved, ...prev]);
@@ -211,6 +213,7 @@ const MyFamily = ({ onNavigate }) => {
     setMessage({ type: '', text: '' });
     try {
       await deleteFamilyMember(formState.id, null);
+      track('family_member_delete');
       setMembers((prev) => prev.filter((item) => String(item.id) !== String(formState.id)));
       setExpandedMemberId(null);
       setScreen('list');

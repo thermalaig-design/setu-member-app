@@ -1,3 +1,4 @@
+import { track } from '../services/analytics';
 import React, { useEffect, useRef, useState } from 'react';
 import { CornerUpLeft, ExternalLink } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
@@ -119,6 +120,7 @@ const openUserPanelExternally = async (onClosed) => {
 
   if (isNative) {
     await Browser.open({ url });
+    track('user_panel_open');
     if (onClosed) {
       Browser.addListener('browserFinished', () => onClosed());
     }

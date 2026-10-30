@@ -1,3 +1,4 @@
+import { track } from '../../services/analytics';
 import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { flushSync } from 'react-dom';
@@ -1002,6 +1003,7 @@ const Sidebar = ({ isOpen, onClose, onNavigate, currentPage, onLogout }) => {
 
               {/* Share Button - controlled by feature_share_app */}
               {ff('feature_share_app') && <button
+              data-track="share_click"
               onClick={handleShareApp}
               className="w-full flex items-center gap-3 px-4 rounded-xl transition-all text-left active:scale-95 select-none relative"
               style={{
@@ -1140,6 +1142,7 @@ const Sidebar = ({ isOpen, onClose, onNavigate, currentPage, onLogout }) => {
               sessionStorage.removeItem('trust_selected_in_session');
               navigate('/login', { replace: true });
             }
+            track('logout');
             if (onClose) onClose();
           }}
           className="w-full flex items-center gap-3 px-4 rounded-xl transition-all text-left active:scale-95 select-none"

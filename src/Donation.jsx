@@ -5,6 +5,7 @@ import { useAppTheme } from './context/ThemeContext';
 import { applyOpacity } from './utils/colorUtils';
 import { fetchDonationsByTrust, getDonationFormPrefill } from './services/donationService';
 import { TRUST_VERSION_UPDATED_EVENT } from './services/trustVersionService';
+import { track } from './services/analytics';
 import Sidebar from './features/sidebar/Sidebar';
 const formatCurrency = (amount) => {
   const numeric = Number(amount);
@@ -93,6 +94,7 @@ export const DonationContent = ({ onNavigate, variant = 'page' }) => {
       setDonations(rows);
     } catch (err) {
       setDonations([]);
+      track('api_error', { screen_name: 'donation', code: 'load_donations_failed' });
       setError(err?.message || 'Unable to load donations.');
     } finally {
       setLoading(false);
@@ -198,6 +200,7 @@ export const DonationContent = ({ onNavigate, variant = 'page' }) => {
             Every contribution makes a real difference for our community.
           </p>
           <button
+            data-track="donate_click"
             onClick={() => openDonationFormPage()}
             className="w-full px-4 py-3 rounded-2xl text-sm font-extrabold active:scale-95 transition-all"
             style={{

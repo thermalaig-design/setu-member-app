@@ -14,6 +14,7 @@ import {
 import { getCartKey, readCartItems, setCartProductQuantity, subscribeCart } from './utils/productCart';
 import { getAppHomePath } from './utils/tenantNavigation';
 import { logMetaViewContent } from './services/metaEvents';
+import { track } from './services/analytics';
 import {
   isTrustCatalogCacheFresh,
   readTrustCatalogCacheForCandidates,
@@ -1816,6 +1817,7 @@ const ProductDetail = ({ categoryId, productId, onBack }) => {
         return;
       }
 
+      track(result.wished ? 'add_to_wishlist' : 'remove_from_wishlist', { product_id: pickText(product?.id) });
       flashActionMessage(result.wished ? 'Added to wishlist' : 'Removed from wishlist');
     } finally {
       setWishlistPending(false);
@@ -1901,6 +1903,7 @@ const ProductDetail = ({ categoryId, productId, onBack }) => {
   const handleAddToCart = async () => {
     if (!product) return;
     if (!ensureSelectionsBeforeCart()) return;
+    track('add_to_cart', { product_id: pickText(product?.id) });
     const updated = await updateCartQuantity(1);
     if (updated) {
       flashActionMessage('Added to cart');
@@ -1931,6 +1934,7 @@ const ProductDetail = ({ categoryId, productId, onBack }) => {
   const handleBuyNow = async () => {
     if (!product) return;
     if (!ensureSelectionsBeforeCart()) return;
+    track('order_click', { product_id: pickText(product?.id) });
     const updated = await updateCartQuantity(bagQuantity > 0 ? bagQuantity : 1);
     if (updated) {
       navigate('/cart');
