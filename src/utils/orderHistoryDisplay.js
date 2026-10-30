@@ -9,7 +9,12 @@ export const normalizeText = (value) => {
   return ['null', 'undefined', 'nan'].includes(lowered) ? '' : text;
 };
 
-export const toTitleCase = (value = '') =>
+export const capitalizeFirst = (value = '') => {
+  const text = String(value || '');
+  return text.charAt(0).toUpperCase() + text.slice(1);
+};
+
+export const toTitleCase =(value = '') =>
   String(value || '')
     .trim()
     .replace(/\s+/g, ' ')
@@ -60,6 +65,23 @@ export const formatOrderDate = (value) => {
   return `${datePart} at ${timePart}`;
 };
 
+export const getStatusPillStyle = (tone) => ({
+  color: tone,
+  background: `color-mix(in srgb, ${tone} 14%, var(--surface-color))`,
+  border: `1px solid color-mix(in srgb, ${tone} 22%, transparent)`,
+});
+
+// "29 Oct, 1:12 pm" — compact form for list rows (no year).
+export const formatOrderDateShort = (value) => {
+  const ts = Date.parse(value);
+  if (Number.isNaN(ts)) return 'Date unavailable';
+
+  const date = new Date(ts);
+  const datePart = new Intl.DateTimeFormat('en-IN', { day: 'numeric', month: 'short' }).format(date);
+  const timePart = new Intl.DateTimeFormat('en-IN', { hour: 'numeric', minute: '2-digit' }).format(date);
+  return `${datePart}, ${timePart}`;
+};
+
 // NOTE: only these three statuses have a dedicated group/label; anything else (including
 // genuine post-payment lifecycle states like "shipped"/"delivered"/"refunded") falls through
 // to the 'other' group below. No status ever resolves to group 'delivered' — the Order History
@@ -88,20 +110,20 @@ export const getStatusMeta = (rawStatus) => {
 
 export const normalizeOrderLine = (item, index) => {
   if (typeof item === 'string') {
-    const name = normalizeText(item);
+    const name = capitalizeFirst(normalizeText(item));
     return name ? { key: `line-${index}`, name, quantity: 1 } : null;
   }
 
   if (!item || typeof item !== 'object') return null;
 
-  const name = normalizeText(
+  const name = capitalizeFirst(normalizeText(
     item.product_name
     || item.name
     || item.title
     || item.product
     || item.item_name
     || item.label
-  );
+  ));
   if (!name) return null;
 
   const quantityValue = Number(item.quantity ?? item.qty ?? item.count ?? 1);
@@ -180,7 +202,7 @@ export const normalizeOrderRecord = (order, index) => {
   // but each row IS one product purchase, so synthesize a single line from the row itself
   // once orderHistoryService.js has enriched it with a catalog product_name.
   if (items.length === 0) {
-    const singleProductName = normalizeText(order.product_name || order.productName);
+    const singleProductName = capitalizeFirst(normalizeText(order.product_name || order.productName));
     if (singleProductName) {
       items = [{
         key: normalizeText(order.product_price_id || order.productPriceId || order.id) || `line-${index}`,
@@ -210,8 +232,19 @@ export const normalizeOrderRecord = (order, index) => {
   const trustLabel = trustName || trustId || ORDER_HISTORY_UNKNOWN_TRUST_LABEL;
   const source = normalizeText(order.source || order.sourceType || order.source_type) || 'local';
 
+  const imageUrl = normalizeText(order.product_image || order.productImage || order.image_url || order.image);
+  const deliveryAddress = normalizeText(order.delivery_address || order.shipping_address || order.address);
+  const productName = items[0]?.name || '';
+
   return {
     id,
+    shortId: id.length > 8 ? id.slice(0, 8) : id,
+    productName,
+    catalogProductId: normalizeText(order.catalog_product_id),
+    catalogCategoryId: normalizeText(order.catalog_category_id),
+    imageUrl,
+    deliveryAddress,
+    createdAtShort: formatOrderDateShort(createdAtRaw),
     purchaseId: normalizeText(order.purchase_id || order.id),
     createdAt: createdAtRaw,
     createdAtTs: Number.isNaN(createdAtTs) ? 0 : createdAtTs,

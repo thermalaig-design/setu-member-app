@@ -32,6 +32,7 @@ import Wishlist from './Wishlist';
 import Cart from './Cart';
 import CreateOrder from './CreateOrder';
 import OrderHistory from './OrderHistory';
+import OrderDetails from './OrderDetails';
 import ExecutiveBody from './ExecutiveBody';
 import Notifications from './Notifications';
 import HealthcareTrusteeDirectory from './HealthcareTrusteeDirectory';
@@ -1427,6 +1428,16 @@ const HospitalTrusteeApp = () => {
             <ProtectedRoute>
               <FeatureGuard featureKey="feature_order_history">
                 <OrderHistory />
+              </FeatureGuard>
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/order-history/:orderId"
+          element={
+            <ProtectedRoute>
+              <FeatureGuard featureKey="feature_order_history">
+                <OrderDetails />
               </FeatureGuard>
             </ProtectedRoute>
           }

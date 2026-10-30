@@ -77,21 +77,39 @@ const LAUNCH_FORM_CSS = `
   -webkit-font-smoothing:antialiased;
 }
 .la-card *{box-sizing:border-box}
-.la-field{margin-bottom:20px}
+.la-heading{display:flex; align-items:center; gap:14px; margin:0 0 24px}
+.la-heading-icon{
+  width:48px; height:48px; flex:none; display:flex; align-items:center; justify-content:center;
+  border-radius:14px; color:#2a1d05;
+  background:linear-gradient(145deg,var(--la-gold-hi),var(--la-gold));
+  box-shadow:0 6px 22px rgba(217,164,65,.35), inset 0 1px 0 rgba(255,255,255,.35);
+  transition:box-shadow .3s ease, transform .3s ease;
+}
+.la-heading-icon:hover{
+  transform:scale(1.06);
+  box-shadow:0 0 14px rgba(240,190,90,.8), 0 0 34px rgba(217,164,65,.6), 0 0 60px rgba(217,164,65,.35), inset 0 1px 0 rgba(255,255,255,.45);
+}
+.la-heading h2{margin:0; font-size:22px; font-weight:800; letter-spacing:-.01em; color:var(--la-text)}
+.la-field{margin-bottom:16px}
 .la-row{display:flex; justify-content:space-between; align-items:baseline; margin-bottom:8px}
-.la-lbl{font-size:13px; font-weight:600; color:var(--la-label); letter-spacing:.1px}
+.la-lbl{display:inline-flex; align-items:center; gap:8px; font-size:13px; font-weight:600; color:var(--la-label); letter-spacing:.1px}
+.la-step{
+  width:22px; height:22px; flex:none; display:inline-flex; align-items:center; justify-content:center;
+  border-radius:50%; font-size:11px; font-weight:800; color:var(--la-gold-hi);
+  background:rgba(217,164,65,.28); border:1px solid rgba(217,164,65,.35);
+}
 .la-req{color:var(--la-gold); margin-left:2px}
 .la-opt{font-size:12px; color:var(--la-muted); font-weight:500}
 .la-wrap{position:relative}
 .la-control{
-  display:block; width:100%; height:50px; padding:0 16px; font:inherit; font-size:15px; color:var(--la-text);
+  display:block; width:100%; height:42px; padding:0 14px; font:inherit; font-size:14px; color:var(--la-text);
   background:var(--la-field); border:1px solid var(--la-border); border-radius:12px; outline:none;
   transition:border-color .18s, box-shadow .18s, background .18s;
 }
 .la-control::placeholder{color:#656172}
 .la-control:hover{background:var(--la-field-hover); border-color:var(--la-border-strong)}
 .la-control:focus{border-color:var(--la-gold); box-shadow:0 0 0 4px var(--la-ring); background:var(--la-field-hover)}
-textarea.la-control{height:auto; min-height:120px; padding:14px 16px; resize:vertical; line-height:1.5}
+textarea.la-control{height:auto; min-height:64px; padding:10px 14px; resize:vertical; line-height:1.5}
 .la-control.has-status{padding-right:48px}
 .la-select{position:relative}
 .la-select-btn{display:flex; align-items:center; text-align:left; cursor:pointer; padding-right:44px}
@@ -149,14 +167,14 @@ textarea.la-control{height:auto; min-height:120px; padding:14px 16px; resize:ver
 .la-chip:hover{background:rgba(217,164,65,.2)}
 .la-chip:active{transform:scale(.96)}
 .la-drop{
-  display:flex; align-items:center; gap:14px; padding:14px; cursor:pointer;
+  display:flex; align-items:center; gap:12px; padding:10px 12px; cursor:pointer;
   background:var(--la-field); border:1.5px dashed var(--la-border-strong); border-radius:12px;
   transition:border-color .18s, background .18s;
 }
 .la-drop:hover,.la-drop.drag{border-color:var(--la-gold); background:var(--la-field-hover)}
 .la-drop.bad{border-color:var(--la-err)}
 .la-thumb{
-  width:52px; height:52px; flex:none; border-radius:10px; overflow:hidden; display:grid; place-items:center;
+  width:40px; height:40px; flex:none; border-radius:10px; overflow:hidden; display:grid; place-items:center;
   color:var(--la-gold); background:rgba(217,164,65,.1); border:1px solid rgba(217,164,65,.2);
 }
 .la-thumb img{width:100%; height:100%; object-fit:cover}
@@ -926,16 +944,22 @@ const AddCommunity = ({ onNavigateBack, variant = 'page' }) => {
       <div className={isHomeVariant ? 'space-y-5' : 'px-4 pt-5 pb-10 space-y-5'}>
         <style>{LAUNCH_FORM_CSS}</style>
         <form className="la-card" onSubmit={handleSubmit} noValidate>
+          {isHomeVariant ? (
+            <div className="la-heading">
+              <span className="la-heading-icon" aria-hidden="true"><Rocket size={22} /></span>
+              <h2>Launch my app</h2>
+            </div>
+          ) : null}
           <div className="la-field" data-state={nameFieldState}>
             <div className="la-row">
-              <label className="la-lbl" htmlFor="la-app-name">Your App Name<span className="la-req">*</span></label>
+              <label className="la-lbl" htmlFor="la-app-name"><span className="la-step">1</span>App Name<span className="la-req">*</span></label>
             </div>
             <div className="la-wrap">
               <input
                 id="la-app-name"
                 type="text"
                 className="la-control has-status"
-                placeholder="e.g. Sunrise Community"
+                placeholder="Enter app name"
                 autoComplete="off"
                 spellCheck={false}
                 aria-describedby="la-name-err"
@@ -974,14 +998,14 @@ const AddCommunity = ({ onNavigateBack, variant = 'page' }) => {
 
           <div className="la-field">
             <div className="la-row">
-              <label className="la-lbl" htmlFor="la-org">Organisation Name</label>
+              <label className="la-lbl" htmlFor="la-org"><span className="la-step">2</span>Organisation Name</label>
               <span className="la-opt">Optional</span>
             </div>
             <input
               id="la-org"
               type="text"
               className="la-control"
-              placeholder="e.g. Sunrise Welfare Trust"
+              placeholder="Enter your organization name"
               autoComplete="organization"
               value={form.legalName}
               onChange={handleChange('legalName')}
@@ -990,7 +1014,7 @@ const AddCommunity = ({ onNavigateBack, variant = 'page' }) => {
 
           <div className="la-field">
             <div className="la-row">
-              <label className="la-lbl" htmlFor="la-type">Type<span className="la-req">*</span></label>
+              <label className="la-lbl" htmlFor="la-type"><span className="la-step">3</span>Type<span className="la-req">*</span></label>
             </div>
             <div className={`la-select${typeOpen ? ' open' : ''}`} ref={typeSelectRef}>
               <button
@@ -1036,7 +1060,7 @@ const AddCommunity = ({ onNavigateBack, variant = 'page' }) => {
 
           <div className="la-field">
             <div className="la-row">
-              <span className="la-lbl">Logo</span>
+              <span className="la-lbl"><span className="la-step">4</span>Logo</span>
               <span className="la-opt">Optional · max 2 MB</span>
             </div>
             <label
@@ -1077,7 +1101,7 @@ const AddCommunity = ({ onNavigateBack, variant = 'page' }) => {
 
           <div className="la-field">
             <div className="la-row">
-              <label className="la-lbl" htmlFor="la-desc">Description</label>
+              <label className="la-lbl" htmlFor="la-desc"><span className="la-step">5</span>Description</label>
               <span className="la-opt">Optional</span>
             </div>
             <textarea
@@ -1101,7 +1125,6 @@ const AddCommunity = ({ onNavigateBack, variant = 'page' }) => {
             <span className="la-spinner" />
             <span>{submitting ? 'Launching…' : 'Launch'}</span>
           </button>
-          <p className="la-foot">By launching, you agree to our Terms and Privacy Policy.</p>
         </form>
 
       </div>

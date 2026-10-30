@@ -307,23 +307,51 @@ const callOrderHistoryPurchaseRpc = async (request) => {
 // productCart.js/productWishlist.js already do for cart and wishlist rows. Dynamic import
 // avoids a static circular dependency (productCart.js dynamically imports this module too,
 // to resolve the member id).
+// Same precedence the Cart uses: the selected image if it is still active, else the first
+// active catalog image (ordered by sort_order), else a flat image_url on the product.
+const resolveCatalogProductImage = (product) => {
+  const images = Array.isArray(product?.images) ? product.images : [];
+  const activeImages = images
+    .filter((image) => {
+      const status = normalizeText(image?.status).toLowerCase();
+      return normalizeText(image?.image_url)
+        && !['inactive', 'disabled', 'deleted', 'archived'].includes(status)
+        && image?.is_active !== false
+        && image?.isActive !== false;
+    })
+    .sort((a, b) => (Number(a?.sort_order) || 0) - (Number(b?.sort_order) || 0));
+
+  const selectedImage = normalizeText(product?.selected_image);
+  const knownUrls = images.map((image) => normalizeText(image?.image_url));
+  if (selectedImage && (!knownUrls.includes(selectedImage) || activeImages.some((image) => normalizeText(image.image_url) === selectedImage))) {
+    return selectedImage;
+  }
+
+  return normalizeText(activeImages[0]?.image_url)
+    || normalizeText(product?.image_url || product?.imageUrl);
+};
+
 const enrichOrderRowsWithCatalog = async (rows, trustId) => {
   if (!Array.isArray(rows) || rows.length === 0) return rows;
 
   try {
     const { fetchTrustProductsCategories, buildProductCatalogLookups } = await import('../utils/productCart.js');
     const categories = await fetchTrustProductsCategories(trustId);
-    const { byPriceId } = buildProductCatalogLookups(categories);
+    const { byPriceId, byProductId } = buildProductCatalogLookups(categories);
 
     return rows.map((row) => {
       const productPriceId = normalizeText(row?.product_price_id || row?.productPriceId);
-      const catalogMatch = productPriceId ? byPriceId.get(productPriceId) : null;
+      const rowProductId = normalizeText(row?.product_id || row?.productId);
+      const catalogMatch = (productPriceId ? byPriceId.get(productPriceId) : null)
+        || (rowProductId ? byProductId.get(rowProductId) : null);
       if (!catalogMatch?.product) return row;
 
       return {
         ...row,
         product_name: normalizeText(catalogMatch.product?.product_name || catalogMatch.product?.alias_name) || row.product_name,
-        product_image: catalogMatch.product?.selected_image || catalogMatch.product?.image_url || row.product_image,
+        catalog_product_id: normalizeText(catalogMatch.product?.id || catalogMatch.product?.product_id || catalogMatch.product?.productId),
+        catalog_category_id: normalizeText(catalogMatch.product?.category_id),
+        product_image: resolveCatalogProductImage(catalogMatch.product) || row.product_image,
       };
     });
   } catch {

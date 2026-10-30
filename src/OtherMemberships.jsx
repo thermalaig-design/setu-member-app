@@ -2,7 +2,7 @@ import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Plus, X, Menu, Home as HomeIcon,
-  AlertCircle, Building2, Loader2, ChevronRight, BadgeCheck
+  AlertCircle, Building2, Loader2, ChevronRight, BadgeCheck, LayoutGrid
 } from 'lucide-react';
 import Sidebar from './features/sidebar/Sidebar';
 import TrustIdCard from './TrustIdCard';
@@ -586,6 +586,10 @@ const OtherMemberships = ({ onNavigate, variant = 'page' }) => {
 
   const sortedOtherMems = useMemo(() => sortMembershipsAlphabetically(otherMems), [otherMems]);
   const sortedTrustLinks = useMemo(() => sortMembershipsAlphabetically(trustLinks), [trustLinks]);
+  // On the home page only the first tiles show; the full list lives on /other-memberships.
+  const HOME_TRUST_TILE_LIMIT = 3;
+  const hasMoreTrustLinks = isHomeVariant && sortedTrustLinks.length > HOME_TRUST_TILE_LIMIT;
+  const visibleTrustLinks = isHomeVariant ? sortedTrustLinks.slice(0, HOME_TRUST_TILE_LIMIT) : sortedTrustLinks;
   const showCreateNewApp = isFeatureVisible(featureFlags, 'feature_add_community');
 
   // ── fetch data ──
@@ -920,6 +924,93 @@ const OtherMemberships = ({ onNavigate, variant = 'page' }) => {
     );
   };
 
+  // Setu's dark theme keeps its fixed gold look; a light tenant theme gets
+  // colors derived from that theme instead so the cards don't clash.
+  const resolveTileTheme = () => isLightTheme
+      ? {
+          cardBg: `linear-gradient(155deg, ${applyOpacity(colors.secondary, 0.1)} 0%, ${applyOpacity('var(--surface-color)', 0.98)} 62%, ${applyOpacity(colors.primary, 0.06)} 100%)`,
+          border: applyOpacity(colors.primary, 0.22),
+          borderHover: applyOpacity(colors.primary, 0.55),
+          shadow: `0 8px 24px ${applyOpacity(colors.secondary, 0.14)}, inset 0 1px 0 rgba(255,255,255,0.5)`,
+          shadowHover: `0 16px 36px ${applyOpacity(colors.secondary, 0.18)}, 0 0 0 1px ${applyOpacity(colors.primary, 0.16)}, inset 0 1px 0 rgba(255,255,255,0.6)`,
+          accentLine: `linear-gradient(90deg, transparent, ${applyOpacity(colors.primary, 0.7)} 40%, ${applyOpacity(colors.accent, 0.9)} 60%, transparent)`,
+          glow: `radial-gradient(circle, ${applyOpacity(colors.primary, 0.08)}, transparent 70%)`,
+          avatarFrame: `linear-gradient(135deg, ${applyOpacity(colors.primary, 0.3)}, ${applyOpacity(colors.primary, 0.05)})`,
+          badgeText: colors.primary,
+          badgeBg: applyOpacity(colors.primary, 0.08),
+          badgeBorder: applyOpacity(colors.primary, 0.22),
+          nameColor: 'var(--heading-color)',
+          legalColor: 'var(--advertisement-description)',
+        }
+      : {
+          cardBg: 'linear-gradient(155deg, rgba(28,31,45,0.98) 0%, rgba(13,15,24,0.99) 62%, rgba(20,17,10,0.99) 100%)',
+          border: 'rgba(226, 178, 39, 0.22)',
+          borderHover: 'rgba(226, 178, 39, 0.6)',
+          shadow: '0 8px 24px rgba(0,0,0,0.34), inset 0 1px 0 rgba(255,255,255,0.05)',
+          shadowHover: '0 16px 36px rgba(0,0,0,0.4), 0 0 0 1px rgba(226,178,39,0.18), inset 0 1px 0 rgba(255,255,255,0.07)',
+          accentLine: 'linear-gradient(90deg, transparent, rgba(226,178,39,0.75) 40%, rgba(255,213,110,0.95) 60%, transparent)',
+          glow: 'radial-gradient(circle, rgba(226,178,39,0.10), transparent 70%)',
+          avatarFrame: 'linear-gradient(135deg, rgba(226,178,39,0.35), rgba(226,178,39,0.05))',
+          badgeText: 'rgba(226,178,39,0.75)',
+          badgeBg: 'rgba(226,178,39,0.08)',
+          badgeBorder: 'rgba(226,178,39,0.22)',
+          nameColor: '#f6f2e6',
+          legalColor: 'rgba(224,230,241,0.58)',
+        };
+
+  // Home variant shows only the first few apps; this tile opens the full list page.
+  const ViewMoreTile = ({ count, onClick }) => {
+    const tile = resolveTileTheme();
+    return (
+      <div
+        className={`other-membership-card${isLightTheme ? ' other-membership-card--light' : ''}`}
+        role="button"
+        tabIndex={0}
+        onClick={onClick}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            onClick();
+          }
+        }}
+        style={{
+          position: 'relative',
+          background: tile.cardBg,
+          border: `1px solid ${tile.border}`,
+          borderRadius: '18px',
+          padding: '14px 13px 12px',
+          cursor: 'pointer',
+          minWidth: 0,
+          overflow: 'hidden',
+          display: 'flex',
+          flexDirection: 'column',
+          justifyContent: 'center',
+          alignItems: 'center',
+          gap: '8px',
+          textAlign: 'center',
+          boxShadow: tile.shadow,
+        }}
+      >
+        <div style={{
+          position: 'absolute', top: 0, left: 0, right: 0, height: '2.5px',
+          background: tile.accentLine,
+          borderRadius: '18px 18px 0 0',
+        }} />
+        <div style={{ padding: '3px', borderRadius: '13px', background: tile.avatarFrame }}>
+          <div style={{ width: 36, height: 36, display: 'flex', alignItems: 'center', justifyContent: 'center', color: tile.nameColor }}>
+            <LayoutGrid size={20} />
+          </div>
+        </div>
+        <span style={{ fontSize: '12.5px', fontWeight: 800, color: tile.nameColor, letterSpacing: '-0.01em' }}>
+          View more
+        </span>
+        <span style={{ fontSize: '9.5px', fontWeight: 500, color: tile.legalColor }}>
+          All {count} apps
+        </span>
+      </div>
+    );
+  };
+
   const TrustLinkTile = ({ link, onClick, onOpenCard, isLoading, isIOS, resolvedUrl }) => {
     const trustName = link.Trust?.name || link.organisation_name || '-';
     const legalName = normalizeText(
@@ -967,39 +1058,7 @@ const OtherMemberships = ({ onNavigate, variant = 'page' }) => {
       onOpenCard?.();
     };
 
-    // Setu's dark theme keeps its fixed gold look; a light tenant theme gets
-    // colors derived from that theme instead so the cards don't clash.
-    const tile = isLightTheme
-      ? {
-          cardBg: `linear-gradient(155deg, ${applyOpacity(colors.secondary, 0.1)} 0%, ${applyOpacity('var(--surface-color)', 0.98)} 62%, ${applyOpacity(colors.primary, 0.06)} 100%)`,
-          border: applyOpacity(colors.primary, 0.22),
-          borderHover: applyOpacity(colors.primary, 0.55),
-          shadow: `0 8px 24px ${applyOpacity(colors.secondary, 0.14)}, inset 0 1px 0 rgba(255,255,255,0.5)`,
-          shadowHover: `0 16px 36px ${applyOpacity(colors.secondary, 0.18)}, 0 0 0 1px ${applyOpacity(colors.primary, 0.16)}, inset 0 1px 0 rgba(255,255,255,0.6)`,
-          accentLine: `linear-gradient(90deg, transparent, ${applyOpacity(colors.primary, 0.7)} 40%, ${applyOpacity(colors.accent, 0.9)} 60%, transparent)`,
-          glow: `radial-gradient(circle, ${applyOpacity(colors.primary, 0.08)}, transparent 70%)`,
-          avatarFrame: `linear-gradient(135deg, ${applyOpacity(colors.primary, 0.3)}, ${applyOpacity(colors.primary, 0.05)})`,
-          badgeText: colors.primary,
-          badgeBg: applyOpacity(colors.primary, 0.08),
-          badgeBorder: applyOpacity(colors.primary, 0.22),
-          nameColor: 'var(--heading-color)',
-          legalColor: 'var(--advertisement-description)',
-        }
-      : {
-          cardBg: 'linear-gradient(155deg, rgba(28,31,45,0.98) 0%, rgba(13,15,24,0.99) 62%, rgba(20,17,10,0.99) 100%)',
-          border: 'rgba(226, 178, 39, 0.22)',
-          borderHover: 'rgba(226, 178, 39, 0.6)',
-          shadow: '0 8px 24px rgba(0,0,0,0.34), inset 0 1px 0 rgba(255,255,255,0.05)',
-          shadowHover: '0 16px 36px rgba(0,0,0,0.4), 0 0 0 1px rgba(226,178,39,0.18), inset 0 1px 0 rgba(255,255,255,0.07)',
-          accentLine: 'linear-gradient(90deg, transparent, rgba(226,178,39,0.75) 40%, rgba(255,213,110,0.95) 60%, transparent)',
-          glow: 'radial-gradient(circle, rgba(226,178,39,0.10), transparent 70%)',
-          avatarFrame: 'linear-gradient(135deg, rgba(226,178,39,0.35), rgba(226,178,39,0.05))',
-          badgeText: 'rgba(226,178,39,0.75)',
-          badgeBg: 'rgba(226,178,39,0.08)',
-          badgeBorder: 'rgba(226,178,39,0.22)',
-          nameColor: '#f6f2e6',
-          legalColor: 'rgba(224,230,241,0.58)',
-        };
+    const tile = resolveTileTheme();
 
     // iOS ONLY: a real <a href target="_blank"> so the navigation is a
     // direct, synchronous result of the tap — the fix for the iOS App
@@ -1316,7 +1375,7 @@ const OtherMemberships = ({ onNavigate, variant = 'page' }) => {
                 }}
               >
                 <Plus size={20} />
-                Create New App
+                Create My App
               </button>
             )}
 
@@ -1345,7 +1404,7 @@ const OtherMemberships = ({ onNavigate, variant = 'page' }) => {
                 className="other-memberships-grid"
                 style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', columnGap: '9px', rowGap: '10px' }}
               >
-                {sortedTrustLinks.map((link, index) => (
+                {visibleTrustLinks.map((link, index) => (
                   <TrustLinkTile
                     key={link.id || index}
                     link={link}
@@ -1356,6 +1415,12 @@ const OtherMemberships = ({ onNavigate, variant = 'page' }) => {
                     resolvedUrl={trustWebAppUrls[normalizeText(link?.trust_id || link?.Trust?.id)]}
                   />
                 ))}
+                {hasMoreTrustLinks ? (
+                  <ViewMoreTile
+                    count={sortedTrustLinks.length}
+                    onClick={() => (onNavigate ? onNavigate('other-memberships') : navigate('/other-memberships'))}
+                  />
+                ) : null}
               </div>
             )}
 

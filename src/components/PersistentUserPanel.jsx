@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { Capacitor } from '@capacitor/core';
 import { Browser } from '@capacitor/browser';
 import { useAppTheme } from '../context/ThemeContext';
+import { getAppHomePath } from '../utils/tenantNavigation';
 import { getNavbarThemeStyles } from '../utils/themeUtils';
 import { getUserPanelToken } from '../services/authService';
 import BottomNav from './BottomNav';
@@ -305,13 +306,13 @@ const PersistentUserPanel = ({ isActive, onNavigate }) => {
         <div className="relative px-4 pt-4 pb-4 flex items-center justify-between">
           <button
             type="button"
-            onClick={() => navigate(-1)}
-            className="p-2 rounded-xl transition-colors flex items-center gap-1.5"
+            onClick={() => navigate(getAppHomePath())}
+            className="px-2 py-1 rounded-xl transition-colors flex flex-col items-center gap-0.5"
             style={{ color: navbarTheme?.textColor, background: 'transparent' }}
             aria-label="Back to app"
           >
             <CornerUpLeft className="h-5 w-5" />
-            <span className="text-xs font-semibold">Back to app</span>
+            <span className="text-[10px] font-semibold leading-none">Back to app</span>
           </button>
           <h1 className="absolute left-1/2 -translate-x-1/2 text-lg font-extrabold tracking-wide" style={{ color: navbarTheme?.textColor }}>App Manager</h1>
         </div>

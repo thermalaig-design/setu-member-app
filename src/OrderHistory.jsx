@@ -1,31 +1,31 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  ArrowLeft,
-  CircleDollarSign,
-  Clock3,
+  ArrowUp,
   ChevronDown,
-  ChevronUp,
+  ChevronLeft,
+  ChevronRight,
+  Image as ImageIcon,
   Package2,
-  PackageCheck,
+  Search,
 } from 'lucide-react';
 import {
   clearOrderHistoryCache,
   loadOrderHistorySnapshot,
-  resolveOrderHistoryTrustScope,
 } from './services/orderHistoryService';
-import { openRazorpayCheckout } from './services/paymentService';
-import { supabase } from './services/supabaseClient';
 import {
   ORDER_HISTORY_UNKNOWN_TRUST_KEY,
   ORDER_HISTORY_UNKNOWN_TRUST_LABEL,
   normalizeText,
   formatCurrency,
   normalizeOrderRecord,
+  getStatusPillStyle,
 } from './utils/orderHistoryDisplay';
-import { useAppTheme } from './context/ThemeContext';
-import { getNavbarThemeStyles } from './utils/themeUtils';
 import { getAppHomePath } from './utils/tenantNavigation';
+import { useOrderPayment } from './hooks/useOrderPayment';
+import OrderPageHeader from './components/OrderPageHeader';
+import OrderProductImage from './components/OrderProductImage';
+import OrderDateFilter, { DATE_FILTER_ALL, resolveDateRange } from './components/OrderDateFilter';
 
 const T = {
   page: 'var(--page-bg, var(--app-page-bg))',
@@ -36,47 +36,41 @@ const T = {
   line: 'color-mix(in srgb, var(--body-text-color) 12%, transparent)',
 };
 
-const ORDER_HISTORY_PAGE_SIZE = 6;
+const ORDER_HISTORY_PAGE_SIZE = 15;
 const ORDER_HISTORY_SKELETON_COUNT = 4;
-const ORDER_HISTORY_LOAD_MORE_DELAY_MS = 180;
-const ORDER_HISTORY_LOAD_MORE_ROOT_MARGIN = '240px';
+const JUMP_TOP_SCROLL_OFFSET = 480;
 
-const getStatusChipStyles = (order) => ({
-  color: order.statusTone,
-  background: `color-mix(in srgb, ${order.statusTone} 12%, var(--surface-color))`,
-  border: `1px solid color-mix(in srgb, ${order.statusTone} 22%, transparent)`,
-});
+// Page numbers to render: always first/last/current +-1, with null marking a gap.
+const getPageItems = (current, total) => {
+  const pages = new Set([1, total, current - 1, current, current + 1].filter((n) => n >= 1 && n <= total));
+  const sorted = [...pages].sort((a, b) => a - b);
+  const items = [];
+  sorted.forEach((n, index) => {
+    if (index > 0 && n - sorted[index - 1] > 1) items.push(null);
+    items.push(n);
+  });
+  return items;
+};
 
-const OrderHistorySummarySkeletonCard = () => (
-  <article className="order-history-summary-card order-history-summary-card--skeleton" aria-hidden="true">
-    <div className="order-history-skeleton order-history-skeleton-icon" />
-    <div className="order-history-skeleton order-history-skeleton-line" style={{ width: '48%', height: 11 }} />
-    <div className="order-history-skeleton order-history-skeleton-line" style={{ width: '68%', height: 18 }} />
-    <div className="order-history-skeleton order-history-skeleton-line" style={{ width: '84%', height: 12 }} />
-  </article>
-);
+const STATUS_FILTERS = [
+  { key: 'all', label: 'All' },
+  { key: 'pending', label: 'Pending' },
+  { key: 'paid', label: 'Paid' },
+];
+
+const matchesStatusFilter = (order, filterKey) => {
+  if (filterKey === 'pending') return order.statusGroup === 'pending';
+  if (filterKey === 'paid') return order.statusGroup === 'active';
+  return true;
+};
 
 const OrderHistoryCardSkeleton = () => (
-  <article className="order-history-card order-history-card--skeleton" aria-hidden="true">
-    <div className="order-history-card-top">
-      <div className="min-w-0 flex-1">
-        <div className="order-history-skeleton order-history-skeleton-line" style={{ width: '46%', height: 15 }} />
-        <div className="order-history-skeleton order-history-skeleton-line" style={{ width: '34%', height: 12, marginTop: 8 }} />
-        <div className="order-history-skeleton order-history-skeleton-pill" style={{ width: 104, height: 24, marginTop: 10 }} />
-      </div>
-      <div className="order-history-skeleton order-history-skeleton-pill" style={{ width: 74, height: 30 }} />
-    </div>
-
-    <div className="order-history-meta-grid">
-      {Array.from({ length: 4 }).map((_, index) => (
-        <div key={index} className="order-history-skeleton order-history-skeleton-meta" />
-      ))}
-    </div>
-
-    <div className="order-history-item-chips">
-      <div className="order-history-skeleton order-history-skeleton-chip" style={{ width: 92 }} />
-      <div className="order-history-skeleton order-history-skeleton-chip" style={{ width: 76 }} />
-      <div className="order-history-skeleton order-history-skeleton-chip" style={{ width: 58 }} />
+  <article className="oh-card oh-card--skeleton" aria-hidden="true">
+    <div className="oh-skeleton oh-thumb" />
+    <div className="oh-card-body">
+      <div className="oh-skeleton" style={{ width: '52%', height: 15 }} />
+      <div className="oh-skeleton" style={{ width: '70%', height: 12, marginTop: 8 }} />
+      <div className="oh-skeleton" style={{ width: '40%', height: 12, marginTop: 8 }} />
     </div>
   </article>
 );
@@ -84,76 +78,18 @@ const OrderHistoryCardSkeleton = () => (
 export function OrderHistoryContent({ variant = 'page' } = {}) {
   const isPageVariant = variant === 'page';
   const navigate = useNavigate();
-  const theme = useAppTheme();
-  const navbarTheme = getNavbarThemeStyles(theme);
-  const navbarTextColor = navbarTheme?.textColor || 'var(--navbar-text)';
   const [orders, setOrders] = useState([]);
-  const [isSummaryOpen, setIsSummaryOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [trustErrors, setTrustErrors] = useState([]);
   const [selectedTrustKey, setSelectedTrustKey] = useState('');
-  const [visibleCount, setVisibleCount] = useState(ORDER_HISTORY_PAGE_SIZE);
-  const [loadingMore, setLoadingMore] = useState(false);
-  const [gatewayTrustIds, setGatewayTrustIds] = useState([]);
-  const [payingOrderId, setPayingOrderId] = useState('');
-  const [payMessage, setPayMessage] = useState('');
-  const sentinelRef = useRef(null);
-  const loadMoreFrameRef = useRef(null);
-  const loadMoreTimeoutRef = useRef(null);
+  const [page, setPage] = useState(1);
+  const [showJumpTop, setShowJumpTop] = useState(false);
+  const [searchText, setSearchText] = useState('');
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [sortOrder, setSortOrder] = useState('newest');
+  const [dateFilter, setDateFilter] = useState(DATE_FILTER_ALL);
 
-  // Only trusts with the payment gateway on get a "Pay now" button on pending orders.
-  const pendingTrustKey = useMemo(() => (
-    [...new Set(orders.filter((order) => order.statusGroup === 'pending' && order.trustId).map((order) => order.trustId))].sort().join(',')
-  ), [orders]);
-
-  useEffect(() => {
-    if (!pendingTrustKey) {
-      setGatewayTrustIds([]);
-      return undefined;
-    }
-    let active = true;
-    supabase
-      .from('Trust')
-      .select('id, payment_gateway')
-      .in('id', pendingTrustKey.split(','))
-      .then(({ data }) => {
-        if (active) setGatewayTrustIds((data || []).filter((row) => row.payment_gateway).map((row) => row.id));
-      })
-      .catch(() => {
-        if (active) setGatewayTrustIds([]);
-      });
-    return () => {
-      active = false;
-    };
-  }, [pendingTrustKey]);
-
-  const handlePayPending = async (order) => {
-    setPayingOrderId(order.id);
-    setPayMessage('');
-    try {
-      const result = await openRazorpayCheckout({
-        trustId: order.trustId,
-        purchaseIds: [order.purchaseId],
-        name: order.trustName || order.trustLabel,
-        description: 'Order payment',
-        themeColor: theme.primary,
-      });
-      setPayMessage(
-        result.status === 'paid'
-          ? 'Payment received. Your order is confirmed.'
-          : 'Payment received, confirming your order. It will update here shortly.'
-      );
-      window.dispatchEvent(new Event('trust-changed'));
-    } catch (error) {
-      setPayMessage(
-        error?.code === 'PAYMENT_CANCELLED'
-          ? 'Payment was cancelled. Tap Pay now to try again.'
-          : error?.message || 'Payment was not completed. Please try again.'
-      );
-    } finally {
-      setPayingOrderId('');
-    }
-  };
+  const { canPay, payOrder, payingOrderId, payMessage } = useOrderPayment(orders);
 
   useEffect(() => {
     let active = true;
@@ -231,23 +167,8 @@ export function OrderHistoryContent({ variant = 'page' } = {}) {
     };
   }, []);
 
-  const summary = useMemo(() => {
-    const totalOrders = orders.length;
-    const pendingOrders = orders.filter((order) => order.statusGroup === 'pending').length;
-    const doneOrders = orders.filter((order) => order.statusGroup === 'active').length;
-    const totalSpent = orders.reduce((sum, order) => sum + (Number(order.totalAmount) || 0), 0);
-    const latestOrder = orders[0] || null;
-
-    return {
-      totalOrders,
-      pendingOrders,
-      doneOrders,
-      totalSpent,
-      latestOrder,
-    };
-  }, [orders]);
-
   const isInitialLoading = isLoading && orders.length === 0;
+
   const trustTabs = useMemo(() => {
     const tabs = [];
     const tabMap = new Map();
@@ -268,7 +189,6 @@ export function OrderHistoryContent({ variant = 'page' } = {}) {
 
     return tabs;
   }, [orders]);
-  const visibleTrustCount = trustTabs.length;
 
   const selectedTrustTab = useMemo(() => {
     if (trustTabs.length === 0) return null;
@@ -277,75 +197,58 @@ export function OrderHistoryContent({ variant = 'page' } = {}) {
   }, [selectedTrustKey, trustTabs]);
 
   const activeTrustKey = selectedTrustTab?.key || '';
-  const visibleOrdersSource = useMemo(() => {
+
+  const trustOrders = useMemo(() => {
     if (!activeTrustKey) return orders;
     return orders.filter((order) => (order.trustKey || order.trustId || order.trustLabel || ORDER_HISTORY_UNKNOWN_TRUST_KEY) === activeTrustKey);
   }, [activeTrustKey, orders]);
 
-  const visibleOrders = useMemo(() => visibleOrdersSource.slice(0, visibleCount), [visibleCount, visibleOrdersSource]);
-  
-  const hasMoreOrders = visibleCount < visibleOrdersSource.length;
-  const orderHistoryTrustScope = resolveOrderHistoryTrustScope();
-  const isAllTrustsMode = orderHistoryTrustScope.isDefaultTrustSelected;
+  const statusCounts = useMemo(() => ({
+    all: trustOrders.length,
+    pending: trustOrders.filter((order) => matchesStatusFilter(order, 'pending')).length,
+    paid: trustOrders.filter((order) => matchesStatusFilter(order, 'paid')).length,
+  }), [trustOrders]);
+
+  const hasDateFilter = dateFilter.preset !== 'all';
+
+  const visibleOrdersSource = useMemo(() => {
+    const query = searchText.trim().toLowerCase();
+    // Date inputs are local calendar days; the "to" day is inclusive.
+    const { from: dateFrom, to: dateTo } = resolveDateRange(dateFilter);
+    const fromTs = dateFrom ? new Date(`${dateFrom}T00:00:00`).getTime() : null;
+    const toTs = dateTo ? new Date(`${dateTo}T23:59:59.999`).getTime() : null;
+
+    const filtered = trustOrders.filter((order) => {
+      if (!matchesStatusFilter(order, statusFilter)) return false;
+      if (fromTs !== null && order.createdAtTs < fromTs) return false;
+      if (toTs !== null && order.createdAtTs > toTs) return false;
+      if (!query) return true;
+      const haystack = [order.id, ...order.items.map((item) => item.name)].join(' ').toLowerCase();
+      return haystack.includes(query);
+    });
+
+    return sortOrder === 'oldest'
+      ? [...filtered].sort((a, b) => (a.createdAtTs || 0) - (b.createdAtTs || 0))
+      : filtered;
+  }, [trustOrders, statusFilter, searchText, dateFilter, sortOrder]);
+
+  const totalPages = Math.max(1, Math.ceil(visibleOrdersSource.length / ORDER_HISTORY_PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  const visibleOrders = useMemo(
+    () => visibleOrdersSource.slice((currentPage - 1) * ORDER_HISTORY_PAGE_SIZE, currentPage * ORDER_HISTORY_PAGE_SIZE),
+    [currentPage, visibleOrdersSource]
+  );
+  const isFiltering = Boolean(searchText.trim()) || statusFilter !== 'all' || hasDateFilter;
 
   const headerSubtitle = trustTabs.length === 1
-    ? `Orders from ${trustTabs[0].label}`
+    ? trustTabs[0].label
     : 'All trusts linked to your account';
-
-  const trustOverviewLabel = isLoading && orders.length === 0
-    ? (isAllTrustsMode ? 'Loading orders from all linked trusts...' : 'Loading orders from the selected trust...')
-    : visibleTrustCount > 0
-      ? `Showing orders across ${visibleTrustCount} trust${visibleTrustCount === 1 ? '' : 's'} with purchases`
-      : 'Showing locally saved orders until trust data is available';
-
-  const sectionCopy = isLoading && orders.length === 0
-    ? (isAllTrustsMode
-      ? 'Fetching the latest purchases from every linked trust.'
-      : 'Fetching the latest purchases from the selected trust.')
-    : trustTabs.length > 1
-      ? 'Switch between trusts using the tabs below.'
-      : 'Latest orders appear first.';
 
   const trustWarning = trustErrors.length > 0
     ? (trustErrors.length === 1
       ? `${trustErrors[0]?.trustName || trustErrors[0]?.trustId || 'One trust'} could not be loaded. Showing the rest from the backend.`
       : `${trustErrors.length} trusts could not be loaded. Showing the rest from the backend.`)
     : '';
-
-  const summaryCards = useMemo(() => ([
-    {
-      label: 'Total Orders',
-      value: summary.totalOrders,
-      helper: summary.latestOrder
-        ? `Latest: ${summary.latestOrder.id}${summary.latestOrder.trustLabel ? ` | ${summary.latestOrder.trustLabel}` : ''}`
-        : trustOverviewLabel,
-      tone: 'var(--brand-navy)',
-      icon: Package2,
-    },
-    {
-      label: 'Payment Pending',
-      value: summary.pendingOrders,
-      helper: summary.pendingOrders > 0 ? 'Waiting on payment' : 'Nothing pending right now',
-      tone: 'var(--app-button-bg)',
-      icon: Clock3,
-    },
-    {
-      label: 'Payment Done',
-      value: summary.doneOrders,
-      helper: summary.totalOrders > 0 ? `${Math.round((summary.doneOrders / summary.totalOrders) * 100) || 0}% of orders` : 'No paid orders yet',
-      tone: 'var(--brand-red)',
-      icon: PackageCheck,
-    },
-    {
-      label: 'Total Spent',
-      value: formatCurrency(summary.totalSpent),
-      helper: summary.totalOrders > 0
-        ? `${summary.totalOrders} order${summary.totalOrders === 1 ? '' : 's'}${visibleTrustCount > 0 ? ` across ${visibleTrustCount} trust${visibleTrustCount === 1 ? '' : 's'}` : ''}`
-        : 'No spend recorded',
-      tone: 'var(--heading-color)',
-      icon: CircleDollarSign,
-    },
-  ]), [summary, trustOverviewLabel, visibleTrustCount]);
 
   useEffect(() => {
     if (trustTabs.length === 0) {
@@ -360,510 +263,335 @@ export function OrderHistoryContent({ variant = 'page' } = {}) {
     ));
   }, [trustTabs]);
 
+  // A new search/filter/sort/trust starts from the first page.
   useEffect(() => {
-    const sentinel = sentinelRef.current;
-    if (!sentinel || typeof window === 'undefined' || isLoading || isInitialLoading || !hasMoreOrders) return undefined;
-
-    if (typeof IntersectionObserver === 'undefined') {
-      setVisibleCount((current) => Math.max(current, visibleOrdersSource.length));
-      return undefined;
-    }
-
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (!entries[0]?.isIntersecting || loadMoreTimeoutRef.current || loadMoreFrameRef.current) {
-          return;
-        }
-
-        setLoadingMore(true);
-        loadMoreFrameRef.current = window.requestAnimationFrame(() => {
-          loadMoreFrameRef.current = null;
-          loadMoreTimeoutRef.current = window.setTimeout(() => {
-            loadMoreTimeoutRef.current = null;
-            setVisibleCount((current) => Math.min(current + ORDER_HISTORY_PAGE_SIZE, visibleOrdersSource.length));
-            setLoadingMore(false);
-          }, ORDER_HISTORY_LOAD_MORE_DELAY_MS);
-        });
-      },
-      {
-        root: null,
-        rootMargin: ORDER_HISTORY_LOAD_MORE_ROOT_MARGIN,
-        threshold: 0.01,
-      }
-    );
-
-    observer.observe(sentinel);
-    return () => observer.disconnect();
-  }, [activeTrustKey, hasMoreOrders, isLoading, isInitialLoading, visibleOrdersSource.length]);
+    setPage(1);
+  }, [activeTrustKey, statusFilter, searchText, dateFilter, sortOrder]);
 
   useEffect(() => {
-    if (loadMoreTimeoutRef.current) {
-      window.clearTimeout(loadMoreTimeoutRef.current);
-      loadMoreTimeoutRef.current = null;
-    }
-    if (loadMoreFrameRef.current) {
-      window.cancelAnimationFrame(loadMoreFrameRef.current);
-      loadMoreFrameRef.current = null;
-    }
+    const handleScroll = () => setShowJumpTop(window.scrollY > JUMP_TOP_SCROLL_OFFSET);
+    handleScroll();
+    window.addEventListener('scroll', handleScroll, { passive: true });
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, []);
 
-    setLoadingMore(false);
-    setVisibleCount(ORDER_HISTORY_PAGE_SIZE);
-  }, [orders, activeTrustKey]);
+  const goToPage = (nextPage) => {
+    setPage(Math.min(Math.max(nextPage, 1), totalPages));
+    window.scrollTo({ top: 0, behavior: 'auto' });
+  };
 
-  const selectedTrustOrderCountLabel = selectedTrustTab
-    ? `Showing ${visibleOrdersSource.length} order${visibleOrdersSource.length === 1 ? '' : 's'} for ${selectedTrustTab.label}`
-    : '';
+  const handleJumpToTop = () => {
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const openOrder = (order) => {
+    navigate(`/order-history/${encodeURIComponent(order.id)}`, { state: { order } });
+  };
 
   return (
-    <main className={isPageVariant ? 'order-history-page' : undefined}>
+    <main className={isPageVariant ? 'oh-page' : undefined}>
       {isPageVariant && (
-        <div
-          className="theme-navbar sticky top-0 z-20"
-          style={{
-            background: navbarTheme?.backgroundStyle || 'var(--navbar-bg, var(--app-navbar-bg))',
-            backdropFilter: `blur(${navbarTheme?.blurPx || '12px'})`,
-            WebkitBackdropFilter: `blur(${navbarTheme?.blurPx || '12px'})`,
-            borderBottom: '1px solid var(--navbar-border)',
-            boxShadow: '0 2px 16px color-mix(in srgb, var(--brand-navy) 16%, transparent)',
-          }}
-        >
-          <div className="h-[3px]" style={{ background: 'var(--navbar-accent)' }} />
-          <div className="px-4 pt-4 pb-4">
-            <div className="flex items-center justify-between gap-3">
-              <button
-                type="button"
-                onClick={() => navigate(getAppHomePath())}
-                className="p-2 rounded-xl transition-colors"
-                style={{
-                  color: navbarTextColor,
-                  background: 'color-mix(in srgb, var(--navbar-bg) 72%, var(--surface-color))',
-                }}
-                aria-label="Go back"
-              >
-                <ArrowLeft className="h-5 w-5" />
-              </button>
-              <div className="min-w-0 flex-1 text-center">
-                <h1 className="truncate text-lg font-extrabold tracking-wide" style={{ color: navbarTextColor }}>
-                  Order History
-                </h1>
-                <p className="mt-0.5 text-[11px] font-medium" style={{ color: 'color-mix(in srgb, var(--body-text-color) 66%, var(--surface-color))' }}>
-                  {headerSubtitle}
-                </p>
-              </div>
-              <div className="w-10" aria-hidden="true" />
-            </div>
-          </div>
-        </div>
+        <OrderPageHeader
+          title="Order History"
+          subtitle={headerSubtitle}
+          onBack={() => navigate(getAppHomePath())}
+        />
       )}
 
-      <section className="order-history-content">
-        <div className="order-history-summary-toggle-row">
-          <button
-            type="button"
-            className="order-history-summary-toggle"
-            onClick={() => setIsSummaryOpen((prev) => !prev)}
-            aria-expanded={isSummaryOpen}
-            aria-controls="order-history-summary-panel"
-          >
-            <span>Orders Summary</span>
-            {isSummaryOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-          </button>
+      <section className="oh-content">
+        <label className="oh-search">
+          <Search className="h-4 w-4" aria-hidden="true" />
+          <input
+            type="search"
+            value={searchText}
+            onChange={(event) => setSearchText(event.target.value)}
+            placeholder="Search by product or order ID"
+            aria-label="Search orders"
+          />
+        </label>
+
+        <div className="oh-filter-row">
+          {STATUS_FILTERS.map((filter) => (
+            <button
+              key={filter.key}
+              type="button"
+              className={`oh-chip${statusFilter === filter.key ? ' oh-chip--active' : ''}`}
+              onClick={() => setStatusFilter(filter.key)}
+              aria-pressed={statusFilter === filter.key}
+            >
+              {filter.label} {statusCounts[filter.key]}
+            </button>
+          ))}
+          <OrderDateFilter value={dateFilter} onChange={setDateFilter} />
         </div>
 
-        {isSummaryOpen ? (
-          <div id="order-history-summary-panel" className="order-history-summary-panel">
-            {trustWarning ? (
-              <div className="order-history-alert" role="status">
-                <strong>Partial history loaded</strong>
-                <p>{trustWarning}</p>
-              </div>
-            ) : null}
-
-            <div className="order-history-summary-grid">
-              {isInitialLoading
-                ? Array.from({ length: 4 }).map((_, index) => (
-                  <OrderHistorySummarySkeletonCard key={`summary-skeleton-${index}`} />
-                ))
-                : summaryCards.map((card) => {
-                  const Icon = card.icon;
-                  return (
-                    <article
-                      key={card.label}
-                      className="order-history-summary-card"
-                      style={{
-                        borderColor: `color-mix(in srgb, ${card.tone} 20%, color-mix(in srgb, var(--surface-color) 14%, transparent))`,
-                        background: `color-mix(in srgb, ${card.tone} 6%, color-mix(in srgb, var(--surface-color) 10%, var(--app-accent-bg)))`,
-                        boxShadow: `0 12px 28px color-mix(in srgb, var(--brand-navy) 10%, transparent)`,
-                      }}
-                    >
-                      <div className="order-history-summary-icon" style={{ background: `color-mix(in srgb, ${card.tone} 14%, var(--surface-color))` }}>
-                        <Icon className="h-4 w-4" style={{ color: card.tone }} />
-                      </div>
-                      <p className="order-history-summary-label">{card.label}</p>
-                      <strong className="order-history-summary-value" style={{ color: 'var(--surface-color)' }}>{card.value}</strong>
-                      <p className="order-history-summary-helper">{card.helper}</p>
-                    </article>
-                  );
-                })}
-            </div>
+        {trustTabs.length > 1 ? (
+          <div className="oh-trust-tabs" role="tablist" aria-label="Filter orders by trust">
+            {trustTabs.map((tab) => {
+              const isActive = tab.key === activeTrustKey;
+              return (
+                <button
+                  key={tab.key}
+                  type="button"
+                  className={`oh-trust-tab${isActive ? ' oh-trust-tab--active' : ''}`}
+                  onClick={() => setSelectedTrustKey(tab.key)}
+                  aria-pressed={isActive}
+                >
+                  <span className="oh-trust-tab-label">{tab.label}</span>
+                  <span className="oh-trust-tab-count">{tab.count}</span>
+                </button>
+              );
+            })}
           </div>
         ) : null}
 
-        <section className="order-history-section">
-          <div className="order-history-section-head">
-            <div>
-              <h3 className="order-history-section-title" style={{ color: 'var(--page-text-color)' }}>
-                Recent Orders
-              </h3>
-              <p className="order-history-section-copy">
-                {sectionCopy}
-              </p>
-            </div>
+        {trustWarning ? (
+          <div className="oh-alert" role="status">
+            <strong>Partial history loaded</strong>
+            <p>{trustWarning}</p>
           </div>
+        ) : null}
 
-          {trustTabs.length > 1 ? (
-            <>
-              <div className="order-history-trust-tabs" role="tablist" aria-label="Filter recent orders by trust">
-                {trustTabs.map((tab) => {
-                  const isActive = tab.key === activeTrustKey;
+        <div className="oh-count-row">
+          <span>{isInitialLoading ? 'Loading orders...' : `${visibleOrdersSource.length} order${visibleOrdersSource.length === 1 ? '' : 's'}`}</span>
+          <label className="oh-sort">
+            <select value={sortOrder} onChange={(event) => setSortOrder(event.target.value)} aria-label="Sort orders">
+              <option value="newest">Newest first</option>
+              <option value="oldest">Oldest first</option>
+            </select>
+            <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" />
+          </label>
+        </div>
 
-                  return (
-                    <button
-                      key={tab.key}
-                      type="button"
-                      className={`order-history-trust-tab${isActive ? ' order-history-trust-tab--active' : ''}`}
-                      onClick={() => setSelectedTrustKey(tab.key)}
-                      aria-pressed={isActive}
-                    >
-                      <span className="order-history-trust-tab-label">{tab.label}</span>
-                      <span className="order-history-trust-tab-count">{tab.count}</span>
-                    </button>
-                  );
-                })}
-              </div>
+        {payMessage ? (
+          <p className="oh-pay-message" role="status">{payMessage}</p>
+        ) : null}
 
-              {selectedTrustOrderCountLabel ? (
-                <p className="order-history-trust-tab-note">{selectedTrustOrderCountLabel}</p>
-              ) : null}
-            </>
-          ) : null}
-
-          {isInitialLoading ? (
-            <div className="order-history-list">
-              {Array.from({ length: ORDER_HISTORY_SKELETON_COUNT }).map((_, index) => (
-                <OrderHistoryCardSkeleton key={`order-skeleton-${index}`} />
-              ))}
+        {isInitialLoading ? (
+          <div className="oh-list">
+            {Array.from({ length: ORDER_HISTORY_SKELETON_COUNT }).map((_, index) => (
+              <OrderHistoryCardSkeleton key={`order-skeleton-${index}`} />
+            ))}
+          </div>
+        ) : visibleOrdersSource.length === 0 ? (
+          <div className="oh-empty">
+            <div className="oh-empty-icon">
+              <Package2 className="h-7 w-7" />
             </div>
-          ) : visibleOrdersSource.length === 0 ? (
-            <div className="order-history-empty">
-              <div
-                className="order-history-empty-icon"
-                style={{
-                  background: 'color-mix(in srgb, var(--brand-navy) 10%, var(--surface-color))',
-                  color: 'var(--brand-navy)',
-                }}
-              >
-                <Package2 className="h-7 w-7" />
-              </div>
-              <p className="order-history-empty-title">{isLoading ? 'Loading order history' : 'No order history yet'}</p>
-              <p className="order-history-empty-copy">
-                {isLoading
-                  ? 'Fetching orders from the trusts linked to your account.'
+            <p className="oh-empty-title">
+              {isLoading ? 'Loading order history' : isFiltering ? 'No matching orders' : 'No order history yet'}
+            </p>
+            <p className="oh-empty-copy">
+              {isLoading
+                ? 'Fetching orders from the trusts linked to your account.'
+                : isFiltering
+                  ? 'Try a different search, status or date range.'
                   : 'Orders placed on any linked trust will show up here once they are available.'}
-              </p>
-              <div className="order-history-empty-actions">
-                <button
-                  type="button"
-                  className="order-history-primary-btn"
-                  onClick={() => navigate('/categories-products')}
-                >
+            </p>
+            {!isLoading && !isFiltering ? (
+              <div className="oh-empty-actions">
+                <button type="button" className="oh-pay-btn" onClick={() => navigate('/categories-products')}>
                   Browse products
                 </button>
-                <button
-                  type="button"
-                  className="order-history-secondary-btn"
-                  onClick={() => navigate(getAppHomePath())}
-                >
+                <button type="button" className="oh-secondary-btn" onClick={() => navigate(getAppHomePath())}>
                   Go home
                 </button>
               </div>
-            </div>
-          ) : (
-            <div className="order-history-list">
-              {payMessage ? (
-                <p className="text-sm font-semibold" style={{ color: T.text }} role="status">{payMessage}</p>
-              ) : null}
-              {visibleOrders.map((order) => {
-                const previewChips = order.items.slice(0, 3);
-                const remainingCount = Math.max(0, order.items.length - previewChips.length);
-                const productSummary = previewChips
-                  .map((item) => `${item.name}${item.quantity > 1 ? ` x${item.quantity}` : ''}`)
-                  .join(', ');
-                const hasProductSummary = Boolean(productSummary);
+            ) : null}
+          </div>
+        ) : (
+          <div className="oh-list">
+            {visibleOrders.map((order) => {
+              const title = order.productName || `Order #${order.shortId}`;
+              const itemsLabel = `${order.itemCount} item${order.itemCount === 1 ? '' : 's'}`;
+              const detailLabel = order.attributesLabel ? `${itemsLabel} · ${order.attributesLabel.replace(/^Size: /, 'Size ')}` : itemsLabel;
+              const showPay = canPay(order);
 
-                return (
-                  <article key={order.id} className="order-history-card">
+              return (
+                <article
+                  key={order.id}
+                  className="oh-card"
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => openOrder(order)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      event.preventDefault();
+                      openOrder(order);
+                    }
+                  }}
+                >
+                  <div className="oh-thumb">
+                    <OrderProductImage
+                      src={order.imageUrl}
+                      loading="lazy"
+                      fallback={<ImageIcon className="h-6 w-6" aria-hidden="true" />}
+                    />
+                  </div>
 
-                    <div className="order-history-card-top">
-                      <div className="min-w-0">
-                        {hasProductSummary ? (
-                          <p className="order-history-card-product" style={{ color: 'var(--body-text-color)' }}>
-                            {productSummary}
-                            {remainingCount > 0 ? ` +${remainingCount} more` : ''}
-                          </p>
-                        ) : null}
-                        <p
-                          className={hasProductSummary ? 'order-history-card-id order-history-card-id--secondary' : 'order-history-card-id'}
-                          style={hasProductSummary ? undefined : { color: 'var(--body-text-color)' }}
-                        >
-                          {hasProductSummary ? `Order #${order.id}` : order.id}
-                        </p>
-                        <p className="order-history-card-date">{order.createdAtLabel}</p>
-                        {order.trustLabel ? (
-                          <p className="order-history-trust-row">
-                            <span className="order-history-trust-chip">Trust: {order.trustLabel}</span>
-                          </p>
-                        ) : null}
-                      </div>
-                      <span className="order-history-status" style={getStatusChipStyles(order)}>
-                        {order.status}
-                      </span>
+                  <div className="oh-card-body">
+                    <div className="oh-card-head">
+                      <h3 className="oh-card-title">{title}</h3>
+                      <ChevronRight className="h-4 w-4 oh-chevron" aria-hidden="true" />
                     </div>
+                    <p className="oh-card-meta">
+                      {order.createdAtShort}
+                      {order.productName ? <> · <span className="oh-card-id">#{order.shortId}</span></> : null}
+                    </p>
+                    <p className="oh-card-meta">{detailLabel}</p>
+                  </div>
 
-                    <div className="order-history-meta-grid">
-                      <div className="order-history-meta-item">
-                        <span className="order-history-meta-label">Items</span>
-                        <strong className="order-history-meta-value">{order.itemCount}</strong>
-                      </div>
-                      <div className="order-history-meta-item">
-                        <span className="order-history-meta-label">Total</span>
-                        <strong className="order-history-meta-value">{formatCurrency(order.totalAmount)}</strong>
-                      </div>
-                      <div className="order-history-meta-item">
-                        <span className="order-history-meta-label">Attributes</span>
-                        <strong className="order-history-meta-value">{order.attributesLabel || 'No variant'}</strong>
-                      </div>
-                      <div className="order-history-meta-item">
-                        <span className="order-history-meta-label">Delivery</span>
-                        <strong className="order-history-meta-value">{order.deliveryEta || order.trackingStage || 'In progress'}</strong>
-                      </div>
-                    </div>
-                    {order.statusGroup === 'pending' && order.purchaseId && gatewayTrustIds.includes(order.trustId) ? (
+                  <div className="oh-card-foot">
+                    <span className="oh-status" style={getStatusPillStyle(order.statusTone)}>{order.status}</span>
+                    <strong className="oh-price">{formatCurrency(order.totalAmount)}</strong>
+                    <span className="oh-delivery">Delivery: {order.deliveryEta || order.trackingStage || 'In progress'}</span>
+                    {showPay ? (
                       <button
                         type="button"
-                        className="order-history-secondary-btn"
+                        className="oh-pay-btn"
                         disabled={Boolean(payingOrderId)}
-                        onClick={() => handlePayPending(order)}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          void payOrder(order);
+                        }}
                       >
-                        {payingOrderId === order.id ? 'Opening payment...' : 'Pay now'}
+                        {payingOrderId === order.id ? 'Opening...' : 'Pay now'}
                       </button>
                     ) : null}
-                  </article>
-                );
-              })}
-              {loadingMore ? (
-                <>
-                  {Array.from({ length: 2 }).map((_, index) => (
-                    <OrderHistoryCardSkeleton key={`order-more-skeleton-${index}`} />
-                  ))}
-                </>
-              ) : null}
-              {hasMoreOrders ? (
-                <div ref={sentinelRef} className="order-history-sentinel" aria-hidden="true" />
-              ) : null}
-              {loadingMore ? (
-                <p className="order-history-loading-more-copy">Loading more orders...</p>
-              ) : null}
-            </div>
-          )}
-        </section>
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        )}
+
+        {!isInitialLoading && totalPages > 1 ? (
+          <nav className="oh-pagination" aria-label="Order pages">
+            <button
+              type="button"
+              className="oh-page-btn"
+              onClick={() => goToPage(currentPage - 1)}
+              disabled={currentPage === 1}
+              aria-label="Previous page"
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </button>
+            {getPageItems(currentPage, totalPages).map((item, index) => (
+              item === null ? (
+                <span key={`gap-${index}`} className="oh-page-gap" aria-hidden="true">...</span>
+              ) : (
+                <button
+                  key={item}
+                  type="button"
+                  className={`oh-page-btn${item === currentPage ? ' oh-page-btn--active' : ''}`}
+                  onClick={() => goToPage(item)}
+                  aria-current={item === currentPage ? 'page' : undefined}
+                  aria-label={`Page ${item}`}
+                >
+                  {item}
+                </button>
+              )
+            ))}
+            <button
+              type="button"
+              className="oh-page-btn"
+              onClick={() => goToPage(currentPage + 1)}
+              disabled={currentPage === totalPages}
+              aria-label="Next page"
+            >
+              <ChevronRight className="h-4 w-4" />
+            </button>
+          </nav>
+        ) : null}
       </section>
 
+      <button
+        type="button"
+        className={`oh-jump-top${showJumpTop ? ' oh-jump-top--visible' : ''}`}
+        onClick={handleJumpToTop}
+        aria-label="Jump to top"
+        aria-hidden={!showJumpTop}
+        tabIndex={showJumpTop ? 0 : -1}
+      >
+        <ArrowUp className="h-[18px] w-[18px]" strokeWidth={2.2} />
+      </button>
+
       <style>{`
-        .order-history-page {
+        .oh-page {
           min-height: 100vh;
           background: ${T.page};
           color: ${T.text};
         }
-        .order-history-content {
-          padding: 18px;
+        .oh-content {
+          padding: 16px 16px 28px;
           display: flex;
           flex-direction: column;
-          gap: 16px;
+          gap: 14px;
         }
-        .order-history-summary-toggle-row {
+        .oh-search {
           display: flex;
-          justify-content: flex-start;
-        }
-        .order-history-summary-toggle {
-          min-height: 42px;
-          border-radius: 999px;
-          border: 1px solid color-mix(in srgb, var(--brand-navy) 18%, transparent);
-          padding: 0 14px;
-          display: inline-flex;
           align-items: center;
-          gap: 8px;
+          gap: 10px;
+          min-height: 48px;
+          padding: 0 16px;
+          border-radius: 999px;
+          background: ${T.surface};
+          border: 1px solid ${T.line};
+          color: ${T.muted};
+        }
+        .oh-search input {
+          flex: 1;
+          min-width: 0;
+          border: 0;
+          outline: 0;
+          background: transparent;
+          font-size: 14px;
+          color: ${T.heading};
+        }
+        .oh-search input::placeholder {
+          color: ${T.muted};
+        }
+        .oh-filter-row {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+        }
+        .oh-chip {
+          min-height: 38px;
+          padding: 0 18px;
+          border-radius: 999px;
+          border: 1px solid color-mix(in srgb, var(--brand-navy) 16%, transparent);
+          background: ${T.surface};
           color: var(--brand-navy);
-          background: color-mix(in srgb, var(--surface-color) 88%, var(--app-accent-bg));
-          font-size: 12px;
-          font-weight: 900;
-          letter-spacing: 0.12em;
-          text-transform: uppercase;
-          cursor: pointer;
-          box-shadow: 0 10px 22px color-mix(in srgb, var(--brand-navy) 6%, transparent);
-          transition: transform 0.18s ease, background-color 0.18s ease;
-        }
-        .order-history-summary-toggle:active {
-          transform: scale(0.98);
-        }
-        .order-history-summary-panel {
-          display: flex;
-          flex-direction: column;
-          gap: 16px;
-        }
-        .order-history-alert {
-          border-radius: 20px;
-          padding: 14px 16px;
-          border: 1px solid color-mix(in srgb, var(--brand-red) 20%, transparent);
-          background: linear-gradient(180deg, color-mix(in srgb, var(--brand-red) 8%, var(--surface-color)) 0%, color-mix(in srgb, var(--surface-color) 96%, var(--app-accent-bg)) 100%);
-          box-shadow: 0 10px 24px color-mix(in srgb, var(--brand-red) 8%, transparent);
-        }
-        .order-history-alert strong {
-          display: block;
-          margin-bottom: 4px;
-          font-size: 12px;
-          font-weight: 900;
-          letter-spacing: 0.12em;
-          text-transform: uppercase;
-          color: var(--brand-red);
-        }
-        .order-history-alert p {
-          margin: 0;
           font-size: 13px;
-          line-height: 1.6;
-          color: ${T.muted};
-        }
-        .order-history-summary-grid {
-          display: grid;
-          grid-template-columns: repeat(2, minmax(0, 1fr));
-          gap: 12px;
-        }
-        .order-history-summary-card {
-          border-radius: 20px;
-          padding: 14px;
-          border: 1px solid;
-          display: flex;
-          flex-direction: column;
-          gap: 7px;
-          min-height: 134px;
-        }
-        .order-history-summary-card--skeleton {
-          background: color-mix(in srgb, var(--surface-color) 10%, var(--app-accent-bg));
-        }
-        .order-history-summary-icon {
-          width: 34px;
-          height: 34px;
-          border-radius: 12px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-        }
-        .order-history-summary-label {
-          margin: 2px 0 0;
-          font-size: 11px;
           font-weight: 800;
-          letter-spacing: 0.12em;
-          text-transform: uppercase;
-          color: color-mix(in srgb, var(--surface-color) 52%, var(--body-text-color) 100%);
+          cursor: pointer;
+          transition: background-color 0.18s ease, color 0.18s ease;
         }
-        .order-history-summary-value {
-          font-size: 18px;
-          line-height: 1.2;
-          letter-spacing: -0.03em;
+        .oh-chip--active {
+          background: var(--app-button-bg);
+          border-color: var(--app-button-bg);
+          color: var(--app-button-text);
         }
-        .order-history-summary-helper {
-          margin: 0;
-          font-size: 12px;
-          line-height: 1.5;
-          color: color-mix(in srgb, var(--surface-color) 70%, transparent);
-        }
-        .order-history-skeleton {
-          position: relative;
-          overflow: hidden;
-          border-radius: 14px;
-          background: color-mix(in srgb, var(--surface-color) 76%, var(--app-accent-bg));
-        }
-        .order-history-skeleton::after {
-          content: '';
-          position: absolute;
-          inset: 0;
-          transform: translateX(-100%);
-          background: linear-gradient(90deg, transparent 0%, color-mix(in srgb, #fff 22%, transparent) 50%, transparent 100%);
-          animation: order-history-shimmer 1.75s ease-in-out infinite;
-        }
-        @keyframes order-history-shimmer {
-          100% {
-            transform: translateX(100%);
-          }
-        }
-        .order-history-skeleton-icon {
-          width: 34px;
-          height: 34px;
-          border-radius: 12px;
-        }
-        .order-history-skeleton-line {
-          border-radius: 999px;
-        }
-        .order-history-skeleton-pill {
-          border-radius: 999px;
-        }
-        .order-history-skeleton-meta {
-          min-height: 58px;
-          border-radius: 16px;
-        }
-        .order-history-section {
-          display: flex;
-          flex-direction: column;
-          gap: 12px;
-        }
-        .order-history-section-head {
-          display: flex;
-          align-items: flex-end;
-          justify-content: space-between;
-          gap: 12px;
-        }
-        .order-history-section-title {
-          margin: 0;
-          font-size: 18px;
-          font-weight: 900;
-          letter-spacing: -0.03em;
-        }
-        .order-history-section-copy {
-          margin: 6px 0 0;
-          font-size: 12px;
-          line-height: 1.5;
-          color: ${T.muted};
-        }
-        .order-history-trust-tabs {
+        .oh-trust-tabs {
           display: flex;
           align-items: center;
           gap: 8px;
           overflow-x: auto;
           padding: 2px 1px 4px;
-          margin-top: 2px;
           scrollbar-width: none;
           -ms-overflow-style: none;
         }
-        .order-history-trust-tabs::-webkit-scrollbar {
+        .oh-trust-tabs::-webkit-scrollbar {
           display: none;
         }
-        .order-history-trust-tab {
+        .oh-trust-tab {
           flex: 0 0 auto;
           min-height: 34px;
           padding: 0 12px;
           border-radius: 999px;
           border: 1px solid color-mix(in srgb, var(--brand-navy) 14%, transparent);
-          background: color-mix(in srgb, var(--surface-color) 86%, var(--app-accent-bg));
+          background: ${T.surface};
           color: ${T.muted};
           display: inline-flex;
           align-items: center;
@@ -871,24 +599,19 @@ export function OrderHistoryContent({ variant = 'page' } = {}) {
           font-size: 11px;
           font-weight: 800;
           cursor: pointer;
-          transition: transform 0.18s ease, background-color 0.18s ease, border-color 0.18s ease, color 0.18s ease;
         }
-        .order-history-trust-tab:active {
-          transform: scale(0.98);
-        }
-        .order-history-trust-tab--active {
+        .oh-trust-tab--active {
           color: var(--brand-navy);
           background: color-mix(in srgb, var(--brand-navy) 10%, var(--surface-color));
           border-color: color-mix(in srgb, var(--brand-navy) 22%, transparent);
-          box-shadow: 0 8px 18px color-mix(in srgb, var(--brand-navy) 7%, transparent);
         }
-        .order-history-trust-tab-label {
+        .oh-trust-tab-label {
           max-width: 180px;
           overflow: hidden;
           text-overflow: ellipsis;
           white-space: nowrap;
         }
-        .order-history-trust-tab-count {
+        .oh-trust-tab-count {
           min-width: 20px;
           height: 20px;
           padding: 0 6px;
@@ -901,18 +624,204 @@ export function OrderHistoryContent({ variant = 'page' } = {}) {
           font-size: 10px;
           font-weight: 900;
         }
-        .order-history-trust-tab--active .order-history-trust-tab-count {
-          background: color-mix(in srgb, var(--brand-navy) 16%, var(--surface-color));
+        .oh-alert {
+          padding: 12px 14px;
+          border-radius: 14px;
+          background: ${T.surface};
+          border: 1px solid color-mix(in srgb, var(--brand-red) 20%, transparent);
         }
-        .order-history-trust-tab-note {
-          margin: 0;
-          font-size: 11px;
-          line-height: 1.4;
-          font-weight: 700;
+        .oh-alert strong {
+          font-size: 12px;
+          color: var(--brand-red);
+        }
+        .oh-alert p {
+          margin: 4px 0 0;
+          font-size: 12px;
+          line-height: 1.5;
           color: ${T.muted};
         }
-        .order-history-empty {
-          min-height: 44vh;
+        .oh-count-row {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          font-size: 12px;
+          font-weight: 600;
+          color: ${T.muted};
+        }
+        .oh-sort {
+          position: relative;
+          display: inline-flex;
+          align-items: center;
+          gap: 4px;
+          color: var(--brand-navy);
+        }
+        .oh-sort select {
+          appearance: none;
+          -webkit-appearance: none;
+          border: 0;
+          background: transparent;
+          padding-right: 18px;
+          font-size: 12px;
+          font-weight: 800;
+          color: var(--brand-navy);
+          cursor: pointer;
+        }
+        .oh-sort svg {
+          position: absolute;
+          right: 0;
+          pointer-events: none;
+        }
+        .oh-pay-message {
+          margin: 0;
+          font-size: 13px;
+          font-weight: 600;
+          color: ${T.text};
+        }
+        .oh-list {
+          display: flex;
+          flex-direction: column;
+          gap: 12px;
+        }
+        .oh-card {
+          display: grid;
+          grid-template-columns: 72px minmax(0, 1fr);
+          column-gap: 12px;
+          row-gap: 10px;
+          padding: 14px;
+          border-radius: 18px;
+          background: ${T.surface};
+          border: 1px solid ${T.line};
+          box-shadow: 0 6px 18px color-mix(in srgb, var(--brand-navy) 8%, transparent);
+          color: ${T.text};
+          cursor: pointer;
+        }
+        .oh-card:active {
+          transform: scale(0.99);
+        }
+        .oh-card--skeleton {
+          cursor: default;
+        }
+        .oh-thumb {
+          width: 72px;
+          height: 72px;
+          border-radius: 14px;
+          overflow: hidden;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          background: color-mix(in srgb, var(--brand-navy) 10%, var(--surface-color));
+          color: var(--brand-navy);
+        }
+        .oh-thumb img {
+          width: 100%;
+          height: 100%;
+          object-fit: cover;
+        }
+        .oh-card-body {
+          min-width: 0;
+        }
+        .oh-card-head {
+          display: flex;
+          align-items: flex-start;
+          justify-content: space-between;
+          gap: 8px;
+        }
+        .oh-card-title {
+          margin: 0;
+          font-size: 16px;
+          font-weight: 800;
+          line-height: 1.3;
+          color: ${T.heading};
+          overflow-wrap: anywhere;
+        }
+        .oh-chevron {
+          flex: 0 0 auto;
+          margin-top: 3px;
+          color: ${T.muted};
+        }
+        .oh-card-meta {
+          margin: 3px 0 0;
+          font-size: 12px;
+          line-height: 1.4;
+          color: ${T.muted};
+        }
+        .oh-card-id {
+          color: var(--brand-navy);
+        }
+        .oh-card-foot {
+          grid-column: 1 / -1;
+          display: grid;
+          grid-template-columns: minmax(0, 1fr) auto;
+          align-items: center;
+          row-gap: 8px;
+          column-gap: 10px;
+        }
+        .oh-status {
+          justify-self: start;
+          padding: 5px 10px;
+          border-radius: 999px;
+          font-size: 11px;
+          font-weight: 800;
+          white-space: nowrap;
+        }
+        .oh-price {
+          font-size: 19px;
+          font-weight: 900;
+          letter-spacing: -0.02em;
+          color: ${T.heading};
+        }
+        .oh-delivery {
+          font-size: 12px;
+          color: ${T.muted};
+        }
+        .oh-pay-btn {
+          min-height: 44px;
+          padding: 0 24px;
+          border-radius: 999px;
+          border: 0;
+          background: var(--app-button-bg);
+          color: var(--app-button-text);
+          font-size: 14px;
+          font-weight: 800;
+          cursor: pointer;
+        }
+        .oh-pay-btn:disabled {
+          opacity: 0.6;
+        }
+        .oh-secondary-btn {
+          min-height: 44px;
+          border-radius: 999px;
+          border: 1px solid ${T.line};
+          background: ${T.surface};
+          color: ${T.heading};
+          font-size: 14px;
+          font-weight: 800;
+          cursor: pointer;
+        }
+        .oh-skeleton {
+          position: relative;
+          overflow: hidden;
+          border-radius: 999px;
+          background: color-mix(in srgb, var(--brand-navy) 8%, var(--surface-color));
+        }
+        .oh-skeleton.oh-thumb {
+          border-radius: 14px;
+        }
+        .oh-skeleton::after {
+          content: '';
+          position: absolute;
+          inset: 0;
+          transform: translateX(-100%);
+          background: linear-gradient(90deg, transparent 0%, color-mix(in srgb, #fff 40%, transparent) 50%, transparent 100%);
+          animation: oh-shimmer 1.75s ease-in-out infinite;
+        }
+        @keyframes oh-shimmer {
+          100% {
+            transform: translateX(100%);
+          }
+        }
+        .oh-empty {
+          min-height: 40vh;
           display: flex;
           flex-direction: column;
           align-items: center;
@@ -921,202 +830,99 @@ export function OrderHistoryContent({ variant = 'page' } = {}) {
           gap: 8px;
           padding: 16px 8px;
         }
-        .order-history-empty-icon {
+        .oh-empty-icon {
           width: 68px;
           height: 68px;
           border-radius: 50%;
           display: flex;
           align-items: center;
           justify-content: center;
-          border: 1px solid color-mix(in srgb, var(--brand-navy) 16%, transparent);
+          background: color-mix(in srgb, var(--brand-navy) 10%, var(--surface-color));
+          color: var(--brand-navy);
         }
-        .order-history-empty-title {
+        .oh-empty-title {
           margin: 8px 0 0;
           font-size: 16px;
           font-weight: 900;
           color: ${T.heading};
         }
-        .order-history-empty-copy {
+        .oh-empty-copy {
           margin: 0;
           max-width: 280px;
           font-size: 13px;
           line-height: 1.6;
           color: ${T.muted};
         }
-        .order-history-empty-actions {
+        .oh-empty-actions {
           width: 100%;
+          max-width: 280px;
           display: grid;
-          grid-template-columns: 1fr;
           gap: 10px;
           margin-top: 10px;
-          max-width: 280px;
         }
-        .order-history-primary-btn,
-        .order-history-secondary-btn {
-          min-height: 46px;
-          border-radius: 14px;
-          border: 0;
+        .oh-pagination {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          flex-wrap: wrap;
+          gap: 8px;
+          padding-top: 4px;
+        }
+        .oh-page-btn {
+          min-width: 38px;
+          height: 38px;
+          padding: 0 10px;
+          border-radius: 999px;
+          border: 1px solid color-mix(in srgb, var(--brand-navy) 16%, transparent);
+          background: ${T.surface};
+          color: var(--brand-navy);
           font-size: 13px;
           font-weight: 800;
-          cursor: pointer;
-          transition: transform 0.18s ease, opacity 0.18s ease;
-        }
-        .order-history-primary-btn {
-          color: var(--app-button-text);
-          background: var(--app-button-bg);
-        }
-        .order-history-secondary-btn {
-          color: ${T.heading};
-          background: color-mix(in srgb, var(--surface-color) 78%, var(--app-accent-bg));
-          border: 1px solid ${T.line};
-        }
-        .order-history-primary-btn:active,
-        .order-history-secondary-btn:active {
-          transform: scale(0.98);
-        }
-        .order-history-list {
-          display: flex;
-          flex-direction: column;
-          gap: 12px;
-        }
-        .order-history-card {
-          border-radius: 20px;
-          padding: 16px;
-          background: linear-gradient(180deg,
-            color-mix(in srgb, var(--surface-color) 10%, var(--app-accent-bg)) 99%,
-            color-mix(in srgb, var(--surface-color) 10%, var(--app-accent-bg)) 100%
-          );
-          border: 1px solid color-mix(in srgb, var(--surface-color) 14%, transparent);
-          box-shadow:
-            0 16px 32px color-mix(in srgb, var(--brand-navy) 12%, transparent),
-            inset 0 1px 0 color-mix(in srgb, #fff 4%, transparent);
-          color: var(--surface-color);
-        }
-        .order-history-card--skeleton {
-          display: flex;
-          flex-direction: column;
-          gap: 12px;
-        }
-        .order-history-card-top {
-          display: flex;
-          align-items: flex-start;
-          justify-content: space-between;
-          gap: 12px;
-        }
-        .order-history-card-product {
-          margin: 0;
-          font-size: 15px;
-          font-weight: 900;
-          line-height: 1.3;
-          color: inherit;
-          overflow-wrap: break-word;
-        }
-        .order-history-card-id {
-          margin: 0;
-          font-size: 15px;
-          font-weight: 900;
-          color: inherit;
-        }
-        .order-history-card-id--secondary {
-          margin-top: 3px;
-          font-size: 11px;
-          font-weight: 700;
-          letter-spacing: 0.03em;
-          color: color-mix(in srgb, currentColor 62%, transparent);
-        }
-        .order-history-card-date {
-          margin: 4px 0 0;
-          font-size: 12px;
-          line-height: 1.5;
-          color: color-mix(in srgb, currentColor 70%, transparent);
-        }
-        .order-history-trust-row {
-          margin: 8px 0 0;
-        }
-        .order-history-trust-chip {
-          display: inline-flex;
-          align-items: center;
-          gap: 6px;
-          padding: 6px 10px;
-          border-radius: 999px;
-          border: 1px solid color-mix(in srgb, var(--surface-color) 16%, transparent);
-          background: color-mix(in srgb, var(--surface-color) 8%, var(--page-bg, var(--app-page-bg)));
-          color: color-mix(in srgb, var(--surface-color) 90%, var(--page-bg, var(--app-page-bg)));
-          font-size: 11px;
-          font-weight: 900;
-          letter-spacing: 0.08em;
-          text-transform: uppercase;
-        }
-        .order-history-status {
           display: inline-flex;
           align-items: center;
           justify-content: center;
-          gap: 6px;
-          padding: 7px 10px;
-          border-radius: 999px;
-          font-size: 11px;
-          font-weight: 800;
-          white-space: nowrap;
+          cursor: pointer;
         }
-        .order-history-meta-grid {
-          margin-top: 14px;
-          display: grid;
-          grid-template-columns: repeat(2, minmax(0, 1fr));
-          gap: 10px;
+        .oh-page-btn--active {
+          background: var(--app-button-bg);
+          border-color: var(--app-button-bg);
+          color: var(--app-button-text);
         }
-        .order-history-meta-item {
-          border-radius: 16px;
-          padding: 10px 12px;
-          background: color-mix(in srgb, var(--surface-color) 7%, var(--page-bg, var(--app-page-bg)));
-          border: 1px solid color-mix(in srgb, var(--surface-color) 12%, transparent);
+        .oh-page-btn:disabled {
+          opacity: 0.4;
+          cursor: default;
         }
-        .order-history-meta-label {
-          display: block;
-          font-size: 10px;
-          font-weight: 800;
-          letter-spacing: 0.12em;
-          text-transform: uppercase;
-          color: color-mix(in srgb, var(--surface-color) 52%, var(--body-text-color) 100%);
-        }
-        .order-history-meta-value {
-          display: block;
-          margin-top: 4px;
-          font-size: 13px;
-          font-weight: 900;
-          color: color-mix(in srgb, var(--surface-color) 92%, var(--page-bg, var(--app-page-bg)));
-          word-break: break-word;
-        }
-        .order-history-item-chips {
-          margin-top: 12px;
-          display: flex;
-          flex-wrap: wrap;
-          gap: 6px;
-        }
-        .order-history-item-chip {
-          border-radius: 999px;
-          padding: 5px 9px;
-          font-size: 11px;
-          font-weight: 700;
-          color: color-mix(in srgb, var(--surface-color) 82%, var(--page-bg, var(--app-page-bg)));
-          background: color-mix(in srgb, var(--surface-color) 8%, var(--page-bg, var(--app-page-bg)));
-          border: 1px solid color-mix(in srgb, var(--surface-color) 10%, transparent);
-        }
-        .order-history-sentinel {
-          width: 100%;
-          height: 1px;
-        }
-        .order-history-loading-more-copy {
-          margin: 0;
-          text-align: center;
-          font-size: 12px;
-          font-weight: 700;
+        .oh-page-gap {
           color: ${T.muted};
+          font-weight: 800;
         }
-        @media (max-width: 380px) {
-          .order-history-summary-grid,
-          .order-history-meta-grid {
-            grid-template-columns: 1fr;
-          }
+        .oh-jump-top {
+          position: fixed;
+          /* The app is a centred 430px column on wide screens (App.jsx), so anchor to the
+             column's right edge instead of the viewport's. */
+          right: max(20px, calc((100vw - 430px) / 2 + 20px));
+          bottom: 28px;
+          z-index: 15;
+          width: 42px;
+          height: 42px;
+          border: none;
+          border-radius: 999px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          background: var(--app-button-bg);
+          color: var(--app-button-text);
+          box-shadow: 0 15px 34px color-mix(in srgb, var(--brand-navy) 28%, transparent);
+          cursor: pointer;
+          opacity: 0;
+          transform: translateY(12px) scale(0.9);
+          pointer-events: none;
+          transition: opacity 220ms ease, transform 220ms ease;
+        }
+        .oh-jump-top--visible {
+          opacity: 1;
+          transform: translateY(0) scale(1);
+          pointer-events: auto;
         }
       `}</style>
     </main>
