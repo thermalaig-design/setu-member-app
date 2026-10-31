@@ -267,6 +267,14 @@ const pinBaseTrustFirst = (trusts = []) => {
   return [baseTrust, ...remaining];
 };
 
+// Fallback when the selected Trust is missing: the logged-in app's own
+// (base) Trust if the member has it, else the first active one.
+const pickFallbackTrust = (trusts = []) =>
+  trusts.find((trust) => String(trust?.id || '').trim() === BASE_TRUST_ID && trust?.is_active !== false)
+  || trusts.find((trust) => trust?.is_active !== false)
+  || trusts[0]
+  || null;
+
 const TRUST_ICON_CACHE_KEY = 'trust_icon_url_cache_v1';
 const readTrustIconUrlCache = () => {
   try {
@@ -788,9 +796,9 @@ const Home = ({ onNavigate, onLogout }) => {
           setStrictTrustApiState('success');
           return;
         }
-        const effectiveTrust = (selectedExists
-          ? apiTrusts.find((trust) => normalizeTrustId(trust?.id) === currentSelected)
-          : apiTrusts.find((trust) => trust?.is_active !== false) || apiTrusts[0]) || null;
+        const effectiveTrust = selectedExists
+          ? apiTrusts.find((trust) => normalizeTrustId(trust?.id) === currentSelected) || null
+          : pickFallbackTrust(apiTrusts);
 
         if (effectiveTrust?.id) {
           const effectiveTrustId = normalizeTrustId(effectiveTrust.id);
@@ -1230,12 +1238,13 @@ const Home = ({ onNavigate, onLogout }) => {
       });
 
       setTrustIconVersionById((prev) => {
-        const now = Date.now();
+        // Token comes only from the Trust row, so the icon URL stays the same
+        // (browser-cached, no flicker) until the logo actually changes.
         const next = { ...prev };
         Object.values(byId).forEach((trust) => {
           const id = normalizeTrustId(trust?.id);
           if (!id) return;
-          next[id] = `${resolveTrustIconToken(trust, '1')}-${now}`;
+          next[id] = resolveTrustIconToken(trust, '1');
         });
         return next;
       });
@@ -1298,7 +1307,7 @@ const Home = ({ onNavigate, onLogout }) => {
         });
         setTrustIconVersionById((prev) => ({
           ...prev,
-          [normalizedFreshId]: `${resolveTrustIconToken(freshTrust, '1')}-${Date.now()}`,
+          [normalizedFreshId]: resolveTrustIconToken(freshTrust, '1'),
         }));
         if (freshTrust?.icon_url) {
           setTrustIconUrlById((prev) => {
@@ -1373,9 +1382,9 @@ const Home = ({ onNavigate, onLogout }) => {
         hasLoadedMemberTrusts.current = true;
         return;
       }
-      const effectiveTrust = (selectedExists
-        ? apiTrusts.find((trust) => normalizeTrustId(trust?.id) === normalizedSelected)
-        : apiTrusts.find((trust) => trust?.is_active !== false) || apiTrusts[0]) || null;
+      const effectiveTrust = selectedExists
+        ? apiTrusts.find((trust) => normalizeTrustId(trust?.id) === normalizedSelected) || null
+        : pickFallbackTrust(apiTrusts);
 
       if (effectiveTrust?.id) {
         const effectiveTrustId = normalizeTrustId(effectiveTrust.id);
@@ -1640,7 +1649,7 @@ const Home = ({ onNavigate, onLogout }) => {
         }));
         setTrustIconVersionById((prev) => ({
           ...prev,
-          [normalizedId]: `${resolveTrustIconToken(freshTrust, '1')}-${Date.now()}`,
+          [normalizedId]: resolveTrustIconToken(freshTrust, '1'),
         }));
         if (freshTrust?.icon_url) {
           setTrustIconUrlById((prev) => {
@@ -2667,7 +2676,7 @@ const Home = ({ onNavigate, onLogout }) => {
     const shouldBlinkForUnread = trustUnreadCount > 0;
     const trustChipAnimations = [
       isAnimatingSelection ? 'trustChipMoveToFront 520ms cubic-bezier(0.22, 1, 0.36, 1)' : null,
-      shouldBlinkForUnread ? 'trustChipUnreadPulse 1.5s ease-in-out infinite' : null,
+      shouldBlinkForUnread ? 'trustChipUnreadPulse 1.6s ease-in-out infinite' : null,
     ].filter(Boolean).join(', ');
 
     return (
@@ -2679,7 +2688,7 @@ const Home = ({ onNavigate, onLogout }) => {
           if (node) trustChipRefs.current[normalizedTrustId] = node;
           else delete trustChipRefs.current[normalizedTrustId];
         }}
-        className="flex-shrink-0 w-[3rem] h-[3rem] rounded-full flex items-center justify-center overflow-visible transition-all duration-200 relative"
+        className={`flex-shrink-0 w-[3rem] h-[3rem] rounded-full flex items-center justify-center overflow-visible transition-all duration-200 relative${shouldBlinkForUnread ? ' trust-chip-unread' : ''}`}
         style={{
           border: isActive
             ? `2.5px solid ${theme.primary}`
@@ -2692,8 +2701,10 @@ const Home = ({ onNavigate, onLogout }) => {
           animation: trustChipAnimations || 'none',
           '--trust-ring-color': theme.primary,
           '--trust-ring-glow': `color-mix(in srgb, ${theme.primary} 45%, ${theme.accent || theme.secondary})`,
+          '--trust-badge-text': onPrimaryText,
         }}
         title={trust?.name || ''}
+        aria-label={shouldBlinkForUnread ? `${trust?.name || 'Trust'}: ${trustUnreadCount} new` : (trust?.name || 'Trust')}
       >
         <TrustChipIcon
           iconUrl={trust?.icon_url || trustIconUrlById[normalizedTrustId]}
@@ -2701,7 +2712,11 @@ const Home = ({ onNavigate, onLogout }) => {
           versionToken={trustIconVersionById[normalizedTrustId] || resolveTrustIconToken(trust, '')}
           state={isActive}
         />
-        
+        {shouldBlinkForUnread ? (
+          <span className="trust-chip-unread-badge" aria-hidden="true">
+            {trustUnreadCount > 9 ? '9+' : trustUnreadCount}
+          </span>
+        ) : null}
       </button>
     );
   };
@@ -3227,7 +3242,7 @@ const Home = ({ onNavigate, onLogout }) => {
             trustList: showTrustSelector && (selectedTrust || otherTrusts.length > 0) ? (
               <div key="trustList">
                 <div
-                  className="flex items-center gap-2 px-4 py-2"
+                  className="flex items-center gap-2 px-4 py-1"
                   style={{
                     animation: resolveAnimation('trustList', 'cards'),
                   }}
@@ -3239,7 +3254,7 @@ const Home = ({ onNavigate, onLogout }) => {
                   ) : null}
                   {otherTrusts.length > 0 ? (
                     <div
-                      className="flex min-w-0 flex-1 gap-2 overflow-x-auto overscroll-x-contain py-2 pl-2"
+                      className="flex min-w-0 flex-1 gap-2.5 overflow-x-auto overscroll-x-contain py-3 pl-3 pr-2"
                       style={{
                         scrollbarWidth: 'none',
                         background: 'transparent',
@@ -3742,19 +3757,68 @@ const Home = ({ onNavigate, onLogout }) => {
           }
         }
 
+        /* Unread: theme colours, but strong enough to read on a dark page
+           (the ring brightens toward white at the peak). */
         @keyframes trustChipUnreadPulse {
           0%, 100% {
             border-color: var(--trust-ring-color);
             box-shadow:
-              0 0 0 0 color-mix(in srgb, var(--trust-ring-glow) 0%, transparent),
-              0 4px 12px color-mix(in srgb, var(--brand-navy) 22%, transparent);
+              0 0 0 2px color-mix(in srgb, var(--trust-ring-glow) 40%, transparent),
+              0 0 10px 2px color-mix(in srgb, var(--trust-ring-glow) 50%, transparent);
           }
           50% {
-            border-color: color-mix(in srgb, var(--trust-ring-color) 68%, var(--surface-color));
+            border-color: color-mix(in srgb, var(--trust-ring-color) 65%, #ffffff);
             box-shadow:
-              0 0 0 7px color-mix(in srgb, var(--trust-ring-glow) 28%, transparent),
-              0 8px 18px color-mix(in srgb, var(--trust-ring-glow) 32%, transparent);
+              0 0 0 3px color-mix(in srgb, var(--trust-ring-glow) 60%, transparent),
+              0 0 18px 5px color-mix(in srgb, var(--trust-ring-glow) 70%, transparent);
           }
+        }
+
+        @keyframes trustChipUnreadRipple {
+          0% { transform: scale(1); opacity: 0.85; }
+          100% { transform: scale(1.45); opacity: 0; }
+        }
+
+        @keyframes trustChipBadgePop {
+          0%, 100% { transform: scale(1); }
+          50% { transform: scale(1.18); }
+        }
+
+        .trust-chip-unread::after {
+          content: '';
+          position: absolute;
+          inset: -3px;
+          border-radius: 9999px;
+          border: 2px solid var(--trust-ring-color);
+          pointer-events: none;
+          animation: trustChipUnreadRipple 1.6s ease-out infinite;
+        }
+
+        .trust-chip-unread-badge {
+          position: absolute;
+          top: -5px;
+          right: -6px;
+          z-index: 2;
+          min-width: 18px;
+          height: 18px;
+          padding: 0 4px;
+          border-radius: 9999px;
+          background: var(--trust-ring-color);
+          color: var(--trust-badge-text, #fff);
+          font-size: 10px;
+          font-weight: 700;
+          line-height: 18px;
+          text-align: center;
+          border: 2px solid var(--app-page-bg, #1a1a1a);
+          box-shadow: 0 2px 8px color-mix(in srgb, var(--trust-ring-glow) 70%, transparent);
+          pointer-events: none;
+          animation: trustChipBadgePop 1.6s ease-in-out infinite;
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+          .trust-chip-unread,
+          .trust-chip-unread::after,
+          .trust-chip-unread-badge { animation: none !important; }
         }
 
         /* Hide scrollbar on home page content */

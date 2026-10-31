@@ -94,7 +94,9 @@ export const hasAnyTrustMembership = (user = {}) =>
 
 export const compactUserForStorage = (user = {}) => {
   const memberships = Array.isArray(user?.hospital_memberships) ? user.hospital_memberships : [];
-  const compactMemberships = memberships.slice(0, 25).map(compactMembership);
+  // No cap: a truncated list can drop the logged-in app's Trust (memberships
+  // are alphabetical), and Home then falls back to a different Trust.
+  const compactMemberships = memberships.map(compactMembership);
   const normalizedMembersId = isUuid(user?.members_id) ? String(user.members_id).trim() : null;
   const normalizedMemberId = isUuid(user?.member_id) ? String(user.member_id).trim() : normalizedMembersId;
   const compactMemberIds = Array.from(

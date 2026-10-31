@@ -48,10 +48,14 @@ export default defineConfig(({ command, mode }) => {
   // blank WebView, since no JS ever loads. `npm run build:capacitor` (mode
   // "capacitor", see .env.capacitor) is the only thing that should ever set
   // this; the ordinary website build/deploy is untouched.
-  const isCapacitorBuild = env.VITE_CAPACITOR_BUILD === 'true';
+  const isCapacitorBuild = mode === 'capacitor' || env.VITE_CAPACITOR_BUILD === 'true';
 
   return {
     base: (command === 'serve' || isCapacitorBuild) ? '/' : '/_setu-app/',
+    // Keep website builds from overwriting the bundle copied into the native app.
+    build: {
+      outDir: isCapacitorBuild ? 'dist-capacitor' : 'dist'
+    },
     server: {
       proxy: pwaManifestProxy
     },
