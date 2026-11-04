@@ -13,7 +13,7 @@ const jwt = (await import(pathToFileURL(require.resolve('jsonwebtoken')))).defau
 const trustId = '11111111-1111-4111-8111-111111111111';
 const memberId = '22222222-2222-4222-8222-222222222222';
 const ids = ['33333333-3333-4333-8333-333333333333', '44444444-4444-4444-8444-444444444444'];
-let tables, serial, orders, activationCount, failActivation, failInvoice;
+let tables, serial, orders, activationCount, failActivation, failInvoice, missingEventsTable;
 const database = {
   from(table) {
     let action = 'select', values, single = false, filters = [], sort, limit;
@@ -36,6 +36,10 @@ const database = {
       single() { single = true; return this; },
       then(resolve, reject) {
         try {
+          if (table === 'razorpay_webhook_events' && missingEventsTable) {
+            return resolve({ data: null, error: { code: 'PGRST205',
+              message: "Could not find the table 'public.razorpay_webhook_events' in the schema cache" } });
+          }
           const source = tables[table] ||= [];
           let selected = source.filter((row) => filters.every((filter) => filter(row)));
           if (sort) selected.sort((a, b) => String(b[sort]).localeCompare(String(a[sort])));
@@ -63,6 +67,7 @@ const database = {
 class Razorpay {
   orders = { create: async (payload) => {
     const order = { ...payload, id: `order_${orders.length + 1}` };
+    if (payload.transfers) order.transfers = payload.transfers.map((t, i) => ({ ...t, id: `trf_mock${i}` }));
     orders.push(order); return order;
   } };
   payments = {
@@ -108,6 +113,7 @@ after(async () => {
 });
 const reset = (route = true, count = 1) => {
   serial = 0; orders = []; activationCount = 0; failActivation = false; failInvoice = false;
+  missingEventsTable = false;
   tables = {
     Trust: [{ id: trustId, name: 'Setu AI', payment_gateway: true, razorpay_route: route }],
     trust_bank_details: [{ trust_id: trustId, razorpay_id: 'acc_test', vendor_share: 98, updated_at: '2026-10-24' }],
@@ -225,6 +231,22 @@ test('11: duplicate event id is skipped; transfer event before capture is parked
   const snapshot = structuredClone(tables.product_payments);
   assert.equal((await webhook('payment.captured', captured(body), 'cap1')).status, 200);
   assert.deepEqual(tables.product_payments, snapshot); assert.equal(activationCount, 1);
+});
+test('create-order stores the Route transfer id from the order', async () => {
+  reset(); await checkout();
+  const row = tables.product_payments[0];
+  assert.equal(row.gateway_transfer_id, 'trf_mock0'); assert.equal(row.transfer_status, 'pending');
+  reset(false); await checkout();
+  assert.equal(tables.product_payments[0].gateway_transfer_id, null);
+});
+test('webhooks work when razorpay_webhook_events table is missing', async () => {
+  reset(); missingEventsTable = true; const { body } = await checkout();
+  assert.equal((await webhook('payment.captured', captured(body), 'cap-nolog')).status, 200);
+  assert.equal((await webhook('transfer.processed', { id: 'trf_test', source: 'pay_test' }, 'trf-nolog')).status, 200);
+  const row = tables.product_payments[0];
+  assert.equal(row.status, 'success'); assert.equal(row.last_webhook_event_id, 'trf-nolog');
+  assert.equal(row.gateway_transfer_id, 'trf_test'); assert.equal(row.transfer_status, 'processed');
+  assert.equal(tables.razorpay_webhook_events, undefined);
 });
 test('permanent errors return 200, transient errors 500, activation errors stay pending', async () => {
   reset(); const { body } = await checkout();

@@ -202,6 +202,7 @@ export const recordPendingOrder = async ({ quote, order }) => {
         invoice_id: invoice.id, payment_mode: 'razorpay', amount: line.total_amount,
         status: 'pending', payment_gateway: 'razorpay', gateway_order_id: order.id,
         transfer_status: quote.route_enabled ? 'pending' : null,
+        gateway_transfer_id: order.transfers?.[0]?.id || null,
         gateway_payload: {
           order: { id: order.id, receipt: order.receipt, amount: order.amount,
             created_at: order.created_at, transfers: order.transfers || null },
@@ -347,34 +348,64 @@ export const applyTransferEvent = async ({ transfer, status, eventId = null, eve
   return { success: true, matched };
 };
 
+// The event log table is optional: the payment rows are updated either way.
+export const isMissingEventsTable = (error) => {
+  if (!error) return false;
+  if (error.code === '42P01' || error.code === 'PGRST205') return true;
+  const message = String(error.message || '');
+  return /razorpay_webhook_events/.test(message) && /does not exist|schema cache|not found/i.test(message);
+};
+
+const warnEventsTableMissing = () => {
+  console.warn('Razorpay webhook event log disabled until razorpay_webhook_events.sql is applied');
+};
+
 /**
  * Webhook event log. Returns { duplicate: true } when this event id was already
  * processed (Razorpay retries); otherwise the event is stored as 'received'.
  */
 export const recordWebhookEvent = async ({ eventId, eventName, event }) => {
-  const existing = await query(db().from('razorpay_webhook_events').select('event_id, status')
-    .eq('event_id', eventId).maybeSingle());
-  if (existing) return { duplicate: existing.status === 'processed' || existing.status === 'pending_match' };
-  const entity = event?.payload?.transfer?.entity || event?.payload?.payment?.entity;
-  const { error } = await db().from('razorpay_webhook_events').insert({
-    event_id: eventId, event_name: eventName, payload: event, status: 'received',
-    entity_id: entity?.source || entity?.id || null,
-    event_created_at: event?.created_at ? new Date(event.created_at * 1000).toISOString() : null,
-  });
-  if (error && error.code !== '23505') throw mapDbError(error);
-  return { duplicate: false };
+  try {
+    const existing = await query(db().from('razorpay_webhook_events').select('event_id, status')
+      .eq('event_id', eventId).maybeSingle());
+    if (existing) return { duplicate: existing.status === 'processed' || existing.status === 'pending_match' };
+    const entity = event?.payload?.transfer?.entity || event?.payload?.payment?.entity;
+    const { error } = await db().from('razorpay_webhook_events').insert({
+      event_id: eventId, event_name: eventName, payload: event, status: 'received',
+      entity_id: entity?.source || entity?.id || null,
+      event_created_at: event?.created_at ? new Date(event.created_at * 1000).toISOString() : null,
+    });
+    if (error && error.code !== '23505') throw mapDbError(error);
+    return { duplicate: false };
+  } catch (error) {
+    if (!isMissingEventsTable(error)) throw error;
+    warnEventsTableMissing();
+    return { duplicate: false };
+  }
 };
 
 export const markWebhookEvent = async (eventId, status, errorMessage = null) => {
-  await query(db().from('razorpay_webhook_events').update({
-    status, error: errorMessage, processed_at: new Date().toISOString(),
-  }).eq('event_id', eventId));
+  try {
+    await query(db().from('razorpay_webhook_events').update({
+      status, error: errorMessage, processed_at: new Date().toISOString(),
+    }).eq('event_id', eventId));
+  } catch (error) {
+    if (!isMissingEventsTable(error)) throw error;
+    warnEventsTableMissing();
+  }
 };
 
 // Transfer events that arrived before the payment row knew its transaction_id.
 export const replayPendingTransferEvents = async (sources) => {
-  const pending = await query(db().from('razorpay_webhook_events').select('event_id, event_name, payload, event_created_at')
-    .eq('status', 'pending_match').in('entity_id', sources.filter(Boolean)));
+  let pending;
+  try {
+    pending = await query(db().from('razorpay_webhook_events').select('event_id, event_name, payload, event_created_at')
+      .eq('status', 'pending_match').in('entity_id', sources.filter(Boolean)));
+  } catch (error) {
+    if (!isMissingEventsTable(error)) throw error;
+    warnEventsTableMissing();
+    return;
+  }
   pending.sort((a, b) => String(a.event_created_at).localeCompare(String(b.event_created_at)));
   for (const item of pending) {
     const transfer = item.payload?.payload?.transfer?.entity;

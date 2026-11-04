@@ -172,6 +172,8 @@ export const razorpayWebhookHandler = async (req, res) => {
     return res.status(400).json({ success: false, message: 'Missing event id.' });
   }
 
+  console.log('Razorpay webhook received', eventName, eventId);
+
   try {
     const { duplicate } = await recordWebhookEvent({ eventId, eventName, event });
     if (duplicate) return res.json({ success: true, duplicate: true });
@@ -204,6 +206,7 @@ export const razorpayWebhookHandler = async (req, res) => {
     }
 
     await markWebhookEvent(eventId, finalStatus);
+    console.log('Razorpay webhook processed', eventName, eventId, finalStatus);
     return res.json({ success: true });
   } catch (error) {
     const message = String(error?.message || error);
