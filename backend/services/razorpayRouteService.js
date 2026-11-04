@@ -253,6 +253,12 @@ export const applyCaptured = async ({ payment, eventId = null }) => {
   for (const row of rows) {
     if (row.status === 'success') {
       // Repair an interrupted invoice write without rerunning activation.
+      // The client verify-payment path usually wins the race, so record the
+      // webhook's event id and payment details here too.
+      await query(db().from('product_payments').update({
+        gateway_payload: { ...row.gateway_payload, payment: compactPayment(payment) },
+        last_webhook_event_id: eventId || row.last_webhook_event_id,
+      }).eq('id', row.id).eq('status', 'success'));
       await query(db().from('product_invoices').update({ status: 'paid' }).eq('id', row.invoice_id));
       continue;
     }
@@ -297,23 +303,88 @@ export const applyFailed = async ({ payment, eventId = null }) => {
   return { success: true };
 };
 
-export const applyTransferEvent = async ({ transfer, status, eventId = null }) => {
+export const applyTransferEvent = async ({ transfer, status, eventId = null, eventCreatedAt = null }) => {
   if (!/^(pay|order)_[A-Za-z0-9]+$/.test(transfer.source || '')) reject('TRANSFER_SOURCE_REQUIRED');
   const rows = await query(db().from('product_payments').select('id, gateway_payload, last_webhook_event_id')
     .eq('payment_gateway', 'razorpay')
     .or(`transaction_id.eq.${transfer.source},gateway_order_id.eq.${transfer.source}`));
+  const failed = status === 'failed';
+  let matched = 0;
   for (const row of rows) {
+    matched += 1;
     if (eventId && row.last_webhook_event_id === eventId) continue;
-    await query(db().from('product_payments').update({
-      gateway_transfer_id: transfer.id, transfer_status: status,
-      gateway_payload: { ...row.gateway_payload, transfer: {
+    // Razorpay does not guarantee ordering: drop events older than the one already applied.
+    const appliedAt = row.gateway_payload?.transfer_event_at;
+    if (eventCreatedAt && appliedAt && eventCreatedAt < appliedAt) continue;
+    const payload = {
+      ...row.gateway_payload,
+      transfer: failed ? transfer : {
         id: transfer.id, source: transfer.source, recipient: transfer.recipient,
         amount: transfer.amount, status: transfer.status,
         settlement_status: transfer.settlement_status || null, processed_at: transfer.processed_at || null,
-      } }, last_webhook_event_id: eventId || row.last_webhook_event_id,
+      },
+      transfer_event_at: eventCreatedAt || appliedAt || null,
+    };
+    if (failed) {
+      payload.needs_attention = true;
+      payload.transfer_failure = {
+        transfer_id: transfer.id, recipient: transfer.recipient, amount: transfer.amount,
+        failure_reason: transfer.failure_reason || transfer.error?.description || transfer.error?.reason || null,
+        error_code: transfer.error?.code || null, failed_at: new Date().toISOString(),
+      };
+      console.error('RAZORPAY TRANSFER FAILED - needs manual attention', {
+        payment_row_id: row.id, ...payload.transfer_failure,
+      });
+    } else {
+      delete payload.transfer_failure;
+      delete payload.needs_attention;
+    }
+    await query(db().from('product_payments').update({
+      gateway_transfer_id: transfer.id, transfer_status: status, gateway_payload: payload,
+      last_webhook_event_id: eventId || row.last_webhook_event_id,
     }).eq('id', row.id).eq('payment_gateway', 'razorpay'));
   }
-  return { success: true };
+  return { success: true, matched };
+};
+
+/**
+ * Webhook event log. Returns { duplicate: true } when this event id was already
+ * processed (Razorpay retries); otherwise the event is stored as 'received'.
+ */
+export const recordWebhookEvent = async ({ eventId, eventName, event }) => {
+  const existing = await query(db().from('razorpay_webhook_events').select('event_id, status')
+    .eq('event_id', eventId).maybeSingle());
+  if (existing) return { duplicate: existing.status === 'processed' || existing.status === 'pending_match' };
+  const entity = event?.payload?.transfer?.entity || event?.payload?.payment?.entity;
+  const { error } = await db().from('razorpay_webhook_events').insert({
+    event_id: eventId, event_name: eventName, payload: event, status: 'received',
+    entity_id: entity?.source || entity?.id || null,
+    event_created_at: event?.created_at ? new Date(event.created_at * 1000).toISOString() : null,
+  });
+  if (error && error.code !== '23505') throw mapDbError(error);
+  return { duplicate: false };
+};
+
+export const markWebhookEvent = async (eventId, status, errorMessage = null) => {
+  await query(db().from('razorpay_webhook_events').update({
+    status, error: errorMessage, processed_at: new Date().toISOString(),
+  }).eq('event_id', eventId));
+};
+
+// Transfer events that arrived before the payment row knew its transaction_id.
+export const replayPendingTransferEvents = async (sources) => {
+  const pending = await query(db().from('razorpay_webhook_events').select('event_id, event_name, payload, event_created_at')
+    .eq('status', 'pending_match').in('entity_id', sources.filter(Boolean)));
+  pending.sort((a, b) => String(a.event_created_at).localeCompare(String(b.event_created_at)));
+  for (const item of pending) {
+    const transfer = item.payload?.payload?.transfer?.entity;
+    if (!transfer) continue;
+    const result = await applyTransferEvent({
+      transfer, status: item.event_name.slice('transfer.'.length),
+      eventId: item.event_id, eventCreatedAt: item.event_created_at,
+    });
+    if (result.matched) await markWebhookEvent(item.event_id, 'processed');
+  }
 };
 
 /**

@@ -5,7 +5,7 @@ import { Buffer } from 'node:buffer';
 
 const source = await readFile(new URL('../src/services/paymentService.js', import.meta.url), 'utf8');
 
-async function runCheckout({ status = 'paid', cancel = false, repeat = false, verifyFails = false } = {}) {
+async function runCheckout({ status = 'paid', cancel = false, repeat = false, verifyFails = false, platform = 'web', nativeOpen } = {}) {
   const events = [];
   const order = {
     success: true, order_id: 'order_test', key_id: 'public_test',
@@ -19,7 +19,18 @@ async function runCheckout({ status = 'paid', cancel = false, repeat = false, ve
     },
     get: async () => ({ data: { status } }),
   };
-  globalThis.__paymentAnalyticsTest = { api, track: (name, params) => events.push({ name, params }) };
+  const nativeCalls = [];
+  globalThis.__paymentAnalyticsTest = {
+    api,
+    track: (name, params) => events.push({ name, params }),
+    Capacitor: { getPlatform: () => platform },
+    registerPlugin: () => ({
+      open: async (args) => {
+        nativeCalls.push(args);
+        return nativeOpen(args);
+      },
+    }),
+  };
   const originalWindow = globalThis.window;
   const originalStorage = globalThis.localStorage;
   globalThis.localStorage = { getItem: () => 'test-session' };
@@ -38,6 +49,7 @@ async function runCheckout({ status = 'paid', cancel = false, repeat = false, ve
   };
   try {
     const isolatedSource = source
+      .replace("import { Capacitor, registerPlugin } from '@capacitor/core';", 'const { Capacitor, registerPlugin } = globalThis.__paymentAnalyticsTest;')
       .replace("import { api } from './api';", 'const { api } = globalThis.__paymentAnalyticsTest;')
       .replace("import { track } from './analytics';", 'const { track } = globalThis.__paymentAnalyticsTest;')
       .replace('const STATUS_POLL_INTERVAL_MS = 2500;', 'const STATUS_POLL_INTERVAL_MS = 0;');
@@ -45,7 +57,7 @@ async function runCheckout({ status = 'paid', cancel = false, repeat = false, ve
     const result = await service.openRazorpayCheckout({ trustId: 'trust_test', purchaseIds: ['purchase_test'] });
     // Allow a repeated gateway callback to finish before checking deduplication.
     await new Promise((resolve) => setTimeout(resolve, 0));
-    return { result, events };
+    return { result, events, nativeCalls };
   } finally {
     if (originalWindow === undefined) delete globalThis.window;
     else globalThis.window = originalWindow;
@@ -80,4 +92,30 @@ test('server status recovery records a purchase after verification fails', async
 
 test('dismissed checkout retains its cancellation behavior', async () => {
   await assert.rejects(runCheckout({ cancel: true }), { code: 'PAYMENT_CANCELLED' });
+});
+
+test('android app uses native checkout with the server order and verifies the result', async () => {
+  const { result, events, nativeCalls } = await runCheckout({
+    platform: 'android',
+    nativeOpen: async () => ({ razorpay_payment_id: 'payment_test', razorpay_order_id: 'order_test', razorpay_signature: 'sig' }),
+  });
+  assert.equal(nativeCalls.length, 1);
+  assert.equal(nativeCalls[0].options.key, 'public_test');
+  assert.equal(nativeCalls[0].options.order_id, 'order_test');
+  assert.deepEqual(result, { status: 'paid', orderId: 'order_test', paymentId: 'payment_test' });
+  assert.equal(events.length, 1);
+});
+
+test('android native cancellation maps to PAYMENT_CANCELLED', async () => {
+  const nativeOpen = async () => {
+    throw Object.assign(new Error('Payment cancelled.'), { code: 'PAYMENT_CANCELLED' });
+  };
+  await assert.rejects(runCheckout({ platform: 'android', nativeOpen }), { code: 'PAYMENT_CANCELLED' });
+});
+
+test('android native failure surfaces the gateway message', async () => {
+  const nativeOpen = async () => {
+    throw Object.assign(new Error('Card declined by bank'), { code: 'PAYMENT_FAILED' });
+  };
+  await assert.rejects(runCheckout({ platform: 'android', nativeOpen }), { message: 'Card declined by bank' });
 });

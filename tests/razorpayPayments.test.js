@@ -201,6 +201,31 @@ test('9: Route disabled creates no transfer and leaves transfer_status null', as
   assert.equal(orders[0].transfers, undefined); assert.equal(tables.product_payments[0].transfer_status, null);
   await webhook('payment.captured', captured(body)); assert.equal(tables.product_payments[0].transfer_status, null);
 });
+test('10: transfer.failed stores the full entity with reason and flags the payment', async () => {
+  reset(); const { body } = await checkout();
+  await webhook('payment.captured', captured(body));
+  const failedTransfer = { id: 'trf_fail', source: 'pay_test', recipient: 'acc_test', amount: 8330,
+    status: 'failed', failure_reason: 'Beneficiary account blocked', error: { code: 'BAD_REQUEST_ERROR' } };
+  assert.equal((await webhook('transfer.failed', failedTransfer, 'transfer-fail')).status, 200);
+  const row = tables.product_payments[0];
+  assert.equal(row.transfer_status, 'failed'); assert.equal(row.gateway_transfer_id, 'trf_fail');
+  assert.equal(row.gateway_payload.transfer.failure_reason, 'Beneficiary account blocked');
+  assert.equal(row.gateway_payload.needs_attention, true);
+  assert.equal(row.gateway_payload.transfer_failure.failure_reason, 'Beneficiary account blocked');
+});
+test('11: duplicate event id is skipped; transfer event before capture is parked then replayed', async () => {
+  reset(); const { body } = await checkout();
+  const failedTransfer = { id: 'trf_early', source: 'pay_test', status: 'failed', failure_reason: 'early' };
+  assert.equal((await webhook('transfer.failed', failedTransfer, 'early1')).status, 200);
+  assert.equal(tables.product_payments[0].transfer_status, 'pending');
+  assert.equal(tables.razorpay_webhook_events[0].status, 'pending_match');
+  await webhook('payment.captured', captured(body), 'cap1');
+  assert.equal(tables.product_payments[0].transfer_status, 'failed');
+  assert.equal(tables.razorpay_webhook_events.find((e) => e.event_id === 'early1').status, 'processed');
+  const snapshot = structuredClone(tables.product_payments);
+  assert.equal((await webhook('payment.captured', captured(body), 'cap1')).status, 200);
+  assert.deepEqual(tables.product_payments, snapshot); assert.equal(activationCount, 1);
+});
 test('permanent errors return 200, transient errors 500, activation errors stay pending', async () => {
   reset(); const { body } = await checkout();
   assert.equal((await webhook('payment.captured', { ...captured(body), order_id: 'order_unknown' })).status, 200);
@@ -246,6 +271,8 @@ test('client checkout dismissal returns PAYMENT_CANCELLED and retains pending pu
   } };
   try {
     const clientSource = (await readFile(new URL('../src/services/paymentService.js', import.meta.url), 'utf8'))
+      .replace("import { Capacitor, registerPlugin } from '@capacitor/core';", "const Capacitor = { getPlatform: () => 'web' }; const registerPlugin = () => ({});")
+      .replace("import { track } from './analytics';", 'const track = () => {};')
       .replace("import { api } from './api';", 'const { api } = globalThis.__rzpTest;');
     const client = await load(clientSource);
     await assert.rejects(() => client.openRazorpayCheckout({ trustId, purchaseIds: [ids[0]] }), { code: 'PAYMENT_CANCELLED' });

@@ -1650,6 +1650,108 @@ test('cart remove and re-add reuse the previous purchase id', async () => {
   assert.equal(cartUtils.readCartItems('trust-readd')[0]?.purchase_id, 'purchase-readd');
 });
 
+test('cart re-add after an order creates a new cart row instead of reusing the order purchase id', async () => {
+  createEnvironment({
+    selected_trust_id: 'trust-after-order',
+    last_selected_trust_id: 'trust-after-order',
+    user: createUserEntry(),
+    'product_cart_purchase_refs_v1_trust-after-order': JSON.stringify({
+      'trust-after-order:product-ordered': {
+        purchase_id: 'purchase-now-order',
+        product_price_id: 'price-ordered',
+        id: 'product-ordered',
+        trust_id: 'trust-after-order'
+      }
+    })
+  });
+
+  const requests = [];
+  cartUtils.setCartPurchaseRpcOverrideForTests(async (request) => {
+    requests.push(request);
+    if (request.p_action === 'get') {
+      return {
+        data: {
+          success: true,
+          purchases: [{
+            id: 'purchase-now-order',
+            type: 'order',
+            status: 'order_payment_pending',
+            quantity: 1,
+            trust_id: 'trust-after-order',
+            product_price_id: 'price-ordered'
+          }]
+        }
+      };
+    }
+    return { data: { id: 'fresh-cart-purchase', product_price_id: request.p_payload.product_price_id } };
+  });
+
+  assert.deepEqual(await cartUtils.refreshCartCache('trust-after-order'), []);
+
+  await cartUtils.setCartProductQuantity(
+    { id: 'product-ordered', product_name: 'Ordered Product', price: { id: 'price-ordered', member_price: 500 } },
+    { trustId: 'trust-after-order', quantity: 1, price: { id: 'price-ordered', member_price: 500 } }
+  );
+
+  assert.deepEqual(requests[1].p_payload, {
+    product_price_id: 'price-ordered',
+    type: 'cart',
+    quantity: 1,
+    unit_price: 500,
+    status: 'add_to_cart',
+    selected_attributes: {}
+  });
+  assert.equal(cartUtils.readCartItems('trust-after-order')[0]?.purchase_id, 'fresh-cart-purchase');
+});
+
+test('forgetting ordered purchase ids keeps cart items but stops reusing their ids', async () => {
+  createEnvironment({
+    selected_trust_id: 'trust-forget',
+    last_selected_trust_id: 'trust-forget',
+    user: createUserEntry(),
+    'product_cart_v2_trust-forget': JSON.stringify([
+      {
+        id: 'product-forget',
+        trust_id: 'trust-forget',
+        purchase_id: 'purchase-forget',
+        product_price_id: 'price-forget',
+        product_name: 'Forget Product',
+        quantity: 2,
+        price: { id: 'price-forget', member_price: 50 }
+      }
+    ]),
+    'product_cart_purchase_refs_v1_trust-forget': JSON.stringify({
+      'trust-forget:product-forget': { purchase_id: 'purchase-forget', product_price_id: 'price-forget' },
+      'trust-forget:product-other': { purchase_id: 'purchase-other', product_price_id: 'price-other' }
+    })
+  });
+
+  cartUtils.forgetCartPurchaseRefs('trust-forget', ['purchase-forget']);
+
+  const [item] = cartUtils.readCartItems('trust-forget');
+  assert.equal(item.quantity, 2);
+  assert.equal(item.purchase_id, '');
+  assert.deepEqual(
+    Object.keys(JSON.parse(globalThis.localStorage.getItem('product_cart_purchase_refs_v1_trust-forget'))),
+    ['trust-forget:product-other']
+  );
+
+  const requests = [];
+  cartUtils.setCartPurchaseRpcOverrideForTests(async (request) => {
+    requests.push(request);
+    return { data: { id: 'fresh-forget-purchase', product_price_id: request.p_payload.product_price_id } };
+  });
+
+  await cartUtils.setCartProductQuantity(
+    { id: 'product-forget', product_name: 'Forget Product', price: { id: 'price-forget', member_price: 50 } },
+    { trustId: 'trust-forget', quantity: 3, price: { id: 'price-forget', member_price: 50 } }
+  );
+
+  assert.equal(requests[0].p_payload.id, undefined);
+  assert.equal(requests[0].p_payload.type, 'cart');
+  assert.equal(cartUtils.readCartItems('trust-forget')[0]?.purchase_id, 'fresh-forget-purchase');
+});
+
 test('cart remove can target the exact item object when product identity changed after refresh', async () => {
   createEnvironment({
     selected_trust_id: 'trust-remove-identity',

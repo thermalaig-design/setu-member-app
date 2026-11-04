@@ -1,5 +1,9 @@
+import { Capacitor, registerPlugin } from '@capacitor/core';
 import { track } from './analytics';
 import { api } from './api';
+
+// Native Android Checkout (android/.../RazorpayPlugin.java); the web uses checkout.js.
+const RazorpayNative = registerPlugin('Razorpay');
 
 const RAZORPAY_CHECKOUT_SRC = 'https://checkout.razorpay.com/v1/checkout.js';
 const SESSION_TOKEN_KEY = 'setu_session_token';
@@ -117,9 +121,16 @@ const pollOrderStatus = async (orderId, attempts) => {
   return status;
 };
 
+const paymentCancelledError = () => {
+  const cancelled = new Error('Payment cancelled.');
+  cancelled.code = 'PAYMENT_CANCELLED';
+  return cancelled;
+};
+
 /**
  * Creates a server-priced order for the given pending purchases and opens
- * Razorpay Checkout. Resolves { status, orderId, paymentId } where status is
+ * Razorpay Checkout (native SDK in the Android app, checkout.js elsewhere).
+ * Resolves { status, orderId, paymentId } where status is
  * 'paid' | 'processing' | 'paid_needs_attention'. Rejects with code
  * 'PAYMENT_CANCELLED' if the user closes the modal.
  */
@@ -131,58 +142,72 @@ export const openRazorpayCheckout = async ({
   prefill = {},
   themeColor = '#0f766e',
 }) => {
-  await loadRazorpayScript();
+  const useNativeCheckout = Capacitor.getPlatform() === 'android';
+  if (!useNativeCheckout) await loadRazorpayScript();
   const order = await createPaymentOrder({ trustId, purchaseIds });
 
-  return new Promise((resolve, reject) => {
-    let paymentReported = false;
-    const completePayment = (status, paymentId) => {
-      // Only server-confirmed paid orders count as purchases, including retry payments.
-      if (status === 'paid' && !paymentReported) {
-        paymentReported = true;
-        track('purchase', {
-          transaction_id: order.order_id,
-          currency: order.currency,
-          value: Number(order.total_amount),
-        });
+  const checkoutOptions = {
+    key: order.key_id,
+    amount: order.amount,
+    currency: order.currency,
+    order_id: order.order_id,
+    name,
+    description,
+    prefill,
+    theme: { color: themeColor },
+    retry: { enabled: true, max_count: 3 },
+  };
+
+  let paymentReported = false;
+  const completePayment = (status, paymentId) => {
+    // Only server-confirmed paid orders count as purchases, including retry payments.
+    if (status === 'paid' && !paymentReported) {
+      paymentReported = true;
+      track('purchase', {
+        transaction_id: order.order_id,
+        currency: order.currency,
+        value: Number(order.total_amount),
+      });
+    }
+    return { status, orderId: order.order_id, paymentId };
+  };
+
+  const confirmPayment = async (response) => {
+    const paymentId = response?.razorpay_payment_id;
+    try {
+      const verification = await verifyRazorpayPayment(response);
+      let status = verification.status;
+      if (status === 'processing') {
+        status = await pollOrderStatus(order.order_id, STATUS_POLL_ATTEMPTS);
       }
-      resolve({ status, orderId: order.order_id, paymentId });
-    };
+      return completePayment(status, paymentId);
+    } catch (verifyError) {
+      // Money may have moved even though verify failed; ask the server before giving up.
+      const status = await pollOrderStatus(order.order_id, 3);
+      if (status === 'paid' || status === 'processing') {
+        return completePayment(status, paymentId);
+      }
+      throw verifyError;
+    }
+  };
+
+  if (useNativeCheckout) {
+    let response;
+    try {
+      response = await RazorpayNative.open({ options: checkoutOptions });
+    } catch (error) {
+      if (error?.code === 'PAYMENT_CANCELLED') throw paymentCancelledError();
+      throw new Error(error?.message || 'Payment failed. Please try again.');
+    }
+    return confirmPayment(response);
+  }
+
+  return new Promise((resolve, reject) => {
     const checkout = new window.Razorpay({
-      key: order.key_id,
-      amount: order.amount,
-      currency: order.currency,
-      order_id: order.order_id,
-      name,
-      description,
-      prefill,
-      theme: { color: themeColor },
-      retry: { enabled: true, max_count: 3 },
-      handler: async (response) => {
-        const paymentId = response?.razorpay_payment_id;
-        try {
-          const verification = await verifyRazorpayPayment(response);
-          let status = verification.status;
-          if (status === 'processing') {
-            status = await pollOrderStatus(order.order_id, STATUS_POLL_ATTEMPTS);
-          }
-          completePayment(status, paymentId);
-        } catch (verifyError) {
-          // Money may have moved even though verify failed; ask the server before giving up.
-          const status = await pollOrderStatus(order.order_id, 3);
-          if (status === 'paid' || status === 'processing') {
-            completePayment(status, paymentId);
-          } else {
-            reject(verifyError);
-          }
-        }
-      },
+      ...checkoutOptions,
+      handler: (response) => confirmPayment(response).then(resolve, reject),
       modal: {
-        ondismiss: () => {
-          const cancelled = new Error('Payment cancelled.');
-          cancelled.code = 'PAYMENT_CANCELLED';
-          reject(cancelled);
-        },
+        ondismiss: () => reject(paymentCancelledError()),
       },
     });
 
