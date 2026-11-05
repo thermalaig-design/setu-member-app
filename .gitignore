@@ -13,3 +13,6 @@ setu_*.png
 
 android/setu-release.jks
 android/keystore.properties
+
+# local archive, too large for GitHub
+android.7z

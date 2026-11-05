@@ -14,6 +14,7 @@ const trustId = '11111111-1111-4111-8111-111111111111';
 const memberId = '22222222-2222-4222-8222-222222222222';
 const ids = ['33333333-3333-4333-8333-333333333333', '44444444-4444-4444-8444-444444444444'];
 let tables, serial, orders, activationCount, failActivation, failInvoice, missingEventsTable;
+let mails, pdfs, refundCalls, refundError, refundStatus;
 const database = {
   from(table) {
     let action = 'select', values, single = false, filters = [], sort, limit;
@@ -53,7 +54,12 @@ const database = {
               return resolve({ data: null, error: { message: 'SUBSCRIPTION_CONFIG_NOT_FOUND' } });
             }
             for (const row of selected) {
-              if (table === 'product_payments' && values.status === 'success' && row.status === 'pending') activationCount++;
+              if (table === 'product_payments' && values.status === 'success' && row.status === 'pending') {
+                activationCount++;
+                const invoice = tables.product_invoices.find((item) => item.id === row.invoice_id);
+                const purchase = tables.product_purchases.find((item) => item.id === invoice?.purchase_id);
+                if (purchase) purchase.status = 'order_payment_done';
+              }
               Object.assign(row, structuredClone(values));
             }
           }
@@ -73,13 +79,26 @@ class Razorpay {
   payments = {
     fetch: async (id) => ({ id, order_id: orders.at(-1).id, amount: orders.at(-1).amount, status: 'authorized', method: 'upi' }),
     capture: async (id, amount) => ({ id, amount, order_id: orders.at(-1).id, status: 'captured', method: 'upi' }),
+    refund: async (id, payload) => {
+      refundCalls.push({ id, payload });
+      if (refundError) throw refundError;
+      return { id: `rfnd_${refundCalls.length}`, payment_id: id, amount: payload.amount, status: refundStatus, created_at: 1790000000 };
+    },
   };
 }
-globalThis.__rzpTest = { database, Razorpay, express, jwt };
+globalThis.__rzpTest = { database, Razorpay, express, jwt,
+  mail: { sendAdminAlertEmail: async (mail) => { mails.push(mail); return { sent: true }; } },
+  invoicePdf: {
+    generateAndStoreInvoicePdf: async (id) => { pdfs.push(id); },
+    getInvoiceSignedUrl: async (id) => `https://signed.test/${id}.pdf`,
+  } };
 const load = (source) => import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}`);
 let source = await readFile(new URL('../backend/services/razorpayRouteService.js', import.meta.url), 'utf8');
 source = source.replace("import Razorpay from 'razorpay';", 'const { Razorpay } = globalThis.__rzpTest;')
-  .replace("import { paymentSupabase } from '../config/supabase.js';", 'const paymentSupabase = globalThis.__rzpTest.database;');
+  .replace("import { paymentSupabase } from '../config/supabase.js';", 'const paymentSupabase = globalThis.__rzpTest.database;')
+  .replace("import { sendAdminAlertEmail } from './emailService.js';", 'const { sendAdminAlertEmail } = globalThis.__rzpTest.mail;')
+  .replace("import { generateAndStoreInvoicePdf, getInvoiceSignedUrl } from './invoicePdfService.js';",
+    'const { generateAndStoreInvoicePdf, getInvoiceSignedUrl } = globalThis.__rzpTest.invoicePdf;');
 const service = await load(source);
 globalThis.__rzpTest.service = service;
 source = await readFile(new URL('../backend/middleware/memberAuth.js', import.meta.url), 'utf8');
@@ -113,7 +132,7 @@ after(async () => {
 });
 const reset = (route = true, count = 1) => {
   serial = 0; orders = []; activationCount = 0; failActivation = false; failInvoice = false;
-  missingEventsTable = false;
+  missingEventsTable = false; mails = []; pdfs = []; refundCalls = []; refundError = null; refundStatus = 'processed';
   tables = {
     Trust: [{ id: trustId, name: 'Setu AI', payment_gateway: true, razorpay_route: route }],
     trust_bank_details: [{ trust_id: trustId, razorpay_id: 'acc_test', vendor_share: 98, updated_at: '2026-10-24' }],
@@ -133,7 +152,7 @@ const post = async (path, body, auth = true) => {
 const checkout = () => post('/create-order', { trust_id: trustId, purchase_ids: tables.product_purchases.map((row) => row.id) });
 const captured = (order) => ({ id: 'pay_test', order_id: order.order_id, amount: order.amount, method: 'upi', status: 'captured' });
 const webhook = async (event, entity, eventId = 'event1', valid = true) => {
-  const body = JSON.stringify({ event, payload: { [event.startsWith('transfer.') ? 'transfer' : 'payment']: { entity } } });
+  const body = JSON.stringify({ event, payload: { [event.split('.')[0] === 'order' ? 'payment' : event.split('.')[0]]: { entity } } });
   const signature = crypto.createHmac('sha256', process.env.RAZORPAY_WEBHOOK_SECRET).update(body).digest('hex');
   return fetch(url + '/webhook', { method: 'POST', body, headers: { 'Content-Type': 'application/json',
     'x-razorpay-signature': valid ? signature : '00', 'x-razorpay-event-id': eventId } });
@@ -306,4 +325,132 @@ test('client checkout dismissal returns PAYMENT_CANCELLED and retains pending pu
     if (savedStorage === undefined) delete globalThis.localStorage; else globalThis.localStorage = savedStorage;
     delete globalThis.__rzpTest.api;
   }
+});
+
+const paidCheckout = async () => {
+  reset(); const { body } = await checkout();
+  await webhook('payment.captured', captured(body), 'cap-paid');
+  return body;
+};
+const failedTransfer = { id: 'trf_fail', source: 'pay_test', recipient: 'acc_test', amount: 8330,
+  status: 'failed', failure_reason: 'Beneficiary account blocked' };
+const refundEntity = (overrides = {}) => ({ id: 'rfnd_1', payment_id: 'pay_test', amount: 17002, status: 'processed', ...overrides });
+
+test('transfer.failed on an activated purchase flags it, keeps the purchase and emails the admin once', async () => {
+  const order = await paidCheckout();
+  await webhook('transfer.failed', failedTransfer, 'tf1');
+  const row = tables.product_payments[0];
+  assert.equal(row.transfer_status, 'failed'); assert.equal(row.gateway_payload.needs_attention, true);
+  assert.equal(row.gateway_payload.purchase_hold, undefined);
+  assert.equal(tables.product_purchases[0].status, 'order_payment_done');
+  assert.equal(mails.length, 1);
+  for (const expected of ['pay_test', order.order_id, 'trf_fail', '83.30', 'Beneficiary account blocked']) {
+    assert.ok(mails[0].text.includes(expected), `alert should mention ${expected}`);
+  }
+  await webhook('transfer.failed', failedTransfer, 'tf2'); // same failure redelivered under a new event id
+  assert.equal(mails.length, 1);
+});
+
+test('transfer.failed before activation holds the purchase without changing its status', async () => {
+  reset(); await checkout();
+  tables.product_payments[0].transaction_id = 'pay_test'; // payment known, purchase not activated
+  await webhook('transfer.failed', failedTransfer, 'tf-hold');
+  const payload = tables.product_payments[0].gateway_payload;
+  assert.equal(payload.purchase_hold, true); assert.equal(payload.needs_attention, undefined);
+  assert.equal(tables.product_purchases[0].status, 'order_payment_pending');
+  assert.equal(mails.length, 1);
+});
+
+test('transfer.processed after transfer.failed clears the flags and keeps other payload keys', async () => {
+  await paidCheckout();
+  await webhook('transfer.failed', failedTransfer, 'tf1');
+  await webhook('transfer.processed', { id: 'trf_fail', source: 'pay_test', recipient: 'acc_test', amount: 8330, status: 'processed' }, 'tf-ok');
+  const row = tables.product_payments[0];
+  assert.equal(row.transfer_status, 'processed');
+  for (const key of ['needs_attention', 'purchase_hold', 'transfer_failure']) assert.equal(row.gateway_payload[key], undefined);
+  assert.ok(row.gateway_payload.order && row.gateway_payload.split && row.gateway_payload.payment);
+});
+
+test('full refund marks payment refunded and cancels purchase and invoice, with reverse_all', async () => {
+  await paidCheckout();
+  const result = await service.refundPayment({ paymentId: 'pay_test', requestedBy: 'admin@x.com' });
+  assert.equal(refundCalls[0].payload.reverse_all, 1); assert.equal(refundCalls[0].payload.amount, 17002);
+  assert.equal(result.fully_refunded, true);
+  const row = tables.product_payments[0];
+  assert.equal(row.status, 'refunded');
+  assert.deepEqual(Object.keys(row.gateway_payload.refund).sort(), ['amount', 'created_at', 'id', 'status']);
+  assert.equal(row.gateway_payload.refund.status, 'processed');
+  assert.equal(tables.product_invoices[0].status, 'cancelled'); assert.equal(tables.product_purchases[0].status, 'cancelled');
+  await assert.rejects(() => service.refundPayment({ paymentId: 'pay_test' }), { code: 'REFUND_ALREADY_REFUNDED' });
+});
+
+test('partial refund keeps the payment successful until the remainder is refunded', async () => {
+  await paidCheckout();
+  await assert.rejects(() => service.refundPayment({ paymentId: 'pay_test', amountRupees: 500 }), { code: 'REFUND_AMOUNT_INVALID' });
+  const first = await service.refundPayment({ paymentId: 'pay_test', amountRupees: 50 });
+  assert.equal(first.fully_refunded, false);
+  const row = tables.product_payments[0];
+  assert.equal(row.status, 'success'); assert.equal(row.gateway_payload.refund.amount, 5000);
+  assert.equal(tables.product_invoices[0].status, 'paid'); assert.equal(tables.product_purchases[0].status, 'order_payment_done');
+  assert.ok(row.gateway_payload.order, 'older payload keys survive');
+  await assert.rejects(() => service.refundPayment({ paymentId: 'pay_test', amountRupees: 120.03 }), { code: 'REFUND_AMOUNT_INVALID' });
+  const second = await service.refundPayment({ paymentId: 'pay_test' }); // remaining Rs. 120.02
+  assert.equal(refundCalls[1].payload.amount, 12002); assert.equal(second.fully_refunded, true);
+  assert.equal(row.status, 'refunded'); assert.equal(row.gateway_payload.refund_history.length, 2);
+});
+
+test('pending refund completes on refund.processed webhook; redelivery is harmless', async () => {
+  await paidCheckout(); refundStatus = 'pending';
+  await service.refundPayment({ paymentId: 'pay_test' });
+  const row = tables.product_payments[0];
+  assert.equal(row.status, 'success'); assert.equal(row.gateway_payload.refund.status, 'pending');
+  assert.equal((await webhook('refund.processed', refundEntity(), 'rf-ok')).status, 200);
+  assert.equal(row.status, 'refunded'); assert.equal(row.gateway_payload.refund.status, 'processed');
+  assert.equal(tables.product_purchases[0].status, 'cancelled');
+  const snapshot = structuredClone(tables.product_payments);
+  assert.equal((await webhook('refund.processed', refundEntity(), 'rf-ok')).status, 200);
+  assert.deepEqual(tables.product_payments, snapshot);
+});
+
+test('refund.failed keeps the payment successful, records the failure, alerts admin and allows a retry', async () => {
+  await paidCheckout(); refundStatus = 'pending';
+  await service.refundPayment({ paymentId: 'pay_test' });
+  assert.equal((await webhook('refund.failed', refundEntity({ status: 'failed' }), 'rf-fail')).status, 200);
+  const row = tables.product_payments[0];
+  assert.equal(row.status, 'success'); assert.equal(row.gateway_payload.refund.status, 'failed');
+  assert.equal(row.gateway_payload.refund_failure.id, 'rfnd_1');
+  assert.equal(tables.product_invoices[0].status, 'paid'); assert.equal(tables.product_purchases[0].status, 'order_payment_done');
+  assert.equal(mails.length, 1); assert.ok(mails[0].text.includes('rfnd_1'));
+  refundStatus = 'processed';
+  assert.equal((await service.refundPayment({ paymentId: 'pay_test' })).fully_refunded, true);
+});
+
+test('Razorpay rejecting a refund leaves the database untouched', async () => {
+  await paidCheckout(); refundError = { error: { description: 'The payment has been fully refunded already' } };
+  const before = structuredClone(tables);
+  await assert.rejects(() => service.refundPayment({ paymentId: 'pay_test' }), (error) => error === refundError);
+  assert.deepEqual(tables, before);
+  await assert.rejects(() => service.refundPayment({ paymentId: 'pay_unknown' }), { code: 'REFUND_PAYMENT_NOT_FOUND' });
+});
+
+test('successful payment stores an invoice PDF; admin refund endpoint requires admin auth', async () => {
+  await paidCheckout();
+  assert.deepEqual(pdfs, [tables.product_invoices[0].id]);
+  const adminSource = (await readFile(new URL('../backend/routes/adminPaymentRoutes.js', import.meta.url), 'utf8'))
+    .replace("import express from 'express';", 'const { express } = globalThis.__rzpTest;')
+    .replace("import { authenticateAdmin } from '../middleware/adminAuth.js';",
+      "const authenticateAdmin = (req, res, next) => (req.headers['x-test-admin'] ? next() : res.status(401).json({ success: false }));")
+    .replace(/import \{([\s\S]*?)\} from '..\/services\/razorpayRouteService.js';/, 'const {$1} = globalThis.__rzpTest.service;');
+  const adminRoutes = await load(adminSource);
+  const app = express(); app.use(express.json()); app.use('/admin', adminRoutes.default);
+  const listener = await new Promise((resolve) => { const l = app.listen(0, '127.0.0.1', () => resolve(l)); });
+  try {
+    const call = (body, admin = true) => fetch(`http://127.0.0.1:${listener.address().port}/admin/refund`, { method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...(admin ? { 'x-test-admin': '1' } : {}) }, body: JSON.stringify(body) });
+    assert.equal((await call({ payment_id: 'pay_test' }, false)).status, 401); assert.equal(refundCalls.length, 0);
+    assert.equal((await call({ payment_id: 'bad' })).status, 400);
+    assert.equal((await call({ payment_id: 'pay_test', amount: -5 })).status, 400);
+    const ok = await call({ payment_id: 'pay_test', amount: 50 });
+    assert.equal(ok.status, 200); assert.equal((await ok.json()).fully_refunded, false);
+  } finally { await new Promise((resolve) => listener.close(resolve)); }
 });

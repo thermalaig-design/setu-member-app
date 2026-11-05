@@ -6,8 +6,11 @@ import {
   PaymentError,
   applyCaptured,
   applyFailed,
+  applyRefundEvent,
   applyTransferEvent,
+  createInvoiceDownloadUrl,
   createRouteOrder,
+  findPaidInvoiceForPurchase,
   getPublicKeyId,
   markWebhookEvent,
   quoteCheckout,
@@ -138,6 +141,25 @@ router.get('/order-status/:orderId', requireMemberSession, async (req, res) => {
   }
 });
 
+// Signed, short-lived link to the invoice PDF of one of the member's own purchases.
+router.get('/invoice/:purchaseId/download-url', requireMemberSession, async (req, res) => {
+  try {
+    const { purchaseId } = req.params;
+    if (!UUID_RE.test(purchaseId)) {
+      return res.status(400).json({ success: false, message: 'Invalid purchase id.' });
+    }
+    const invoice = await findPaidInvoiceForPurchase(purchaseId);
+    if (!invoice || !(await memberBelongsToSession(invoice.member_id, req.member))) {
+      return res.status(404).json({ success: false, message: 'Invoice not found.' });
+    }
+    const downloadUrl = await createInvoiceDownloadUrl(invoice.id);
+    if (!downloadUrl) return res.status(404).json({ success: false, message: 'Invoice not found.' });
+    return res.json({ success: true, url: downloadUrl });
+  } catch (error) {
+    return sendError(res, error, 'Failed to prepare invoice download.');
+  }
+});
+
 const PERMANENT_ERROR_PREFIXES = ['GATEWAY_ORDER_NOT_FOUND', 'AMOUNT_MISMATCH'];
 
 // Mounted in server.js with express.raw() BEFORE express.json(): the signature
@@ -191,6 +213,11 @@ export const razorpayWebhookHandler = async (req, res) => {
       }
     } else if (eventName === 'payment.failed') {
       if (payment?.order_id) await applyFailed({ payment, eventId });
+    } else if (eventName === 'refund.processed' || eventName === 'refund.failed') {
+      const refund = event?.payload?.refund?.entity;
+      if (refund?.id) {
+        await applyRefundEvent({ refund, status: eventName.slice('refund.'.length), eventId });
+      }
     } else if (eventName.startsWith('transfer.')) {
       if (transfer) {
         const eventCreatedAt = event?.created_at ? new Date(event.created_at * 1000).toISOString() : null;

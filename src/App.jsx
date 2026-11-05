@@ -50,6 +50,7 @@ import PrivacyPolicy from './PrivacyPolicy';
 import Gallery from './Gallery';
 import OtherMemberships from './OtherMemberships';
 import AdminUserProfiles from './admin/AdminUserProfiles';
+import AdminPayments from './admin/AdminPayments';
 import ContactUs from './ContactUs';
 import MyFamily from './MyFamily';
 import NominationDetails from './NominationDetails';
@@ -1661,6 +1662,14 @@ const HospitalTrusteeApp = () => {
           element={
             <ProtectedRoute>
               <AdminUserProfiles onNavigate={handleNavigate} />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/admin-payments"
+          element={
+            <ProtectedRoute>
+              <AdminPayments onNavigate={handleNavigate} />
             </ProtectedRoute>
           }
         />

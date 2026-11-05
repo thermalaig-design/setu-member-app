@@ -1,3 +1,4 @@
+
 import { supabase } from '../config/supabase.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -82,6 +83,11 @@ const resolveMasterMembersId = async (userId, fallbackMembersId = null) => {
 
   return await resolveMasterMembersIdFromUuid(userId);
 };
+
+// The person-level id (reg_members.members_id / Members.members_id). member_session.members_id
+// stores this same value, so push-token registration uses it to find a person's session rows.
+export const resolvePersonIdForUser = (userId, fallbackMembersId = null) =>
+  resolveMasterMembersId(userId, fallbackMembersId);
 
 // notification_recipients.member_id references reg_members.id — a per-trust
 // membership row. A member with memberships in multiple trusts has a

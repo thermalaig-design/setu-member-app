@@ -103,6 +103,16 @@ export const getPaymentOrderStatus = async (orderId) => {
   }
 };
 
+// Short-lived signed link to the stored invoice PDF of a paid purchase.
+export const getInvoiceDownloadUrl = async (purchaseId) => {
+  try {
+    const response = await api.get(`/payments/invoice/${encodeURIComponent(purchaseId)}/download-url`, authConfig());
+    return response.data?.url;
+  } catch (error) {
+    throw toUserError(error, 'Unable to download the invoice right now.');
+  }
+};
+
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 // Polls until the order leaves "processing" (or attempts run out).

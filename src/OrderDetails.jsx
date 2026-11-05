@@ -11,6 +11,7 @@ import {
   normalizeOrderRecord,
 } from './utils/orderHistoryDisplay';
 import { useOrderPayment } from './hooks/useOrderPayment';
+import { getInvoiceDownloadUrl } from './services/paymentService';
 import OrderPageHeader from './components/OrderPageHeader';
 import OrderProductImage from './components/OrderProductImage';
 
@@ -55,6 +56,7 @@ function OrderDetails() {
   const { orderId } = useParams();
   const [order, setOrder] = useState(location.state?.order || null);
   const [isLoading, setIsLoading] = useState(!location.state?.order);
+  const [invoiceState, setInvoiceState] = useState({ busy: false, error: '' });
 
   useEffect(() => {
     let active = true;
@@ -105,6 +107,18 @@ function OrderDetails() {
       </main>
     );
   }
+
+  const downloadInvoice = async () => {
+    setInvoiceState({ busy: true, error: '' });
+    try {
+      const url = await getInvoiceDownloadUrl(order.id);
+      if (!url) throw new Error('Invoice is not available yet.');
+      window.open(url, '_blank', 'noopener');
+      setInvoiceState({ busy: false, error: '' });
+    } catch (error) {
+      setInvoiceState({ busy: false, error: error?.message || 'Unable to download the invoice.' });
+    }
+  };
 
   const timeline = buildTimeline(order);
   const showPay = canPay(order);
@@ -193,6 +207,14 @@ function OrderDetails() {
             <div><dt>Delivery address</dt><dd>{order.deliveryAddress || 'Not available'}</dd></div>
           </dl>
         </article>
+        {order.statusGroup === 'active' ? (
+          <div className="od-invoice">
+            <button type="button" className="od-pay-btn" disabled={invoiceState.busy} onClick={() => void downloadInvoice()}>
+              {invoiceState.busy ? 'Preparing invoice...' : 'Download Invoice'}
+            </button>
+            {invoiceState.error ? <p role="alert">{invoiceState.error}</p> : null}
+          </div>
+        ) : null}
       </section>
 
       {showPay ? (
@@ -428,6 +450,7 @@ const styles = `
     font-weight: 900;
     color: ${T.heading};
   }
+  .od-invoice { display: flex; flex-direction: column; align-items: center; gap: 8px; margin-top: 16px; }
   .od-pay-btn {
     min-height: 48px;
     padding: 0 36px;
