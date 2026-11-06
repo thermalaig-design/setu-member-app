@@ -11,6 +11,7 @@ import { fetchTrustHelpUrl } from '../services/trustService';
 // feature_bottom_nav flag and shown on any page that renders it, not just
 // Home. Self-contained: fetches its own flags + this trust's help_url so
 // pages don't need to wire that state themselves.
+// The quick action button is a FAB that opens the User Panel, which is
 const BottomNav = ({ onNavigate }) => {
   const theme = useAppTheme();
   const navbarTheme = useMemo(() => getNavbarThemeStyles(theme), [theme]);
