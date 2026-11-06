@@ -1,6 +1,6 @@
 /* global process, Buffer */
 import crypto from 'crypto';
-import Razorpay from 'razorpay';
+import axios from 'axios';
 import { paymentSupabase } from '../config/supabase.js';
 
 const db = () => {
@@ -40,6 +40,36 @@ export const mapDbError = (error) => {
   return error;
 };
 
+// Minimal Razorpay REST client covering only the calls this service makes.
+// Gateway errors keep Razorpay's { error: { description } } shape
+// so callers can surface the gateway message.
+const createRazorpayClient = ({ keyId, keySecret }) => {
+  const http = axios.create({
+    baseURL: 'https://api.razorpay.com/v1',
+    auth: { username: keyId, password: keySecret },
+    timeout: 15000,
+  });
+  const call = async (request) => {
+    try {
+      return (await request).data;
+    } catch (error) {
+      const gatewayError = error?.response?.data?.error;
+      if (!gatewayError) throw error;
+      throw Object.assign(new Error(gatewayError.description || 'Razorpay request failed'), {
+        statusCode: error.response.status,
+        error: gatewayError,
+      });
+    }
+  };
+  return {
+    orders: { create: (payload) => call(http.post('/orders', payload)) },
+    payments: {
+      fetch: (id) => call(http.get(`/payments/${encodeURIComponent(id)}`)),
+      capture: (id, amount, currency) => call(http.post(`/payments/${encodeURIComponent(id)}/capture`, { amount, currency })),
+    },
+  };
+};
+
 let razorpayClient = null;
 export const getRazorpay = () => {
   if (razorpayClient) return razorpayClient;
@@ -48,7 +78,7 @@ export const getRazorpay = () => {
   if (!keyId || !keySecret) {
     throw new PaymentError('Payment gateway is not configured on the server.', 503, 'GATEWAY_NOT_CONFIGURED');
   }
-  razorpayClient = new Razorpay({ key_id: keyId, key_secret: keySecret });
+  razorpayClient = createRazorpayClient({ keyId, keySecret });
   return razorpayClient;
 };
 

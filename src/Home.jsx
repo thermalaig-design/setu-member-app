@@ -23,6 +23,7 @@ import { ReferralContent } from './Referral';
 import { AddCommunityContent } from './AddCommunity';
 import { UserPanelContent } from './components/PersistentUserPanel';
 import { OtherMembershipsContent } from './OtherMemberships';
+import { resolveAssetUrl } from './utils/assetUrl';
 import { useAppTheme } from './context/ThemeContext';
 import { useTenant } from './context/TenantContext';
 import { shouldSkipTrustReassignment } from './utils/tenantTrustSelection';
@@ -293,21 +294,6 @@ const buildCacheBustedIconUrl = (iconUrl, versionToken) => {
   if (!versionToken) return src;
   const separator = src.includes('?') ? '&' : '?';
   return `${src}${separator}v=${encodeURIComponent(String(versionToken))}`;
-};
-
-// Resolves a possibly-local asset path against Vite's configured base
-// ('/' in dev, '/_setu-app/' in production) instead of the hardcoded site
-// root. Local icons (e.g. '/icons/quick-access/notices.svg') are only ever
-// deployed under that base, so a bare '/' path resolves against the wrong
-// host location — most visibly on white-label tenant hosts. Full remote
-// URLs (Supabase storage, CDNs, data URIs) are left untouched.
-const resolveAssetUrl = (path) => {
-  const value = String(path || '').trim();
-  if (!value) return '';
-  if (/^([a-z][a-z0-9+.-]*:)?\/\//i.test(value) || value.startsWith('data:')) return value;
-  if (!value.startsWith('/')) return value;
-  const base = String(import.meta.env.BASE_URL || '/').replace(/\/+$/, '');
-  return `${base}${value}`;
 };
 
 const resolveTrustIconToken = (trust, fallback = '1') =>
@@ -3140,83 +3126,61 @@ const Home = ({ onNavigate, onLogout }) => {
         {showMemberBannerFeature && (userProfile?.name || showSelectedTrustMemberBanner) && (
           <div className="px-4 pb-3">
             <div
-              className="rounded-[22px] px-3 py-2"
+              className="member-card relative overflow-hidden rounded-xl px-2.5 py-1.5"
               style={{
-                background: showSelectedTrustMemberBanner
-                  ? 'linear-gradient(135deg, #121212 0%, #1b1b1b 55%, #2a2a2a 100%)'
-                  : `linear-gradient(135deg, ${applyOpacity(theme.accent, 0.6)}, ${theme.accentBg})`,
-                border: `1px solid ${showSelectedTrustMemberBanner ? 'rgba(212, 160, 23, 0.5)' : applyOpacity(theme.primary, 0.08)}`,
-                boxShadow: showSelectedTrustMemberBanner
-                  ? '0 14px 32px rgba(212, 160, 23, 0.18)'
-                  : 'none',
+                background: 'color-mix(in srgb, var(--navbar-text) 12%, transparent)',
+                border: '1px solid color-mix(in srgb, var(--navbar-text) 22%, transparent)',
               }}
             >
-              <div className="flex items-center gap-2 min-w-0 justify-between">
-                <div className='flex gap-2'>
+              <span className="member-card-shine" aria-hidden="true" />
+              <div className="relative flex items-center gap-2.5 min-w-0">
                 {userProfile?.profilePhotoUrl ? (
                   <img
                     src={userProfile.profilePhotoUrl}
                     alt={userProfile.name}
-                    className="w-10 h-10 rounded-full object-cover flex-shrink-0"
-                    style={{ border: `1.5px solid ${showSelectedTrustMemberBanner ? '#d4a017' : theme.primary}` }}
+                    className="member-card-avatar w-8 h-8 rounded-full object-cover flex-shrink-0"
+                    style={{ border: '2px solid color-mix(in srgb, var(--navbar-text) 70%, transparent)' }}
                   />
                 ) : (
                   <div
-                    className="w-10 h-10 rounded-full flex items-center justify-center text-[12px] font-bold flex-shrink-0"
+                    className="member-card-avatar w-8 h-8 rounded-full flex items-center justify-center text-[12px] font-bold flex-shrink-0"
                     style={{
-                      background: showSelectedTrustMemberBanner
-                        ? 'linear-gradient(135deg, #7c5a00 0%, #d4a017 100%)'
-                        : appButtonBg,
-                      color: showSelectedTrustMemberBanner ? '#fffdf5' : onPrimaryText,
-                    
+                      background: appButtonBg,
+                      color: onPrimaryText,
+                      border: '2px solid color-mix(in srgb, var(--navbar-text) 70%, transparent)',
                     }}
                   >
                     {(userProfile?.name || currentUser?.name || 'M').charAt(0).toUpperCase()}
                   </div>
                 )}
 
-                <div >
                 <div className="min-w-0 flex-1">
                   {userProfile?.name ? (
-                    <div className="flex items-center min-w-0">
-                      <p className="text-[14px] font-semibold truncate leading-snug relative top-[3px]" style={{ color: showSelectedTrustMemberBanner ? '#f8f0c5' : headingColor }}>
-                        <span className="font-extrabold">{userProfile.name}</span>
-                      </p>
-                    </div>
+                    <p className="text-[14px] font-extrabold truncate leading-tight" style={{ color: navbarTextColor }}>
+                      {userProfile.name}
+                    </p>
+                  ) : null}
+                  {showSelectedTrustMemberBanner && selectedTrustMembership?.role ? (
+                    <p
+                      className="text-[10px] font-semibold uppercase tracking-[0.08em] truncate leading-tight"
+                      style={{ color: 'color-mix(in srgb, var(--navbar-text) 75%, transparent)' }}
+                    >
+                      {selectedTrustMembership.role}
+                    </p>
                   ) : null}
                 </div>
-                <div>
-                  {showSelectedTrustMemberBanner && selectedTrustMembership?.role ? (
-                  <span
-                    className="inline-flex items-center  text-[10px] uppercase tracking-[0.1em] flex-shrink-0"
-                    style={{
-                      // background: 'linear-gradient(135deg, #5a3f00 0%, #d4a017 100%)',
-                      color: '#fff8db',
-                      // border: '1px solid rgba(255, 227, 133, 0.5)',
-                    }}
-                  >
-                    {/* <Crown className="h-3.5 w-3.5 flex-shrink-0" /> */}
-                    <span className="truncate">{selectedTrustMembership.role}</span>
-                  </span>
-                ) : null}
-                  </div>
-                </div>
-                </div>
-                <div>
+
                 {showSelectedTrustMemberBanner && selectedTrustMembership?.membership_number ? (
                   <span
-                    className="inline-flex items-center gap-1.5 rounded-full px-2 py-1 text-[10px] font-extrabold uppercase tracking-[0.12em]  flex-shrink-0"
+                    className="rounded-full px-2 py-0.5 text-[10px] font-bold tracking-[0.06em] flex-shrink-0"
                     style={{
-                      background: 'linear-gradient(135deg, #5a3f00 0%, #d4a017 100%)',
-                      color: '#fff8db',
-                      border: '1px solid rgba(255, 227, 133, 0.5)',
+                      background: 'color-mix(in srgb, var(--navbar-text) 18%, transparent)',
+                      color: navbarTextColor,
                     }}
                   >
-                    <Crown className="h-3.5 w-3.5 flex-shrink-0" />
-                    <span className="truncate">{selectedTrustMembership.membership_number}</span>
+                    {selectedTrustMembership.membership_number}
                   </span>
                 ) : null}
-                </div>
               </div>
             </div>
           </div>
@@ -3281,8 +3245,18 @@ const Home = ({ onNavigate, onLogout }) => {
               >
                 <div className="flex items-stretch">
                   <div className="overflow-hidden flex-1 py-2">
-                    <div className="marquee-track flex">
-                      {[...marqueeUpdates, ...marqueeUpdates].map((msg, i) => (
+                    {/* One "set" is repeated until it is wider than the screen, then
+                        the set is doubled; translating -50% loops seamlessly even when
+                        there is only one short message. */}
+                    <div
+                      className="marquee-track flex"
+                      style={{ animationDuration: `${Math.max(20, Math.max(marqueeUpdates.length, 6) * 6)}s` }}
+                    >
+                      {(() => {
+                        const repeat = Math.max(1, Math.ceil(6 / marqueeUpdates.length));
+                        const set = Array.from({ length: repeat }, () => marqueeUpdates).flat();
+                        return [...set, ...set];
+                      })().map((msg, i) => (
                         <span key={i} className="whitespace-nowrap text-xs font-semibold px-6" style={{ color: 'var(--marquee-text)' }}>⭐ {msg}</span>
                       ))}
                     </div>
@@ -3412,7 +3386,7 @@ const Home = ({ onNavigate, onLogout }) => {
                   if (tileBatch.length > 0) groups.push({ type: 'tiles', items: tileBatch });
 
                   return groups.map((group, groupIndex) => {
-                    const spacingClass = groupIndex > 0 ? 'mt-4' : '';
+                    const spacingClass = groupIndex > 0 ? 'mt-7' : '';
                     if (group.type === 'content') {
                       const { action, ContentRenderer } = group;
                       const contentKey = action.route === 'products'
@@ -3687,6 +3661,39 @@ const Home = ({ onNavigate, onLogout }) => {
 
 
       <style>{`
+        .member-card {
+          animation: memberCardIn 0.45s cubic-bezier(0.22, 1, 0.36, 1) both;
+        }
+        .member-card-avatar {
+          animation: memberAvatarPop 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) 0.12s both;
+        }
+        .member-card-shine {
+          position: absolute;
+          top: 0;
+          bottom: 0;
+          left: 0;
+          width: 40%;
+          pointer-events: none;
+          background: linear-gradient(105deg, transparent 0%, color-mix(in srgb, var(--navbar-text) 28%, transparent) 50%, transparent 100%);
+          transform: translateX(-120%);
+          animation: memberCardShine 1.1s ease-out 0.5s 1 both;
+        }
+        @keyframes memberCardIn {
+          from { opacity: 0; transform: translateY(8px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes memberAvatarPop {
+          from { opacity: 0; transform: scale(0.7); }
+          to { opacity: 1; transform: scale(1); }
+        }
+        @keyframes memberCardShine {
+          from { transform: translateX(-120%); }
+          to { transform: translateX(380%); }
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .member-card, .member-card-avatar { animation: none; }
+          .member-card-shine { display: none; }
+        }
         .marquee-track {
           display: flex;
           animation: marquee-scroll 30s linear infinite;

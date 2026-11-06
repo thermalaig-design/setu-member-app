@@ -357,3 +357,13 @@ html::-webkit-scrollbar-thumb:hover,
     color: color-mix(in srgb, var(--body-text-color) 75%, var(--surface-color));
   }
 }
+
+/* iOS Safari/WKWebView zooms the whole page when a focused field has a font-size
+   under 16px, and does not zoom back out. Keep every text field at 16px on iOS. */
+@supports (-webkit-touch-callout: none) {
+  input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='file']),
+  select,
+  textarea {
+    font-size: 16px;
+  }
+}

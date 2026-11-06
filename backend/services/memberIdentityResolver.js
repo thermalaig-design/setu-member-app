@@ -83,6 +83,11 @@ const resolveMasterMembersId = async (userId, fallbackMembersId = null) => {
   return await resolveMasterMembersIdFromUuid(userId);
 };
 
+// The person-level id (reg_members.members_id / Members.members_id). member_session.members_id
+// stores this same value, so push-token registration uses it to find a person's session rows.
+export const resolvePersonIdForUser = (userId, fallbackMembersId = null) =>
+  resolveMasterMembersId(userId, fallbackMembersId);
+
 // notification_recipients.member_id references reg_members.id — a per-trust
 // membership row. A member with memberships in multiple trusts has a
 // distinct reg_members.id per trust, so this returns all of them.

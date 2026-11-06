@@ -1,8 +1,9 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   ArrowUp,
   ChevronLeft,
+  ChevronRight,
   ShoppingCart,
   Shirt,
   Sparkles,
@@ -87,6 +88,31 @@ const getTrustCandidates = (preferredTrustId = '') => {
 
   return [...new Set([selectedTrustId].filter(Boolean))];
 };
+
+// One shared observer reveals elements (fade + rise) the first time they scroll into view.
+let revealObserver = null;
+const getRevealObserver = () => {
+  if (revealObserver || typeof IntersectionObserver === 'undefined') return revealObserver;
+  revealObserver = new IntersectionObserver((entries) => {
+    entries.forEach((entry) => {
+      if (!entry.isIntersecting) return;
+      entry.target.classList.add('ws-in');
+      revealObserver.unobserve(entry.target);
+    });
+  }, { rootMargin: '0px 0px -6% 0px', threshold: 0.05 });
+  return revealObserver;
+};
+
+const useRevealRef = () => useCallback((node) => {
+  if (!node) return undefined;
+  const observer = getRevealObserver();
+  if (!observer) {
+    node.classList.add('ws-in');
+    return undefined;
+  }
+  observer.observe(node);
+  return () => observer.unobserve(node);
+}, []);
 
 function CategoryArt({
   variant = 'card',
@@ -281,39 +307,53 @@ function EmptyState({ title, description, onRetry }) {
 }
 
 function CircleSlider({ entries, onOpen, title, badge }) {
+  const revealRef = useRevealRef();
+
   return (
     <>
       {title ? (
-        <div className="ws-section-title flex items-center gap-2 px-4 pt-4">
-          {title}
-          {badge ? (
-            <span
-              className="rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider"
-              style={{ background: SKELETON_BG, color: THEME.text }}
-            >
-              {badge}
-            </span>
-          ) : null}
+        <div className="ws-circle-head">
+          <div className="ws-section-title ws-section-title--static">
+            {title}
+            {badge ? (
+              <span
+                className="ml-2 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider"
+                style={{ background: SKELETON_BG, color: THEME.text }}
+              >
+                {badge}
+              </span>
+            ) : null}
+          </div>
         </div>
       ) : null}
-      <div className="ws-circle-row no-scrollbar">
-        {entries.map((entry) => (
-          <button
+      <div className={`ws-circle-row no-scrollbar${title ? ' ws-circle-row--titled' : ''}`}>
+        {entries.map((entry, index) => (
+          <div
             key={entry.id}
-            className="ws-circle-item"
-            type="button"
-            onClick={() => onOpen(entry.id)}
+            ref={revealRef}
+            className="ws-reveal"
+            style={{ '--i': Math.min(index, 6) }}
           >
-            <CategoryArt
-              variant="circle"
-              label={entry.label}
-              imageUrl={entry.imageUrl}
-              iconName={entry.icon}
-              colors={entry.colors}
-              sample={entry.sample}
-            />
-            <span className="ws-circle-label">{entry.label}</span>
-          </button>
+            <button
+              className="ws-circle-item"
+              type="button"
+              onClick={() => onOpen(entry.id)}
+            >
+              <span className="ws-circle-ring">
+                <span className="ws-circle-inner">
+                  <CategoryArt
+                    variant="circle"
+                    label={entry.label}
+                    imageUrl={entry.imageUrl}
+                    iconName={entry.icon}
+                    colors={entry.colors}
+                    sample={entry.sample}
+                  />
+                </span>
+              </span>
+              <span className="ws-circle-label">{entry.label}</span>
+            </button>
+          </div>
         ))}
       </div>
     </>
@@ -323,22 +363,29 @@ function CircleSlider({ entries, onOpen, title, badge }) {
 function CardGrid({ section, onOpen }) {
   const rows = splitIntoRows(section.items || [], section.rowPattern || getCardRowPattern(section.items?.length || 0));
   const openSection = () => onOpen(section.id);
+  const revealRef = useRevealRef();
 
   return (
     <section className="ws-section">
-      <div
-        className="ws-section-title"
-        role="button"
-        tabIndex={0}
-        onClick={openSection}
-        onKeyDown={(event) => {
-          if (event.key === 'Enter' || event.key === ' ') {
-            event.preventDefault();
-            openSection();
-          }
-        }}
-      >
-        {section.label}
+      <div ref={revealRef} className="ws-reveal ws-section-head">
+        <div
+          className="ws-section-title"
+          role="button"
+          tabIndex={0}
+          onClick={openSection}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault();
+              openSection();
+            }
+          }}
+        >
+          {section.label}
+        </div>
+        <button type="button" className="ws-view-all" onClick={openSection}>
+          View all
+          <ChevronRight size={14} strokeWidth={2.4} />
+        </button>
       </div>
       <div className="ws-card-rows">
         {rows.map((row, rowIndex) => {
@@ -351,24 +398,35 @@ function CardGrid({ section, onOpen }) {
               className="ws-grid"
               style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}
             >
-              {row.map((item) => (
-                <button
+              {row.map((item, itemIndex) => (
+                <div
                   key={item.id}
-                  className="ws-tile"
-                  type="button"
-                  onClick={() => onOpen(item)}
+                  ref={revealRef}
+                  className="ws-reveal"
+                  style={{ '--i': itemIndex }}
                 >
-                  <CategoryArt
-                    variant="card"
-                    label={item.label}
-                    imageUrl={item.imageUrl}
-                    iconName={item.icon}
-                    colors={item.colors}
-                    tall={tall}
-                    sample={item.sample}
-                  />
-                  <span className="ws-tile-label">{item.label}</span>
-                </button>
+                  <button
+                    className="ws-tile"
+                    type="button"
+                    onClick={() => onOpen(item)}
+                  >
+                    <CategoryArt
+                      variant="card"
+                      label={item.label}
+                      imageUrl={item.imageUrl}
+                      iconName={item.icon}
+                      colors={item.colors}
+                      tall={tall}
+                      sample={item.sample}
+                    />
+                    <span className="ws-tile-foot">
+                      <span className="ws-tile-label">{item.label}</span>
+                      <span className="ws-tile-arrow" aria-hidden="true">
+                        <ChevronRight size={14} strokeWidth={2.6} />
+                      </span>
+                    </span>
+                  </button>
+                </div>
               ))}
             </div>
           );
@@ -698,6 +756,7 @@ export function CategoriesProductsContent({
             <>
               {sliderEntries.length > 0 ? (
                 <CircleSlider
+                  title="Categories"
                   entries={sliderEntries}
                   onOpen={(id) => navigate(`/categories-products/list/${encodeRouteId(id)}`)}
                 />
@@ -758,12 +817,57 @@ export function CategoriesProductsContent({
           display: none;
         }
 
+        .ws-scroll {
+          --ws-accent: ${primaryColor};
+        }
+
+        .ws-reveal {
+          opacity: 0;
+          transform: translate3d(0, 18px, 0);
+        }
+
+        .ws-reveal.ws-in {
+          opacity: 1;
+          transform: translate3d(0, 0, 0);
+          transition:
+            opacity 0.5s ease calc(var(--i, 0) * 70ms),
+            transform 0.6s cubic-bezier(0.22, 1, 0.36, 1) calc(var(--i, 0) * 70ms);
+        }
+
+        .ws-circle-head {
+          padding: 18px 18px 0;
+        }
+
         .ws-circle-row {
           display: flex;
           gap: 18px;
           padding: 18px 18px 8px;
           overflow-x: auto;
           align-items: flex-start;
+        }
+
+        .ws-circle-row--titled {
+          padding-top: 4px;
+        }
+
+        .ws-circle-ring {
+          display: block;
+          padding: 3px;
+          border-radius: 999px;
+          background: linear-gradient(135deg, var(--ws-accent), color-mix(in srgb, var(--ws-accent) 30%, var(--surface-color)));
+          box-shadow: 0 8px 18px color-mix(in srgb, var(--ws-accent) 22%, transparent);
+          transition: transform 0.18s ease;
+        }
+
+        .ws-circle-inner {
+          display: block;
+          border: 2.5px solid var(--surface-color);
+          border-radius: 999px;
+          overflow: hidden;
+        }
+
+        .ws-circle-item:active .ws-circle-ring {
+          transform: scale(0.94);
         }
 
         .ws-circle-item {
@@ -780,6 +884,7 @@ export function CategoriesProductsContent({
         }
 
         .ws-circle-label {
+          font-weight: 600;
           font-size: 13px;
           color: var(--page-text-color, ${navbarTextColor});
           text-align: center;
@@ -791,15 +896,58 @@ export function CategoriesProductsContent({
           padding: 18px;
         }
 
-        .ws-section-title {
-          font-size: 16px;
-          font-weight: 700;
+        .ws-section-head {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 12px;
           margin-bottom: 12px;
+        }
+
+        .ws-section-title {
+          display: flex;
+          align-items: center;
+          font-size: 17px;
+          font-weight: 800;
+          letter-spacing: -0.01em;
           color: var(--page-text-color, ${navbarTextColor});
           cursor: pointer;
           outline: none;
           width: max-content;
           max-width: 100%;
+        }
+
+        .ws-section-title::before {
+          content: '';
+          width: 4px;
+          height: 18px;
+          margin-right: 8px;
+          border-radius: 4px;
+          background: var(--ws-accent);
+        }
+
+        .ws-section-title--static {
+          cursor: default;
+        }
+
+        .ws-view-all {
+          display: inline-flex;
+          align-items: center;
+          gap: 2px;
+          padding: 5px 8px 5px 12px;
+          border: 0;
+          border-radius: 999px;
+          font-size: 12px;
+          font-weight: 700;
+          color: var(--ws-accent);
+          background: color-mix(in srgb, var(--ws-accent) 12%, transparent);
+          cursor: pointer;
+          flex-shrink: 0;
+          transition: transform 0.15s ease;
+        }
+
+        .ws-view-all:active {
+          transform: scale(0.95);
         }
 
         .ws-section-title:focus-visible {
@@ -819,21 +967,56 @@ export function CategoriesProductsContent({
         }
 
         .ws-tile {
-          background: none;
-          border: none;
+          background: var(--surface-color);
+          border: 1px solid color-mix(in srgb, var(--ws-accent) 14%, transparent);
+          border-radius: 16px;
+          overflow: hidden;
           padding: 0;
           cursor: pointer;
           display: flex;
           flex-direction: column;
-          gap: 8px;
           text-align: left;
           width: 100%;
+          box-shadow: 0 8px 20px color-mix(in srgb, var(--ws-accent) 12%, transparent);
+          transition: transform 0.15s ease, box-shadow 0.15s ease;
+        }
+
+        .ws-tile:active {
+          transform: scale(0.97);
+          box-shadow: 0 3px 8px color-mix(in srgb, var(--ws-accent) 12%, transparent);
+        }
+
+        .ws-tile-foot {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 8px;
+          padding: 10px 10px 10px 12px;
         }
 
         .ws-tile-label {
           font-size: 13px;
+          font-weight: 600;
           color: var(--page-text-color, ${navbarTextColor});
           line-height: 1.25;
+          min-width: 0;
+        }
+
+        .ws-tile-arrow {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          width: 24px;
+          height: 24px;
+          flex-shrink: 0;
+          border-radius: 999px;
+          color: var(--ws-accent);
+          background: color-mix(in srgb, var(--ws-accent) 12%, transparent);
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+          .ws-reveal { opacity: 1; transform: none; }
+          .ws-reveal.ws-in { transition: none; }
         }
 
         .ws-jump-top {

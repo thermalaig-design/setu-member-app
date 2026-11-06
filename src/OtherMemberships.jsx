@@ -1334,7 +1334,7 @@ const OtherMemberships = ({ onNavigate, variant = 'page' }) => {
 	      )}
 
       {/* ── Content ── */}
-      <div className="other-memberships-content" style={{ width: '100%', margin: '0 auto', boxSizing: 'border-box' }}>
+      <div className="other-memberships-content" style={{ width: '100%', margin: '0 auto', boxSizing: 'border-box', ...(isHomeVariant ? { padding: 0 } : null) }}>
         {/* Loading spinner */}
         {loading && trustLinks.length === 0 && (
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '60px 0' }}>

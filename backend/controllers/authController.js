@@ -50,12 +50,13 @@ const buildSessionEventPayload = (body = {}) => {
 
 // Location keys are server-owned: any client-sent values are dropped, and for
 // a login with a final members_id + trust_id the server's local GeoIP result
-// is merged in. Existing metadata keys are kept. Never fails the login.
+// is merged in. iOS logins never get a location. Existing metadata keys are
+// kept. Never fails the login.
 const withSessionLocation = async (req, payload) => {
   const metadata = { ...payload.metadata };
   SESSION_LOCATION_KEYS.forEach((key) => { delete metadata[key]; });
 
-  if (payload.action_type === 'login' && payload.members_id && payload.trust_id) {
+  if (payload.action_type === 'login' && payload.app_platform !== 'ios' && payload.members_id && payload.trust_id) {
     try {
       const location = toSessionLocationMetadata(await lookupClientLocation(req));
       if (location) Object.assign(metadata, location);

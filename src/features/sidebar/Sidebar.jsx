@@ -10,6 +10,7 @@ import { getProfile, updateMemberPrivacy } from '../../services/api';
 import { fetchFeatureFlags, isFeatureVisible } from '../../services/featureFlags';
 import { buildShareAppLinksFromMembership, getStoredMembershipForTrust } from '../../utils/trustMembershipLinks';
 import { logUserSessionEvent } from '../../services/sessionAuditService';
+import { unregisterPushToken } from '../../services/pushNotificationService';
 import { trackAction } from '../../services/pageTrackingService';
 import { useTrustDataVersion } from '../../hooks/useTrustDataVersion';
 import { useAppTheme } from '../../context/ThemeContext';
@@ -18,6 +19,7 @@ import { getThemeToken } from '../../utils/themeUtils';
 import { getShareAppTargetLink } from '../../utils/shareApp';
 import { resolveSelectedTrustMembership } from '../../utils/storageUtils';
 import { MEMBER_PRIVACY_UPDATED_EVENT } from '../../utils/memberIdentity';
+import { resolveAssetUrl } from '../../utils/assetUrl';
 
 const normalizeSidebarRoute = (route = '', featureKey = '') => {
   const routeValue = String(route || '')
@@ -53,8 +55,68 @@ const resolveSidebarIcon = (featureKey, route) => {
   if (normalizedRoute === 'add-community') return CirclePlus;
   if (normalizedRoute === 'order-history') return Clock3;
   if (normalizedRoute === 'products') return ShoppingBag;
-  return PhoneCall;
+  return FileText;
 };
+
+// Same per-route icon files the Home quick-access tiles use, so both places match.
+const SIDEBAR_ICON_URL_BY_ROUTE = {
+  notices: '/icons/quick-access/noticeboard.svg',
+  facilities: '/icons/quick-access/facilities.svg',
+  events: '/icons/quick-access/events.svg',
+  achievements: '/icons/quick-access/directory.svg',
+  donation: '/icons/quick-access/donation.svg',
+  'executive-body': '/icons/quick-access/directory.svg',
+  directory: '/icons/quick-access/directory.svg',
+  appointment: '/icons/quick-access/opd.svg',
+  reference: '/icons/quick-access/referral.svg',
+  reports: '/icons/quick-access/reports.svg',
+  products: '/icons/quick-access/products.svg',
+  'order-history': '/icons/quick-access/order-history.svg',
+  'add-community': '/icons/quick-access/directory.svg',
+  'user-panel': '/icons/quick-access/directory.svg',
+};
+const SIDEBAR_LUCIDE_ONLY_ROUTES = new Set(['contact-us', 'my-family', 'nomination-details']);
+
+const resolveSidebarIconUrl = (route, explicitIcon) => {
+  const icon = String(explicitIcon || '').trim();
+  if (icon) return icon;
+  if (SIDEBAR_ICON_URL_BY_ROUTE[route]) return SIDEBAR_ICON_URL_BY_ROUTE[route];
+  return SIDEBAR_LUCIDE_ONLY_ROUTES.has(route) ? '' : '/icons/quick-access/directory.svg';
+};
+
+// Menu icon: the feature's icon file masked in the given colour (as on Home tiles),
+// falling back to a lucide glyph when there is no file or it fails to load.
+const SidebarFeatureIcon = ({ iconUrl, Fallback, color }) => {
+  const [failed, setFailed] = useState(false);
+  const src = resolveAssetUrl(iconUrl);
+  if (!src || failed) {
+    return React.createElement(Fallback, { className: 'h-5 w-5 flex-shrink-0', style: { color } });
+  }
+  const mask = `url("${src}") center / contain no-repeat`;
+  return (
+    <span
+      role="img"
+      aria-hidden="true"
+      className="relative inline-block h-5 w-5 flex-shrink-0"
+      style={{ backgroundColor: color, WebkitMask: mask, mask }}
+    >
+      <img src={src} alt="" aria-hidden="true" className="absolute inset-0 h-full w-full opacity-0" onError={() => setFailed(true)} />
+    </span>
+  );
+};
+
+// WhatsApp-style placeholder: round avatar with a person silhouette.
+const AvatarPlaceholder = ({ color }) => (
+  <svg viewBox="0 0 56 56" className="h-full w-full" aria-hidden="true">
+    <circle cx="28" cy="21" r="9.5" fill={color} />
+    <path d="M9 56c0-12 8.5-20 19-20s19 8 19 20z" fill={color} />
+  </svg>
+);
+
+const SIDEBAR_OPEN_MS = 380;
+const SIDEBAR_CLOSE_MS = 260;
+const prefersReducedMotion = () =>
+  typeof window !== 'undefined' && Boolean(window.matchMedia?.('(prefers-reduced-motion: reduce)').matches);
 
 const normalizeDisplayInApp = (value) => String(value || 'home').trim().toLowerCase();
 
@@ -191,7 +253,9 @@ const Sidebar = ({ isOpen, onClose, onNavigate, currentPage, onLogout }) => {
   const sidebarDividerColor = getThemeToken(theme, 'sidebar.divider_color', applyOpacity(sidebarTextColor, 0.16));
   const sidebarProgressTrackColor = getThemeToken(theme, 'sidebar.progress_track_color', applyOpacity(sidebarTextColor, 0.2));
   const sidebarBadgeBgColor = getThemeToken(theme, 'sidebar.badge_bg_color', applyOpacity(sidebarActiveTextColor, 0.16));
-  const sidebarBadgeTextColor = getThemeToken(theme, 'sidebar.badge_text_color', sidebarActiveTextColor);
+  // Readable text on the sidebar background: the theme's own text colour with a hint of its accent.
+  const sidebarSoftTextColor = `color-mix(in srgb, ${sidebarTextColor} 90%, ${sidebarActiveTextColor})`;
+  const sidebarBadgeTextColor = getThemeToken(theme, 'sidebar.badge_text_color', sidebarSoftTextColor);
   const sidebarTapHighlightColor = getThemeToken(theme, 'sidebar.tap_highlight_color', applyOpacity(sidebarActiveTextColor, 0.06));
   const sidebarToastBgColor = getThemeToken(theme, 'sidebar.toast_bg_color', secondary);
   const sidebarToastTextColor = getThemeToken(theme, 'sidebar.toast_text_color', 'var(--surface-color)');
@@ -222,6 +286,15 @@ const Sidebar = ({ isOpen, onClose, onNavigate, currentPage, onLogout }) => {
   });
   const [selectedTrustId, setSelectedTrustId] = useState(() => String(localStorage.getItem('selected_trust_id') || '').trim());
   const [shareToast, setShareToast] = useState(false);
+  const [failedAvatarUrl, setFailedAvatarUrl] = useState('');
+  // Keep the panel mounted while it slides out so closing animates too.
+  const [prevIsOpen, setPrevIsOpen] = useState(isOpen);
+  const [isClosing, setIsClosing] = useState(false);
+  const [hasEntered, setHasEntered] = useState(false);
+  if (isOpen !== prevIsOpen) {
+    setPrevIsOpen(isOpen);
+    setIsClosing(!isOpen);
+  }
   const [featureFlags, setFeatureFlags] = useState({});
   const [flagsData, setFlagsData] = useState({});
   const [memberTrustLinks, setMemberTrustLinks] = useState([]);
@@ -506,6 +579,22 @@ const Sidebar = ({ isOpen, onClose, onNavigate, currentPage, onLogout }) => {
   // No body scroll lock needed — overlay + fixed panel already block background interaction.
   // prevents background scroll on mobile, and covers background on desktop.
 
+  useEffect(() => {
+    if (isOpen) {
+      let innerId = 0;
+      const outerId = requestAnimationFrame(() => {
+        innerId = requestAnimationFrame(() => setHasEntered(true));
+      });
+      return () => {
+        cancelAnimationFrame(outerId);
+        cancelAnimationFrame(innerId);
+      };
+    }
+    setHasEntered(false);
+    const timerId = setTimeout(() => setIsClosing(false), SIDEBAR_CLOSE_MS);
+    return () => clearTimeout(timerId);
+  }, [isOpen]);
+
   // Swipe left to close
   useEffect(() => {
     if (!isOpen) return;
@@ -556,7 +645,9 @@ const Sidebar = ({ isOpen, onClose, onNavigate, currentPage, onLogout }) => {
     };
   }, [isOpen, onClose]);
 
-  if (!isOpen) return null;
+  if (!isOpen && !isClosing) return null;
+  const reduceMotion = prefersReducedMotion();
+  const isSidebarSettled = hasEntered && isOpen;
 
   const displayName = resolveNameValue(profile?.name, userData?.Name, userData?.name) || 'User';
   const selectedTrustMembership = resolveSelectedTrustMembership(userData || {}, selectedTrustId);
@@ -577,7 +668,6 @@ const Sidebar = ({ isOpen, onClose, onNavigate, currentPage, onLogout }) => {
     selectedTrustMembership?.['Membership number'],
     selectedTrustMembership?.membershipNumber
   );
-  const initials = displayName.charAt(0).toUpperCase();
   const completion = calcCompletion(profile, userData);
   const completionColor = sidebarActiveTextColor;
 
@@ -660,6 +750,7 @@ const Sidebar = ({ isOpen, onClose, onNavigate, currentPage, onLogout }) => {
       id: normalizeSidebarRoute(meta?.route, key),
       label: toTitleCase(meta?.display_name || meta?.name || key),
       icon: resolveSidebarIcon(key, meta?.route),
+      iconUrl: resolveSidebarIconUrl(normalizeSidebarRoute(meta?.route, key), meta?.icon_url),
       quickOrder: meta?.quick_order ?? null,
     }))
     .sort((a, b) => {
@@ -673,6 +764,32 @@ const Sidebar = ({ isOpen, onClose, onNavigate, currentPage, onLogout }) => {
 
   return (
     <>
+      <style>{`
+        /* Items ease in from the left once the panel is open. "backwards" fill keeps
+           the final state untouched so active:scale-95 on buttons still works. */
+        .sb-open .sb-head,
+        .sb-open .sb-nav > *,
+        .sb-open .sb-foot { animation: sbItemIn 420ms cubic-bezier(0.22, 1, 0.36, 1) backwards; }
+        .sb-open .sb-head { animation-delay: 60ms; }
+        .sb-open .sb-nav > *:nth-child(1) { animation-delay: 130ms; }
+        .sb-open .sb-nav > *:nth-child(2) { animation-delay: 180ms; }
+        .sb-open .sb-nav > *:nth-child(3) { animation-delay: 230ms; }
+        .sb-open .sb-nav > *:nth-child(4) { animation-delay: 280ms; }
+        .sb-open .sb-nav > *:nth-child(5) { animation-delay: 330ms; }
+        .sb-open .sb-nav > *:nth-child(n+6) { animation-delay: 380ms; }
+        .sb-open .sb-foot { animation-name: sbFootIn; animation-delay: 300ms; }
+        @keyframes sbItemIn {
+          from { opacity: 0; transform: translate3d(-18px, 0, 0); }
+          to { opacity: 1; transform: translate3d(0, 0, 0); }
+        }
+        @keyframes sbFootIn {
+          from { opacity: 0; transform: translate3d(0, 14px, 0); }
+          to { opacity: 1; transform: translate3d(0, 0, 0); }
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .sb-open .sb-head, .sb-open .sb-nav > *, .sb-open .sb-foot { animation: none; }
+        }
+      `}</style>
       {/* Overlay — absolute within parent container */}
       <div
         className="absolute max-md:fixed inset-0 backdrop-blur-sm z-40"
@@ -687,14 +804,17 @@ const Sidebar = ({ isOpen, onClose, onNavigate, currentPage, onLogout }) => {
         }}
         style={{
           touchAction: 'auto',
-          background: sidebarOverlayBg
+          background: sidebarOverlayBg,
+          opacity: hasEntered ? 1 : 0,
+          transition: reduceMotion ? 'none' : `opacity ${isOpen ? SIDEBAR_OPEN_MS : SIDEBAR_CLOSE_MS}ms ease-out`,
+          pointerEvents: isOpen ? 'auto' : 'none'
         }}
       />
 
       {/* Sidebar panel — absolute, left-anchored, full height */}
       <div
         ref={sidebarRef}
-        className="theme-sidebar absolute max-md:fixed left-0 top-0 bottom-0 w-72 shadow-2xl z-50 flex flex-col"
+        className={`theme-sidebar absolute max-md:fixed left-0 top-0 bottom-0 w-72 shadow-2xl z-50 flex flex-col${isSidebarSettled ? ' sb-open' : ''}`}
         data-sidebar="true"
         style={{
           maxWidth: '85vw',
@@ -702,9 +822,17 @@ const Sidebar = ({ isOpen, onClose, onNavigate, currentPage, onLogout }) => {
           maxHeight: '100dvh',
           touchAction: 'pan-y',
           background: 'var(--sidebar-bg)',
-          backdropFilter: 'blur(var(--sidebar-blur, 12px))',
-          WebkitBackdropFilter: 'blur(var(--sidebar-blur, 12px))',
+          // Blur only once settled: animating a backdrop blur janks on Android.
+          backdropFilter: hasEntered && isOpen ? 'blur(var(--sidebar-blur, 12px))' : 'none',
+          WebkitBackdropFilter: hasEntered && isOpen ? 'blur(var(--sidebar-blur, 12px))' : 'none',
           opacity: 'var(--sidebar-opacity, 1)',
+          transform: hasEntered ? 'translate3d(0, 0, 0)' : 'translate3d(-100%, 0, 0)',
+          transition: reduceMotion
+            ? 'none'
+            : isOpen
+              ? `transform ${SIDEBAR_OPEN_MS}ms cubic-bezier(0.32, 0.72, 0, 1)`
+              : `transform ${SIDEBAR_CLOSE_MS}ms cubic-bezier(0.4, 0, 1, 1)`,
+          pointerEvents: isOpen ? 'auto' : 'none',
           borderRight: '1px solid var(--sidebar-border)',
           overflow: 'hidden',
           WebkitOverflowScrolling: 'touch',
@@ -718,36 +846,32 @@ const Sidebar = ({ isOpen, onClose, onNavigate, currentPage, onLogout }) => {
         {/* ── Profile Card Header ── */}
         {ff('feature_profile') && (
         <div
-          className="px-5 pt-14 pb-5 flex-shrink-0 cursor-pointer"
+          className="sb-head px-5 pt-14 pb-5 flex-shrink-0 cursor-pointer"
 	          style={{ borderBottom: `1px solid ${sidebarDividerColor}` }}
           onClick={() => { onNavigate('profile'); onClose(); }}
         >
           {/* Avatar + name row */}
           <div className="flex items-center gap-3 mb-3">
             {/* Avatar */}
-            <div className="relative bottom-2 flex-shrink-0">
-              {profile?.profilePhotoUrl ? (
-                <img
-                  src={profile.profilePhotoUrl}
-                  alt={displayName}
-                  className="h-14 w-14 rounded-2xl object-cover"
-                  style={{ border: `2px solid ${accent}` }}
-                  onError={(e) => { e.target.onerror = null; e.target.style.display = 'none'; }}
-                />
-              ) : (
-                <div className="h-14 w-14 rounded-2xl flex items-center justify-center text-xl font-bold select-none"
-                  style={{ background: accent, border: `2px solid ${primary}`, color: primary }}>
-                  {initials}
-                </div>
-              )}
-              {/* Online dot */}
+            <div className="relative flex-shrink-0">
               <div
-                className="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full border-2"
+                className="h-14 w-14 rounded-full overflow-hidden flex items-center justify-center"
                 style={{
-                  background: 'var(--quick-actions-icon-bg)',
-                  borderColor: 'var(--surface-color)'
+                  background: `color-mix(in srgb, ${sidebarTextColor} 18%, transparent)`,
+                  boxShadow: `0 0 0 2px color-mix(in srgb, ${sidebarTextColor} 80%, transparent), 0 4px 12px rgba(0, 0, 0, 0.25)`,
                 }}
-              />
+              >
+                {profile?.profilePhotoUrl && failedAvatarUrl !== profile.profilePhotoUrl ? (
+                  <img
+                    src={profile.profilePhotoUrl}
+                    alt={displayName}
+                    className="h-full w-full object-cover"
+                    onError={() => setFailedAvatarUrl(profile.profilePhotoUrl)}
+                  />
+                ) : (
+                  <AvatarPlaceholder color={`color-mix(in srgb, ${sidebarTextColor} 75%, transparent)`} />
+                )}
+              </div>
             </div>
 
             {/* Name + subtitle */}
@@ -783,7 +907,7 @@ const Sidebar = ({ isOpen, onClose, onNavigate, currentPage, onLogout }) => {
               </span>
             </span>
           </p>
-              <p className="text-xs font-semibold mt-0.5" style={{ color: sidebarActiveTextColor }}>View &amp; Edit Profile</p>
+              <p className="text-xs font-semibold mt-1" style={{ color: sidebarSoftTextColor }}>View &amp; Edit Profile</p>
             </div>
 
             <ChevronRight
@@ -838,7 +962,7 @@ const Sidebar = ({ isOpen, onClose, onNavigate, currentPage, onLogout }) => {
         >
           {/* Nav items + More Options */}
           <div className="py-3 px-3">
-            <div className="space-y-1">
+            <div className="sb-nav space-y-1">
               {primaryMenuItems.map((item) => {
                 const cp = String(currentPage || '').trim().toLowerCase().replace(/_/g, '-');
                 const aliasMap = {
@@ -870,14 +994,11 @@ const Sidebar = ({ isOpen, onClose, onNavigate, currentPage, onLogout }) => {
                       background: isActive ? accent : 'transparent',
                     }}
                   >
-	                    <item.icon
-	                      className="h-5 w-5 flex-shrink-0"
-	                      style={{
-	                        color: isActive
-	                          ? sidebarActiveTextColor
-	                          : itemTextColor
-	                      }}
-	                    />
+                    <SidebarFeatureIcon
+                      iconUrl={item.iconUrl}
+                      Fallback={item.icon}
+                      color={isActive ? sidebarActiveTextColor : itemTextColor}
+                    />
                     <span
                       className="font-semibold flex-1"
                       style={{
@@ -1032,7 +1153,7 @@ const Sidebar = ({ isOpen, onClose, onNavigate, currentPage, onLogout }) => {
 
       {/* ── Fixed Logout Button at Bottom ── */}
         <div
-          className="absolute left-0 right-0 bottom-0 px-3 pt-2 z-50"
+          className="sb-foot absolute left-0 right-0 bottom-0 px-3 pt-2 z-50"
           style={{
             background: 'var(--sidebar-bg)',
 	          borderTop: `1px solid ${sidebarDividerColor}`,
@@ -1125,10 +1246,11 @@ const Sidebar = ({ isOpen, onClose, onNavigate, currentPage, onLogout }) => {
               } catch {
                 currentUser = null;
               }
+              const pushToken = await unregisterPushToken();
               await logUserSessionEvent({
                 user: currentUser,
                 actionType: 'logout',
-                extra: { source: 'sidebar-fallback' }
+                extra: { source: 'sidebar-fallback', ...(pushToken ? { fcm_token: pushToken } : {}) }
               });
               localStorage.removeItem('user');
               localStorage.removeItem('isLoggedIn');

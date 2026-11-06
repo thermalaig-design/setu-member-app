@@ -1,13 +1,14 @@
 import { track } from './services/analytics';
 import { useGalleryContext } from './context/GalleryContext';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import {
   Image as ImageIcon, X, ChevronLeft, ChevronRight,
   Menu, Home as HomeIcon, FolderOpen, Play, Pause, ArrowLeft
 } from 'lucide-react';
 import Sidebar from './features/sidebar/Sidebar';
 import { getAppHomePath } from './utils/tenantNavigation';
+import { useNavigation } from './context/ImprovedNavigationProvider';
 
 function FolderCover({ photos, folderName }) {
   const [p1Err, setP1Err] = useState(false);
@@ -150,6 +151,8 @@ function buildPaginationItems(currentPage, totalPages) {
 export function GalleryContent({ onNavigate, variant = 'page' }) {
   const isPageVariant = variant === 'page';
   const navigate = useNavigate();
+  const { pathname } = useLocation();
+  const { registerBackCallback, unregisterBackCallback } = useNavigation();
   const {
     trustId,
     albumsById,
@@ -370,6 +373,32 @@ export function GalleryContent({ onNavigate, variant = 'page' }) {
 
   const openLightbox = (image) => { track('gallery_image_open'); setSelectedImage(image); setIsPlaying(true); };
   const closeLightbox = () => { setSelectedImage(null); setIsPlaying(false); };
+  const backToAlbums = () => {
+    setSelectedAlbumId(null);
+    setAlbumPageImages([]);
+    setAlbumTotalPages(0);
+    setCurrentPage(1);
+  };
+
+  // Back (Android button / iOS edge swipe) steps out of the lightbox, then the album,
+  // and only then leaves the Gallery page.
+  const hasOpenImage = Boolean(selectedImage);
+  const hasOpenAlbum = Boolean(selectedAlbumId);
+  useEffect(() => {
+    if (!isPageVariant || (!hasOpenImage && !hasOpenAlbum)) return undefined;
+    registerBackCallback(pathname, () => {
+      if (hasOpenImage) {
+        setSelectedImage(null);
+        setIsPlaying(false);
+        return;
+      }
+      setSelectedAlbumId(null);
+      setAlbumPageImages([]);
+      setAlbumTotalPages(0);
+      setCurrentPage(1);
+    });
+    return () => unregisterBackCallback(pathname);
+  }, [isPageVariant, hasOpenImage, hasOpenAlbum, pathname, registerBackCallback, unregisterBackCallback]);
   const goToPrevious = () => {
     const idx = filteredImages.findIndex((img) => img.id === selectedImage.id);
     setSelectedImage(filteredImages[idx === 0 ? filteredImages.length - 1 : idx - 1]);
@@ -417,12 +446,7 @@ export function GalleryContent({ onNavigate, variant = 'page' }) {
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             {selectedAlbumId && (
               <button
-                onClick={() => {
-                  setSelectedAlbumId(null);
-                  setAlbumPageImages([]);
-                  setAlbumTotalPages(0);
-                  setCurrentPage(1);
-                }}
+                onClick={backToAlbums}
                 style={{ ...nb.iconBtn, width: 34, height: 34, background: 'color-mix(in srgb, var(--surface-color) 18%, transparent)', marginRight: 2 }}
               >
                 <ArrowLeft style={{ width: 18, height: 18, color: 'var(--app-button-text, var(--surface-color))' }} />
@@ -439,7 +463,7 @@ export function GalleryContent({ onNavigate, variant = 'page' }) {
         </div>
       )}
 
-      <div style={isPageVariant ? { padding: '16px 14px 40px', maxWidth: 520, margin: '0 auto' } : { maxWidth: 520, margin: '0 auto' }}>
+      <div style={isPageVariant ? { padding: '20px 16px calc(40px + env(safe-area-inset-bottom, 0px))', maxWidth: 520, margin: '0 auto' } : { maxWidth: 520, margin: '0 auto' }}>
         {isLoading && !showLoadingFallback && !hasSettledInitialAlbums && (
           <div style={gl.folderGrid}>
             {Array.from({ length: 6 }).map((_, i) => (
@@ -469,7 +493,7 @@ export function GalleryContent({ onNavigate, variant = 'page' }) {
               </div>
             ) : (
               <>
-                <div style={{ marginBottom: 16, marginTop: 4 }}>
+                <div style={{ marginBottom: 16, marginTop: isPageVariant ? 4 : 0 }}>
                   <h2 style={{ fontSize: 20, fontWeight: 800, color: actionBg, margin: 0 }}>Albums</h2>
                   <p style={{ fontSize: 12, color: 'var(--body-text-color)', margin: '4px 0 0', fontWeight: 500 }}>{albums.length} album{albums.length !== 1 ? 's' : ''}</p>
                 </div>

@@ -31,6 +31,7 @@ import { checkPhoneNumber, verifyOTP } from './services/authService';
 import { fetchDirectoryData } from './services/directoryService';
 import { fetchTrustById } from './services/trustService';
 import { logUserSessionEvent } from './services/sessionAuditService';
+import { unregisterPushToken } from './services/pushNotificationService';
 import TermsModal from './components/TermsModal';
 import { clearLoginTermsPromptPending, isLoginTermsPromptPending, resolveLegalTrustId, setLoginTermsPromptPending } from './utils/legalContent';
 import { getAppHomePath } from './utils/tenantNavigation';
@@ -355,10 +356,11 @@ function VIPLogin({ onNavigate, onLogout }) {
       await onLogout('logout', user || pendingUser || null);
       return;
     }
+    const pushToken = await unregisterPushToken();
     await logUserSessionEvent({
       user: user || pendingUser || null,
       actionType: 'logout',
-      extra: { source: 'vip-manual-fallback' }
+      extra: { source: 'vip-manual-fallback', ...(pushToken ? { fcm_token: pushToken } : {}) }
     });
     localStorage.removeItem('isLoggedIn');
     localStorage.removeItem('user');

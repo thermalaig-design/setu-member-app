@@ -27,12 +27,10 @@
     "cors": "^2.8.5",
     "dotenv": "^16.3.1",
     "express": "^4.18.2",
-    "firebase-admin": "^13.6.0",
     "jsonwebtoken": "^9.0.2",
     "maxmind": "^5.0.7",
     "multer": "^2.0.2",
     "nodemailer": "^7.0.12",
-    "razorpay": "^2.9.8",
     "sharp": "^0.34.4"
   },
   "devDependencies": {

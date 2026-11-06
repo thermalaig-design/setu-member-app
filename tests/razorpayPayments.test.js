@@ -60,20 +60,23 @@ const database = {
     return builder;
   },
 };
-class Razorpay {
-  orders = { create: async (payload) => {
-    const order = { ...payload, id: `order_${orders.length + 1}` };
-    orders.push(order); return order;
-  } };
-  payments = {
-    fetch: async (id) => ({ id, order_id: orders.at(-1).id, amount: orders.at(-1).amount, status: 'authorized', method: 'upi' }),
-    capture: async (id, amount) => ({ id, amount, order_id: orders.at(-1).id, status: 'captured', method: 'upi' }),
-  };
-}
-globalThis.__rzpTest = { database, Razorpay, express, jwt };
+// Stands in for axios: answers the Razorpay REST paths the service calls.
+const axios = { create: () => ({
+  post: async (path, payload) => {
+    if (path === '/orders') {
+      const order = { ...payload, id: `order_${orders.length + 1}` };
+      orders.push(order); return { data: order };
+    }
+    const id = decodeURIComponent(path.split('/')[2]);
+    return { data: { id, amount: payload.amount, order_id: orders.at(-1).id, status: 'captured', method: 'upi' } };
+  },
+  get: async (path) => ({ data: { id: decodeURIComponent(path.split('/')[2]), order_id: orders.at(-1).id,
+    amount: orders.at(-1).amount, status: 'authorized', method: 'upi' } }),
+}) };
+globalThis.__rzpTest = { database, axios, express, jwt };
 const load = (source) => import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}`);
 let source = await readFile(new URL('../backend/services/razorpayRouteService.js', import.meta.url), 'utf8');
-source = source.replace("import Razorpay from 'razorpay';", 'const { Razorpay } = globalThis.__rzpTest;')
+source = source.replace("import axios from 'axios';", 'const { axios } = globalThis.__rzpTest;')
   .replace("import { paymentSupabase } from '../config/supabase.js';", 'const paymentSupabase = globalThis.__rzpTest.database;');
 const service = await load(source);
 globalThis.__rzpTest.service = service;

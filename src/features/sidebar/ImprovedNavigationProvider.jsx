@@ -21,6 +21,7 @@ import React, {
   useRef,
 } from 'react';
 import { App } from '@capacitor/app';
+import { Capacitor } from '@capacitor/core';
 import { useNavigate, useLocation } from 'react-router-dom';
 
 // ─────────────────────────────────────────────────────────────
@@ -165,72 +166,61 @@ export const NavigationProvider = ({ children }) => {
 
   const canGoBack = navigationStack.length > 1;
 
+  // ── Shared back logic (Android back button + iOS edge swipe) ──
+  const navigateRef = useRef(navigate);
+  useEffect(() => {
+    navigateRef.current = navigate;
+  }, [navigate]);
+
+  // Order: sidebar -> the page's own handler (album, lightbox, modal) -> parent route
+  // -> exit (Android only) -> history.
+  const goBack = useCallback(() => {
+    const currentPath = locationRef.current.pathname;
+    const currentStack = stackRef.current;
+    const canExit = Capacitor.getPlatform() === 'android';
+
+    // 1. Sidebar open? Close it first
+    if (globalSidebarState.isOpen && globalSidebarState.closeCallback) {
+      globalSidebarState.closeCallback();
+      return;
+    }
+
+    // 2. Custom callback for this route?
+    const callback = callbacksRef.current[currentPath];
+    if (callback && typeof callback === 'function') {
+      callback();
+      return;
+    }
+
+    // 3. Go to parent route first
+    const parentRoute = ROUTE_HIERARCHY[currentPath]?.parent;
+    if (parentRoute) {
+      navigateRef.current(parentRoute);
+      return;
+    }
+
+    // 4. At root level - exit app (iOS has no exit; do nothing there)
+    if (currentPath === '/' || currentPath === '/login' || currentPath === '/home') {
+      if (canExit) App.exitApp();
+      return;
+    }
+
+    // 5. Fallback - use stack or exit
+    if (currentStack.length > 1) {
+      navigateRef.current(-1);
+    } else if (canExit) {
+      App.exitApp();
+    }
+  }, []);
+
   // ── Android Back Button Listener ──────────────────────────
   useEffect(() => {
-    // Store navigate in a ref to avoid dependency issues
-    const navigateRef = { current: navigate };
-
-    const subscriptionPromise = App.addListener('backButton', async () => {
-      const currentPath = locationRef.current.pathname;
-      const currentStack = stackRef.current;
-
-      console.log('📱 Back button pressed!');
-      console.log('   Current Path:', currentPath);
-      console.log('   Stack:', currentStack);
-      console.log('   Callbacks available:', Object.keys(callbacksRef.current));
-      console.log('   Parent Route:', ROUTE_HIERARCHY[currentPath]?.parent);
-
-      // 1. Sidebar open? Close it first
-      if (globalSidebarState.isOpen && globalSidebarState.closeCallback) {
-        console.log('📂 Closing sidebar...');
-        globalSidebarState.closeCallback();
-        return;
-      }
-
-      // 2. Custom callback for this route?
-      const callback = callbacksRef.current[currentPath];
-      if (callback && typeof callback === 'function') {
-        console.log('✅ Executing custom callback for:', currentPath);
-        callback();
-        return;
-      }
-
-      // 3. ✅ IMPROVED: Go to parent route first
-      const parentRoute = ROUTE_HIERARCHY[currentPath]?.parent;
-      if (parentRoute) {
-        console.log('⬅️ Going to parent route:', parentRoute);
-        navigateRef.current(parentRoute);
-        return;
-      }
-
-      // 4. At root level - exit app
-      if (
-        currentPath === '/' ||
-        currentPath === '/login' ||
-        currentPath === '/home'
-      ) {
-        console.log('🚪 At root screen, exiting app...');
-        App.exitApp();
-        return;
-      }
-
-      // 5. Fallback - use stack or exit
-      if (currentStack.length > 1) {
-        console.log('⬅️ Fallback: Using navigation stack...');
-        navigateRef.current(-1);
-      } else {
-        console.log('🚪 Fallback: Exiting app...');
-        App.exitApp();
-      }
-    });
+    const subscriptionPromise = App.addListener('backButton', () => goBack());
 
     return () => {
-      subscriptionPromise.then((sub) => {
-        sub.remove();
-        console.log('🧹 Back listener cleaned up');
-      });
+      subscriptionPromise.then((sub) => sub.remove());
     };
-  }, [navigate]);
+  }, [goBack]);
 
   return (
     <NavigationContext.Provider
@@ -243,6 +233,7 @@ export const NavigationProvider = ({ children }) => {
         getCurrentRoute,
         getParentRoute,
         canGoBack,
+        goBack,
         exitApp: () => App.exitApp(),
         routeHierarchy: ROUTE_HIERARCHY,
       }}

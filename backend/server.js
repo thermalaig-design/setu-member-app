@@ -21,8 +21,6 @@ import orderHistoryRoutes from './routes/orderHistoryRoutes.js';
 import paymentRoutes, { razorpayWebhookHandler } from './routes/paymentRoutes.js';
 import locationRoutes from './routes/locationRoutes.js';
 import { initGeoIp } from './services/geoIpService.js';
-import { initFirebaseAdmin } from './config/firebaseAdmin.js';
-import { startNotificationPushWorker } from './services/notificationPushWorker.js';
 
 // ES module fix for __dirname
 const __filename = fileURLToPath(import.meta.url);
@@ -167,6 +165,4 @@ app.listen(PORT, () => {
 });
   
 
-initFirebaseAdmin();
-startNotificationPushWorker();
 initGeoIp();

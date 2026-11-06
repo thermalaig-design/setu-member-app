@@ -1,46 +1,14 @@
-﻿import React, { useState, useEffect, useRef } from 'react';
+﻿import React, { useState, useEffect } from 'react';
 import { Bell, ChevronRight, Home as HomeIcon, Menu, X, Check, Calendar, User, Stethoscope, Clock, MapPin, Building2, FileText } from 'lucide-react';
 import { getUserNotifications, markNotificationAsRead, markAllNotificationsAsRead, deleteNotification } from './services/api';
-import { supabase } from './services/supabaseClient';
 import { readNotificationCache, writeNotificationCache } from './services/notificationCache';
-import { getCurrentNotificationContext, matchesNotificationForContext } from './services/notificationAudience';
 import { tryNavigateNotificationRoute } from './services/notificationRedirectService';
 import Sidebar from './features/sidebar/Sidebar';
 import { useAppTheme } from './context/ThemeContext';
 
-const buildNotificationContentKey = (notification) => {
-  const title = String(notification?.title || '').trim().toLowerCase();
-  const message = String(notification?.message || notification?.body || '').trim().toLowerCase();
-  const type = String(notification?.click_action || notification?.type || '').trim().toLowerCase();
-  const createdAt = String(notification?.created_at || '').trim();
-  const createdAtSecond = createdAt ? createdAt.slice(0, 19) : '';
-  return `${type}|${title}|${message}|${createdAtSecond}`;
-};
-
-const dedupeNotificationsByContent = (notifications) => {
-  const seen = new Set();
-  return notifications.filter((notification) => {
-    const key = buildNotificationContentKey(notification);
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
-};
-
-const upsertNotificationById = (notifications, incomingNotification) => {
-  const nextNotifications = [...(notifications || [])];
-  const existingIndex = nextNotifications.findIndex((notification) => notification.id === incomingNotification.id);
-
-  if (existingIndex >= 0) {
-    nextNotifications[existingIndex] = {
-      ...nextNotifications[existingIndex],
-      ...incomingNotification,
-    };
-    return nextNotifications;
-  }
-
-  return dedupeNotificationsByContent([incomingNotification, ...nextNotifications]);
-};
+// The list spans every trust the member belongs to, so it has its own cache entry and never
+// overwrites the per-trust entries Home reads.
+const ALL_TRUSTS_CACHE_KEY = 'all-trusts';
 
 const Notifications = ({ onNavigate }) => {
   const theme = useAppTheme();
@@ -50,7 +18,6 @@ const Notifications = ({ onNavigate }) => {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [selectedNotification, setSelectedNotification] = useState(null);
   const [showDetailModal, setShowDetailModal] = useState(false);
-  const channelRef = useRef(null);
   const pageBg = 'var(--page-bg, var(--app-page-bg))';
   const surface = 'var(--surface-color)';
   const heading = 'var(--heading-color)';
@@ -104,24 +71,19 @@ const Notifications = ({ onNavigate }) => {
 
   // Load notifications on component mount and subscribe to realtime
   useEffect(() => {
-    const trustKey = String(localStorage.getItem('selected_trust_id') || '').trim();
+    const trustKey = ALL_TRUSTS_CACHE_KEY;
     const cachedNotifications = readNotificationCache(trustKey);
     if (cachedNotifications) {
       setNotifications(cachedNotifications.notifications || []);
       setLoading(false);
     }
 
+    // No realtime channel: nothing is published for it. The list refreshes on push arrival,
+    // push tap, app resume, trust change and whenever this screen opens.
     const syncNotifications = (options = {}) => {
       fetchNotifications(options);
-
-      if (channelRef.current) {
-        supabase.removeChannel(channelRef.current);
-        channelRef.current = null;
-      }
-      subscribeToNotifications();
     };
 
-    // âœ… NEW: Add event listeners for notification updates
     const handlePushNotificationArrived = () => {
       syncNotifications({ showLoader: false });
     };
@@ -146,72 +108,12 @@ const Notifications = ({ onNavigate }) => {
     syncNotifications({ showLoader: !cachedNotifications });
 
     return () => {
-      if (channelRef.current) {
-        supabase.removeChannel(channelRef.current);
-        channelRef.current = null;
-      }
       window.removeEventListener('pushNotificationArrived', handlePushNotificationArrived);
       window.removeEventListener('pushNotificationClicked', handlePushNotificationClicked);
       window.removeEventListener('appResumed', handleAppResumed);
       window.removeEventListener('trust-changed', handleTrustChanged);
     };
   }, []);
-
-  const subscribeToNotifications = () => {
-    const notificationContext = getCurrentNotificationContext();
-    if (!notificationContext.userId) return;
-
-    const channel = supabase
-      .channel('notifications-realtime')
-      .on(
-        'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'notification' },
-        (payload) => {
-          const newNotif = payload.new;
-          const isForMe = matchesNotificationForContext(newNotif, notificationContext);
-          if (isForMe) {
-            const trustKey = String(localStorage.getItem('selected_trust_id') || '').trim();
-            setNotifications((prev) => {
-              const next = upsertNotificationById(prev, newNotif);
-              writeNotificationCache(trustKey, next);
-              return next;
-            });
-          }
-        }
-      )
-      .on(
-        'postgres_changes',
-        { event: 'UPDATE', schema: 'public', table: 'notification' },
-        (payload) => {
-          const updatedNotif = payload.new;
-          const isForMe = matchesNotificationForContext(updatedNotif, notificationContext);
-          if (isForMe) {
-            const trustKey = String(localStorage.getItem('selected_trust_id') || '').trim();
-            setNotifications((prev) => {
-              const next = upsertNotificationById(prev, updatedNotif);
-              writeNotificationCache(trustKey, next);
-              return next;
-            });
-          }
-        }
-      )
-      .on(
-        'postgres_changes',
-        { event: 'DELETE', schema: 'public', table: 'notification' },
-        (payload) => {
-          const deletedNotif = payload.old;
-          const trustKey = String(localStorage.getItem('selected_trust_id') || '').trim();
-          setNotifications((prev) => {
-            const next = prev.filter((notification) => notification.id !== deletedNotif.id);
-            writeNotificationCache(trustKey, next);
-            return next;
-          });
-        }
-      )
-      .subscribe();
-
-    channelRef.current = channel;
-  };
 
   // Handle initial notification from sessionStorage
   useEffect(() => {
@@ -232,7 +134,7 @@ const Notifications = ({ onNavigate }) => {
   }, []);
 
   const fetchNotifications = async ({ showLoader = true } = {}) => {
-    const trustKey = String(localStorage.getItem('selected_trust_id') || '').trim();
+    const trustKey = ALL_TRUSTS_CACHE_KEY;
     const cachedNotifications = readNotificationCache(trustKey);
 
     if (cachedNotifications) {
@@ -244,7 +146,7 @@ const Notifications = ({ onNavigate }) => {
       if (showLoader) {
         setLoading(true);
       }
-      const response = await getUserNotifications();
+      const response = await getUserNotifications(null, { allTrusts: true });
       if (response.success) {
         const nextNotifications = response.data || [];
         setError('');
@@ -273,7 +175,7 @@ const Notifications = ({ onNavigate }) => {
     try {
       await markNotificationAsRead(id);
       // Update the notification locally
-      const trustKey = String(localStorage.getItem('selected_trust_id') || '').trim();
+      const trustKey = ALL_TRUSTS_CACHE_KEY;
       setNotifications((prev) => {
         const next = prev.map((notif) => (
           notif.id === id ? { ...notif, is_read: true } : notif
@@ -288,10 +190,20 @@ const Notifications = ({ onNavigate }) => {
 
   const handleNotificationClick = async (notification) => {
     try {
+      // The list spans all trusts: open the notification inside the trust it belongs to
+      // (same switch the push-tap handler does).
+      const notificationTrustId = String(notification?.trust_id || '').trim();
+      const currentTrustId = String(localStorage.getItem('selected_trust_id') || '').trim();
+      if (notificationTrustId && notificationTrustId !== currentTrustId) {
+        localStorage.setItem('selected_trust_id', notificationTrustId);
+        localStorage.setItem('last_selected_trust_id', notificationTrustId);
+        window.dispatchEvent(new CustomEvent('trust-changed', { detail: { trustId: notificationTrustId } }));
+      }
+
       // Mark as read when clicked
       if (!notification.is_read) {
         await markNotificationAsRead(notification.id);
-        const trustKey = String(localStorage.getItem('selected_trust_id') || '').trim();
+        const trustKey = ALL_TRUSTS_CACHE_KEY;
         setNotifications((prev) => {
           const next = (Array.isArray(prev) ? prev : []).map((notif) => (
             notif.id === notification.id ? { ...notif, is_read: true } : notif
@@ -346,7 +258,7 @@ const Notifications = ({ onNavigate }) => {
     e.stopPropagation();
     try {
       // Optimistically remove from UI
-      const trustKey = String(localStorage.getItem('selected_trust_id') || '').trim();
+      const trustKey = ALL_TRUSTS_CACHE_KEY;
       setNotifications((prev) => {
         const next = prev.filter((n) => n.id !== id);
         writeNotificationCache(trustKey, next);
@@ -363,9 +275,9 @@ const Notifications = ({ onNavigate }) => {
 
   const handleMarkAllAsRead = async () => {
     try {
-      await markAllNotificationsAsRead();
+      await markAllNotificationsAsRead({ allTrusts: true });
       // Update all notifications locally
-      const trustKey = String(localStorage.getItem('selected_trust_id') || '').trim();
+      const trustKey = ALL_TRUSTS_CACHE_KEY;
       setNotifications((prev) => {
         const next = prev.map((notif) => ({ ...notif, is_read: true }));
         writeNotificationCache(trustKey, next);
@@ -516,9 +428,16 @@ const Notifications = ({ onNavigate }) => {
               </p>
 
               <div className="flex items-center justify-between">
-                <span className="text-xs text-gray-400 font-medium">
-                  {new Date(notification.created_at).toLocaleDateString()} at {new Date(notification.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                </span>
+                <div className="min-w-0 flex flex-col">
+                  {notification.trust_name && (
+                    <span className="text-[11px] font-semibold truncate" style={{ color: theme.primary }}>
+                      {notification.trust_name}
+                    </span>
+                  )}
+                  <span className="text-xs text-gray-400 font-medium">
+                    {new Date(notification.created_at).toLocaleDateString()} at {new Date(notification.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  </span>
+                </div>
 
                 {!notification.is_read && (
                   <button

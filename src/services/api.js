@@ -1214,7 +1214,9 @@ export const getUserReports = async () => {
 };
 
 // Get user notifications from the new notification schema only
-export const getUserNotifications = async (trustIdOverride = null) => {
+// allTrusts: list notifications of every trust the member belongs to (Notifications screen).
+// Default stays current-trust only, which Home uses for its per-trust unread counters.
+export const getUserNotifications = async (trustIdOverride = null, { allTrusts = false } = {}) => {
   try {
     const headers = resolveAuthHeaders();
     const normalizedTrustIdOverride = normalizeTrustId(trustIdOverride);
@@ -1224,6 +1226,7 @@ export const getUserNotifications = async (trustIdOverride = null) => {
 
     const response = await api.get('/notifications', {
       headers: requestHeaders,
+      ...(allTrusts ? { params: { scope: 'all' } } : {}),
     });
 
     return { success: true, data: response?.data?.data || [] };
@@ -1247,10 +1250,11 @@ export const markNotificationAsRead = async (id) => {
 };
 
 // Mark all notifications as read through the backend using the new schema
-export const markAllNotificationsAsRead = async () => {
+export const markAllNotificationsAsRead = async ({ allTrusts = false } = {}) => {
   try {
     await api.patch('/notifications/read-all', {}, {
       headers: resolveAuthHeaders(),
+      ...(allTrusts ? { params: { scope: 'all' } } : {}),
     });
     return { success: true };
   } catch (error) {

@@ -209,6 +209,10 @@ textarea.la-control{height:auto; min-height:64px; padding:10px 14px; resize:vert
 @keyframes la-shake{25%{transform:translateX(-4px)}75%{transform:translateX(4px)}}
 @keyframes la-fade{from{opacity:0; transform:translateY(-4px)}to{opacity:1; transform:none}}
 @media (max-width:420px){ .la-card{padding:26px 20px 22px} }
+.la-card--page{padding:20px 20px 20px}
+.la-card--page .la-field{margin-bottom:14px}
+.la-card--page .la-row{margin-bottom:6px}
+@media (max-width:420px){ .la-card--page{padding:18px 16px 18px} }
 @media (prefers-reduced-motion:reduce){ .la-card *{animation:none!important; transition:none!important} }
 `;
 
@@ -944,9 +948,9 @@ const AddCommunity = ({ onNavigateBack, variant = 'page' }) => {
         </>
       )}
 
-      <div className={isHomeVariant ? 'space-y-5' : 'px-4 pt-5 pb-10 space-y-5'}>
+      <div className={isHomeVariant ? '' : 'px-4 pt-4 pb-[calc(2rem+env(safe-area-inset-bottom,0px))]'}>
         <style>{LAUNCH_FORM_CSS}</style>
-        <form className="la-card" onSubmit={handleSubmit} noValidate>
+        <form className={isHomeVariant ? 'la-card' : 'la-card la-card--page'} onSubmit={handleSubmit} noValidate>
           {isHomeVariant ? (
             <div className="la-heading">
               <span className="la-heading-icon" aria-hidden="true"><Rocket size={22} /></span>

@@ -10,10 +10,23 @@ import { getProfile, saveProfile } from './services/api';
 import { useAppTheme } from './context/ThemeContext';
 import { getNavbarThemeStyles } from './utils/themeUtils';
 
+// Field colours come from the card tokens (same pair SectionCard uses for its title), so labels,
+// typed text and placeholders stay readable on any theme, light or dark.
+const FIELD_LABEL_COLOR = 'var(--advertisement-title)';
+const FIELD_BG = 'color-mix(in srgb, var(--advertisement-title) 7%, var(--advertisement-card-bg))';
+const FIELD_BG_DISABLED = 'color-mix(in srgb, var(--advertisement-title) 3%, var(--advertisement-card-bg))';
+const FIELD_BORDER = 'color-mix(in srgb, var(--advertisement-title) 22%, transparent)';
+const FIELD_TEXT = 'var(--advertisement-title)';
+// 16px keeps iOS Safari/WKWebView from zooming the page when an input is focused.
+const FIELD_FONT_SIZE = '16px';
+
+const PHONE_LENGTH = 10;
+const toPhoneDigits = (value) => String(value || '').replace(/\D/g, '').slice(0, PHONE_LENGTH);
+
 // Classy input field — label on top, styled bordered input
-const RowField = ({ label, type = 'text', value, onChange, placeholder, disabled = false, icon: Icon }) => (
+const RowField = ({ label, type = 'text', value, onChange, placeholder, disabled = false, icon: Icon, phone = false }) => (
   <div className={`flex flex-col gap-1 ${disabled ? 'opacity-70' : ''}`}>
-    <label className="text-[11px] font-bold uppercase tracking-widest ml-0.5 flex items-center gap-1" style={{ color: 'var(--brand-navy)' }}>
+    <label className="text-[11px] font-bold uppercase tracking-widest ml-0.5 flex items-center gap-1" style={{ color: FIELD_LABEL_COLOR }}>
       {Icon && <Icon className="h-3 w-3" />}{label}
       {disabled && <span className="text-[9px] px-1.5 py-0.5 rounded-full ml-1 font-semibold" style={{ background: 'color-mix(in srgb, var(--surface-color) 78%, var(--app-accent-bg))', color: 'color-mix(in srgb, var(--body-text-color) 60%, var(--surface-color))' }}>AUTO</span>}
     </label>
@@ -21,20 +34,23 @@ const RowField = ({ label, type = 'text', value, onChange, placeholder, disabled
       className="relative rounded-2xl border-2 transition-all"
       style={{
         boxShadow: 'none',
-        borderColor: 'color-mix(in srgb, var(--brand-navy) 10%, transparent)',
-        background: disabled ? 'color-mix(in srgb, var(--surface-color) 76%, var(--app-accent-bg))' : 'var(--surface-color)'
+        borderColor: FIELD_BORDER,
+        background: disabled ? FIELD_BG_DISABLED : FIELD_BG
       }}
       onFocusCapture={e => { if (!disabled) e.currentTarget.style.borderColor = 'var(--brand-red)'; e.currentTarget.style.boxShadow = '0 0 0 3px color-mix(in srgb, var(--brand-red) 8%, transparent)'; }}
       onBlurCapture={e => { e.currentTarget.style.borderColor = ''; e.currentTarget.style.boxShadow = ''; }}
     >
       <input
-        type={type}
+        type={phone ? 'tel' : type}
+        inputMode={phone ? 'numeric' : undefined}
+        maxLength={phone ? PHONE_LENGTH : undefined}
+        autoComplete={phone ? 'tel-national' : undefined}
         value={value || ''}
-        onChange={(e) => onChange && onChange(e.target.value)}
+        onChange={(e) => onChange && onChange(phone ? toPhoneDigits(e.target.value) : e.target.value)}
         placeholder={placeholder || `Enter ${label.toLowerCase()}`}
         disabled={disabled}
-        className="w-full px-4 py-3 text-sm font-medium bg-transparent focus:outline-none placeholder:opacity-65 disabled:cursor-not-allowed rounded-2xl"
-        style={{ color: 'var(--body-text-color)' }}
+        className="w-full px-4 py-3 font-medium bg-transparent focus:outline-none placeholder:opacity-65 disabled:cursor-not-allowed rounded-2xl"
+        style={{ color: FIELD_TEXT, fontSize: FIELD_FONT_SIZE }}
       />
     </div>
   </div>
@@ -43,16 +59,16 @@ const RowField = ({ label, type = 'text', value, onChange, placeholder, disabled
 // Date field
 const RowDate = ({ label, value, onChange, icon: Icon }) => (
   <div className="flex flex-col gap-1">
-    <label className="text-[11px] font-bold uppercase tracking-widest ml-0.5 flex items-center gap-1" style={{ color: 'var(--brand-navy)' }}>
+    <label className="text-[11px] font-bold uppercase tracking-widest ml-0.5 flex items-center gap-1" style={{ color: FIELD_LABEL_COLOR }}>
       {Icon && <Icon className="h-3 w-3" />}{label}
     </label>
-    <div className="relative rounded-2xl border-2 transition-all" style={{ background: 'var(--surface-color)', borderColor: 'color-mix(in srgb, var(--brand-navy) 10%, transparent)' }} onFocusCapture={e => { e.currentTarget.style.borderColor = 'var(--brand-red)'; e.currentTarget.style.boxShadow = '0 0 0 3px color-mix(in srgb, var(--brand-red) 8%, transparent)'; }} onBlurCapture={e => { e.currentTarget.style.borderColor = ''; e.currentTarget.style.boxShadow = ''; }}>
+    <div className="relative rounded-2xl border-2 transition-all" style={{ background: FIELD_BG, borderColor: FIELD_BORDER }} onFocusCapture={e => { e.currentTarget.style.borderColor = 'var(--brand-red)'; e.currentTarget.style.boxShadow = '0 0 0 3px color-mix(in srgb, var(--brand-red) 8%, transparent)'; }} onBlurCapture={e => { e.currentTarget.style.borderColor = ''; e.currentTarget.style.boxShadow = ''; }}>
       <input
         type="date"
         value={value || ''}
         onChange={(e) => onChange(e.target.value)}
-        className="w-full px-4 py-3 text-sm font-medium bg-transparent focus:outline-none rounded-2xl"
-        style={{ color: 'var(--body-text-color)' }}
+        className="w-full px-4 py-3 font-medium bg-transparent focus:outline-none rounded-2xl"
+        style={{ color: FIELD_TEXT, fontSize: FIELD_FONT_SIZE }}
       />
     </div>
   </div>
@@ -61,15 +77,15 @@ const RowDate = ({ label, value, onChange, icon: Icon }) => (
 // Select field
 const RowSelect = ({ label, value, onChange, options, placeholder, icon: Icon }) => (
   <div className="flex flex-col gap-1">
-    <label className="text-[11px] font-bold uppercase tracking-widest ml-0.5 flex items-center gap-1" style={{ color: 'var(--brand-navy)' }}>
+    <label className="text-[11px] font-bold uppercase tracking-widest ml-0.5 flex items-center gap-1" style={{ color: FIELD_LABEL_COLOR }}>
       {Icon && <Icon className="h-3 w-3" />}{label}
     </label>
-    <div className="relative rounded-2xl border-2 transition-all" style={{ background: 'var(--surface-color)', borderColor: 'color-mix(in srgb, var(--brand-navy) 10%, transparent)' }} onFocusCapture={e => { e.currentTarget.style.borderColor = 'var(--brand-red)'; e.currentTarget.style.boxShadow = '0 0 0 3px color-mix(in srgb, var(--brand-red) 8%, transparent)'; }} onBlurCapture={e => { e.currentTarget.style.borderColor = ''; e.currentTarget.style.boxShadow = ''; }}>
+    <div className="relative rounded-2xl border-2 transition-all" style={{ background: FIELD_BG, borderColor: FIELD_BORDER }} onFocusCapture={e => { e.currentTarget.style.borderColor = 'var(--brand-red)'; e.currentTarget.style.boxShadow = '0 0 0 3px color-mix(in srgb, var(--brand-red) 8%, transparent)'; }} onBlurCapture={e => { e.currentTarget.style.borderColor = ''; e.currentTarget.style.boxShadow = ''; }}>
       <select
         value={value || ''}
         onChange={(e) => onChange(e.target.value)}
-        className="w-full px-4 py-3 text-sm font-medium bg-transparent focus:outline-none appearance-none rounded-2xl pr-8"
-        style={{ color: 'var(--body-text-color)' }}
+        className="w-full px-4 py-3 font-medium bg-transparent focus:outline-none appearance-none rounded-2xl pr-8"
+        style={{ color: FIELD_TEXT, fontSize: FIELD_FONT_SIZE }}
       >
         <option value="">{placeholder || 'Select'}</option>
         {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
@@ -596,6 +612,12 @@ const Profile = ({ onNavigate, onProfileUpdate }) => {
 
   const handleSave = async () => {
     if (!profileData.name) { setMessage({ type: 'error', text: 'Please enter your name' }); return; }
+    const phoneChecks = [
+      ['Emergency contact number', profileData.emergency_contact_number],
+      ['Spouse contact number', profileData.spouse_contact_number],
+    ];
+    const badPhone = phoneChecks.find(([, v]) => String(v || '').trim() && String(v).replace(/\D/g, '').length !== PHONE_LENGTH);
+    if (badPhone) { setMessage({ type: 'error', text: `${badPhone[0]} must be exactly ${PHONE_LENGTH} digits` }); return; }
     setSaving(true); setMessage({ type: '', text: '' });
     try {
       const response = await saveProfile(profileData, photoFile);
@@ -862,11 +884,11 @@ const Profile = ({ onNavigate, onProfileUpdate }) => {
               </SectionCard>
               <SectionCard title="Emergency" subtitle="Emergency contact details" isOpen={true}>
                 <RowField label="Contact Name" value={profileData.emergency_contact_name} onChange={set('emergency_contact_name')} placeholder="Full name" />
-                <RowField label="Contact Number" value={profileData.emergency_contact_number} onChange={set('emergency_contact_number')} placeholder="Phone number" />
+                <RowField label="Contact Number" phone value={profileData.emergency_contact_number} onChange={set('emergency_contact_number')} placeholder="10-digit phone number" />
               </SectionCard>
               <SectionCard title="Family" subtitle="Spouse and children details" isOpen={true}>
                 <RowField label="Spouse Name" value={profileData.spouse_name} onChange={set('spouse_name')} placeholder="Enter spouse name" />
-                <RowField label="Spouse Contact" value={profileData.spouse_contact_number} onChange={set('spouse_contact_number')} placeholder="Enter contact number" />
+                <RowField label="Spouse Contact" phone value={profileData.spouse_contact_number} onChange={set('spouse_contact_number')} placeholder="10-digit phone number" />
                 <RowField label="No. of Children" type="number" value={profileData.children_count} onChange={set('children_count')} placeholder="0" />
               </SectionCard>
               <SectionCard title="Social" subtitle="Social media links" isOpen={true}>
@@ -948,7 +970,7 @@ const Profile = ({ onNavigate, onProfileUpdate }) => {
                               onBlurCapture={e => { e.currentTarget.style.borderColor = ''; e.currentTarget.style.boxShadow = ''; }}>
                               <input type="text" value={member.name} onChange={e => updateMember(idx, 'name', e.target.value)}
                                 placeholder="Full name"
-                                className="w-full px-3 py-2.5 text-sm font-medium bg-transparent focus:outline-none rounded-2xl" style={{ color: 'var(--body-text-color)' }} />
+                                className="w-full px-3 py-2.5 font-medium bg-transparent focus:outline-none rounded-2xl" style={{ color: 'var(--body-text-color)', fontSize: FIELD_FONT_SIZE }} />
                             </div>
                           </div>
                           <div className="flex flex-col gap-1">
@@ -957,7 +979,7 @@ const Profile = ({ onNavigate, onProfileUpdate }) => {
                               onFocusCapture={e => { e.currentTarget.style.borderColor = 'var(--brand-red)'; e.currentTarget.style.boxShadow = '0 0 0 3px color-mix(in srgb, var(--brand-red) 8%, transparent)'; }}
                               onBlurCapture={e => { e.currentTarget.style.borderColor = ''; e.currentTarget.style.boxShadow = ''; }}>
                               <select value={member.relation} onChange={e => updateMember(idx, 'relation', e.target.value)}
-                                className="w-full px-3 py-2.5 text-sm font-medium bg-transparent focus:outline-none appearance-none rounded-2xl pr-7" style={{ color: 'var(--body-text-color)' }}>
+                                className="w-full px-3 py-2.5 font-medium bg-transparent focus:outline-none appearance-none rounded-2xl pr-7" style={{ color: 'var(--body-text-color)', fontSize: FIELD_FONT_SIZE }}>
                                 <option value="">Select</option>
                                 {['Spouse', 'Father', 'Mother', 'Son', 'Daughter', 'Brother', 'Sister', 'Grandfather', 'Grandmother', 'Uncle', 'Aunt', 'Other'].map(r => <option key={r} value={r}>{r}</option>)}
                               </select>
@@ -993,7 +1015,7 @@ const Profile = ({ onNavigate, onProfileUpdate }) => {
                               onBlurCapture={e => { e.currentTarget.style.borderColor = ''; e.currentTarget.style.boxShadow = ''; }}>
                               <input type="number" value={member.age} min="0" max="120" onChange={e => updateMember(idx, 'age', e.target.value)}
                                 placeholder="Years"
-                                className="w-full px-3 py-2.5 text-sm font-medium bg-transparent focus:outline-none rounded-2xl" style={{ color: 'var(--body-text-color)' }} />
+                                className="w-full px-3 py-2.5 font-medium bg-transparent focus:outline-none rounded-2xl" style={{ color: 'var(--body-text-color)', fontSize: FIELD_FONT_SIZE }} />
                             </div>
                           </div>
                           <div className="flex flex-col gap-1">
@@ -1002,7 +1024,7 @@ const Profile = ({ onNavigate, onProfileUpdate }) => {
                               onFocusCapture={e => { e.currentTarget.style.borderColor = 'var(--brand-red)'; }}
                               onBlurCapture={e => { e.currentTarget.style.borderColor = ''; }}>
                               <select value={member.blood_group} onChange={e => updateMember(idx, 'blood_group', e.target.value)}
-                                className="w-full px-3 py-2.5 text-sm font-medium bg-transparent focus:outline-none appearance-none rounded-2xl pr-7" style={{ color: 'var(--body-text-color)' }}>
+                                className="w-full px-3 py-2.5 font-medium bg-transparent focus:outline-none appearance-none rounded-2xl pr-7" style={{ color: 'var(--body-text-color)', fontSize: FIELD_FONT_SIZE }}>
                                 <option value="">Select</option>
                                 {['A+', 'A-', 'B+', 'B-', 'O+', 'O-', 'AB+', 'AB-'].map(bg => <option key={bg} value={bg}>{bg}</option>)}
                               </select>
@@ -1019,9 +1041,9 @@ const Profile = ({ onNavigate, onProfileUpdate }) => {
                           <div className="rounded-2xl border-2 transition-all" style={{ background: 'var(--surface-color)', borderColor: 'color-mix(in srgb, var(--brand-navy) 10%, transparent)' }}
                             onFocusCapture={e => { e.currentTarget.style.borderColor = 'var(--brand-red)'; e.currentTarget.style.boxShadow = '0 0 0 3px color-mix(in srgb, var(--brand-red) 8%, transparent)'; }}
                             onBlurCapture={e => { e.currentTarget.style.borderColor = ''; e.currentTarget.style.boxShadow = ''; }}>
-                            <input type="tel" value={member.contact_no} onChange={e => updateMember(idx, 'contact_no', e.target.value)}
+                            <input type="tel" inputMode="numeric" maxLength={PHONE_LENGTH} value={member.contact_no} onChange={e => updateMember(idx, 'contact_no', toPhoneDigits(e.target.value))}
                               placeholder="Optional"
-                              className="w-full px-3 py-2.5 text-sm font-medium bg-transparent focus:outline-none rounded-2xl" style={{ color: 'var(--body-text-color)' }} />
+                              className="w-full px-3 py-2.5 font-medium bg-transparent focus:outline-none rounded-2xl" style={{ color: 'var(--body-text-color)', fontSize: FIELD_FONT_SIZE }} />
                           </div>
                         </div>
 
@@ -1033,7 +1055,7 @@ const Profile = ({ onNavigate, onProfileUpdate }) => {
                             onBlurCapture={e => { e.currentTarget.style.borderColor = ''; e.currentTarget.style.boxShadow = ''; }}>
                             <input type="email" value={member.email} onChange={e => updateMember(idx, 'email', e.target.value)}
                               placeholder="email@example.com"
-                              className="w-full px-3 py-2.5 text-sm font-medium bg-transparent focus:outline-none rounded-2xl" style={{ color: 'var(--body-text-color)' }} />
+                              className="w-full px-3 py-2.5 font-medium bg-transparent focus:outline-none rounded-2xl" style={{ color: 'var(--body-text-color)', fontSize: FIELD_FONT_SIZE }} />
                           </div>
                         </div>
 
@@ -1045,7 +1067,7 @@ const Profile = ({ onNavigate, onProfileUpdate }) => {
                             onBlurCapture={e => { e.currentTarget.style.borderColor = ''; e.currentTarget.style.boxShadow = ''; }}>
                             <input type="text" value={member.address} onChange={e => updateMember(idx, 'address', e.target.value)}
                               placeholder="Full address"
-                              className="w-full px-3 py-2.5 text-sm font-medium bg-transparent focus:outline-none rounded-2xl" style={{ color: 'var(--body-text-color)' }} />
+                              className="w-full px-3 py-2.5 font-medium bg-transparent focus:outline-none rounded-2xl" style={{ color: 'var(--body-text-color)', fontSize: FIELD_FONT_SIZE }} />
                           </div>
                         </div>
 
