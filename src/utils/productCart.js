@@ -164,6 +164,26 @@ const rememberCartPurchaseRef = (item = {}) => {
   writeCartPurchaseRefs(trustId, refs);
 };
 
+// Purchases that became orders are no longer cart rows. Reusing their ids would
+// flip the order row back to add_to_cart and the cart refresh would hide it.
+export const forgetCartPurchaseRefs = (trustId, purchaseIds = []) => {
+  const ids = new Set((Array.isArray(purchaseIds) ? purchaseIds : []).map(normalizeText).filter(Boolean));
+  if (ids.size === 0) return;
+
+  const refs = readCartPurchaseRefs(trustId);
+  const keptRefs = Object.fromEntries(
+    Object.entries(refs).filter(([, ref]) => !ids.has(normalizeText(ref?.purchase_id || ref?.purchaseId)))
+  );
+  if (Object.keys(keptRefs).length !== Object.keys(refs).length) {
+    writeCartPurchaseRefs(trustId, keptRefs);
+  }
+
+  const items = readCartItems(trustId);
+  if (items.some((item) => ids.has(item.purchase_id))) {
+    writeScopedCartItems(trustId, items.map((item) => (ids.has(item.purchase_id) ? { ...item, purchase_id: '' } : item)));
+  }
+};
+
 const notifyCartChange = (items) => {
   if (typeof window === 'undefined') return;
 
@@ -1523,6 +1543,13 @@ const loadRemoteCartItems = async (trustId = undefined, localItems = []) => {
     const rowType = normalizeText(row?.type || row?.purchase_type || row?.purchaseType).toLowerCase();
     return rowTrustId === requestTrustId && rowType === CART_TYPE;
   });
+
+  // Heal ids remembered before an order was placed; they now point at order rows.
+  const cartPurchaseIds = new Set(cartRows.map(getPurchaseRowId).filter(Boolean));
+  const staleRefIds = Object.values(readCartPurchaseRefs(requestTrustId))
+    .map((ref) => normalizeText(ref?.purchase_id || ref?.purchaseId))
+    .filter((purchaseId) => purchaseId && !cartPurchaseIds.has(purchaseId));
+  forgetCartPurchaseRefs(requestTrustId, staleRefIds);
 
   const activeRows = pickLatestCartRowsByPrice(cartRows)
     .filter((row) => normalizeText(row?.status || row?.purchase_status || row?.purchaseStatus || row?.state).toLowerCase() === ADD_TO_CART_STATUS)

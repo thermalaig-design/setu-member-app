@@ -17,7 +17,7 @@ import { openRazorpayCheckout } from './services/paymentService';
 import { track } from './services/analytics';
 import { supabase } from './services/supabaseClient';
 import { applyOpacity } from './utils/colorUtils';
-import { clearCartItems, getCartItemPricing, getCartSummary, readCartItems, refreshCartCache, subscribeCart } from './utils/productCart';
+import { clearCartItems, forgetCartPurchaseRefs, getCartItemPricing, getCartSummary, readCartItems, refreshCartCache, subscribeCart } from './utils/productCart';
 import { getNavbarThemeStyles } from './utils/themeUtils';
 import { getAppHomePath } from './utils/tenantNavigation';
 
@@ -559,6 +559,8 @@ function CreateOrder() {
         }
 
         pendingOrderRef.current = { signature: cartSignature, purchaseIds };
+        // These rows are orders now; a later add to cart must create a fresh cart row.
+        forgetCartPurchaseRefs(trustId, purchaseIds);
         return purchaseIds;
       };
 

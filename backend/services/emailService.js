@@ -805,3 +805,29 @@ Trustee & Patron Portal
   }
 };
 
+
+/**
+ * Plain-text alert to the admin mailbox (ADMIN_ALERT_EMAIL, falling back to ADMIN_EMAIL).
+ * Never throws: callers use it from webhook handlers that must not fail because of mail.
+ */
+export const sendAdminAlertEmail = async ({ subject, text }) => {
+  const to = process.env.ADMIN_ALERT_EMAIL || process.env.ADMIN_EMAIL;
+  if (!to) {
+    console.warn('Admin alert not emailed: ADMIN_ALERT_EMAIL / ADMIN_EMAIL is not set');
+    return { sent: false, reason: 'no_recipient' };
+  }
+  if (!transporter) {
+    console.warn('Admin alert not emailed: email transport is disabled');
+    return { sent: false, reason: 'email_disabled' };
+  }
+  try {
+    await transporter.sendMail({
+      from: { name: 'Setu Payments', address: process.env.EMAIL_USER || 'no-reply@setu.local' },
+      to, subject, text,
+    });
+    return { sent: true };
+  } catch (error) {
+    console.error('Admin alert email failed:', error?.message || error);
+    return { sent: false, reason: 'send_failed' };
+  }
+};

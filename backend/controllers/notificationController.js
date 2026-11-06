@@ -1,3 +1,4 @@
+//
 import { supabase } from '../config/supabase.js';
 import { createCompatibleNotification } from '../services/notificationCompatibilityService.js';
 import { buildNotificationViewModel, mergeNotifications } from '../services/notificationSchemaMapper.js';

@@ -6,11 +6,17 @@ import {
   PaymentError,
   applyCaptured,
   applyFailed,
+  applyRefundEvent,
   applyTransferEvent,
+  createInvoiceDownloadUrl,
   createRouteOrder,
+  findPaidInvoiceForPurchase,
   getPublicKeyId,
+  markWebhookEvent,
   quoteCheckout,
   recordPendingOrder,
+  recordWebhookEvent,
+  replayPendingTransferEvents,
   settleVerifiedPayment,
   verifyCheckoutSignature,
   verifyWebhookSignature,
@@ -135,6 +141,25 @@ router.get('/order-status/:orderId', requireMemberSession, async (req, res) => {
   }
 });
 
+// Signed, short-lived link to the invoice PDF of one of the member's own purchases.
+router.get('/invoice/:purchaseId/download-url', requireMemberSession, async (req, res) => {
+  try {
+    const { purchaseId } = req.params;
+    if (!UUID_RE.test(purchaseId)) {
+      return res.status(400).json({ success: false, message: 'Invalid purchase id.' });
+    }
+    const invoice = await findPaidInvoiceForPurchase(purchaseId);
+    if (!invoice || !(await memberBelongsToSession(invoice.member_id, req.member))) {
+      return res.status(404).json({ success: false, message: 'Invoice not found.' });
+    }
+    const downloadUrl = await createInvoiceDownloadUrl(invoice.id);
+    if (!downloadUrl) return res.status(404).json({ success: false, message: 'Invoice not found.' });
+    return res.json({ success: true, url: downloadUrl });
+  } catch (error) {
+    return sendError(res, error, 'Failed to prepare invoice download.');
+  }
+});
+
 const PERMANENT_ERROR_PREFIXES = ['GATEWAY_ORDER_NOT_FOUND', 'AMOUNT_MISMATCH'];
 
 // Mounted in server.js with express.raw() BEFORE express.json(): the signature
@@ -148,6 +173,11 @@ export const razorpayWebhookHandler = async (req, res) => {
   const rawBody = Buffer.isBuffer(req.body) ? req.body : Buffer.from(String(req.body || ''));
   const signature = req.headers['x-razorpay-signature'];
   if (!verifyWebhookSignature({ rawBody, signature })) {
+    // Never log the secret or the signature itself - only enough to diagnose a secret mismatch.
+    console.warn('Razorpay webhook rejected: invalid signature', {
+      event_id: req.headers['x-razorpay-event-id'] || null,
+      has_signature: Boolean(signature), body_bytes: rawBody.length,
+    });
     return res.status(400).json({ success: false, message: 'Invalid signature.' });
   }
 
@@ -164,26 +194,51 @@ export const razorpayWebhookHandler = async (req, res) => {
     return res.status(400).json({ success: false, message: 'Missing event id.' });
   }
 
+  console.log('Razorpay webhook received', eventName, eventId);
+
   try {
+    const { duplicate } = await recordWebhookEvent({ eventId, eventName, event });
+    if (duplicate) return res.json({ success: true, duplicate: true });
+
     const payment = event?.payload?.payment?.entity;
     const transfer = event?.payload?.transfer?.entity;
+    let finalStatus = 'processed';
 
     if (eventName === 'payment.captured' || eventName === 'order.paid') {
       if (payment?.id && payment?.order_id) {
-        await applyCaptured({ payment, eventId });
+        const result = await applyCaptured({ payment, eventId });
+        // Activation errors are acknowledged but not "processed", so a redelivery re-runs them.
+        if (result?.success === false) finalStatus = 'failed';
+        await replayPendingTransferEvents([payment.id, payment.order_id]);
       }
     } else if (eventName === 'payment.failed') {
       if (payment?.order_id) await applyFailed({ payment, eventId });
+    } else if (eventName === 'refund.processed' || eventName === 'refund.failed') {
+      const refund = event?.payload?.refund?.entity;
+      if (refund?.id) {
+        await applyRefundEvent({ refund, status: eventName.slice('refund.'.length), eventId });
+      }
     } else if (eventName.startsWith('transfer.')) {
       if (transfer) {
-        await applyTransferEvent({ transfer, status: eventName.slice('transfer.'.length), eventId });
+        const eventCreatedAt = event?.created_at ? new Date(event.created_at * 1000).toISOString() : null;
+        const result = await applyTransferEvent({
+          transfer, status: eventName.slice('transfer.'.length), eventId, eventCreatedAt,
+        });
+        if (!result.matched) {
+          // Payment not recorded yet (out-of-order delivery): park it, replayed on capture.
+          console.warn('Razorpay transfer event has no matching payment row yet', eventName, eventId, transfer.source);
+          finalStatus = 'pending_match';
+        }
       }
     }
 
+    await markWebhookEvent(eventId, finalStatus);
+    console.log('Razorpay webhook processed', eventName, eventId, finalStatus);
     return res.json({ success: true });
   } catch (error) {
     const message = String(error?.message || error);
     console.error('Razorpay webhook processing failed:', eventName, eventId, message);
+    await markWebhookEvent(eventId, 'failed', message).catch(() => {});
 
     // mapDbError turns known codes into friendly PaymentErrors; match on the code too.
     const permanent = PERMANENT_ERROR_PREFIXES.some((prefix) => message.startsWith(prefix) || error?.code === prefix);
