@@ -129,7 +129,7 @@ const twa = {
   appVersionName: `1.0.${runNumber}`,
   signingKey: { path: keystorePath, alias: keyAlias },
   fallbackType: 'customtabs',
-  minSdkVersion: 21,
+  minSdkVersion: 24,
   isChromeOSOnly: false,
   isMetaQuest: false,
   splashScreenFadeOutDuration: 300,
