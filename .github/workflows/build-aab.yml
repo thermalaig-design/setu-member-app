@@ -58,7 +58,7 @@ jobs:
       - name: Install Android SDK packages
         run: |
           yes | sdkmanager --licenses > /dev/null || true
-          sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0" > /dev/null
+          sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.1.0" > /dev/null
 
       - name: Install Bubblewrap
         run: npm i -g @bubblewrap/cli
@@ -75,7 +75,10 @@ jobs:
         run: |
           mkdir -p ~/.bubblewrap
           test -x "$JAVA_HOME/bin/java" || { echo "::error::JAVA_HOME invalid: $JAVA_HOME"; exit 1; }
-          test -d "$ANDROID_HOME/build-tools/34.0.0" || { echo "::error::ANDROID_HOME missing build-tools: $ANDROID_HOME"; exit 1; }
+          test -d "$ANDROID_HOME/build-tools/36.1.0" || { echo "::error::ANDROID_HOME missing build-tools: $ANDROID_HOME"; exit 1; }
+          # Bubblewrap validatePath() needs <sdk>/tools or <sdk>/bin; runner SDK only has cmdline-tools
+          mkdir -p "$ANDROID_HOME/tools" 2>/dev/null || sudo mkdir -p "$ANDROID_HOME/tools"
+          ls "$ANDROID_HOME" "$ANDROID_HOME/build-tools"
           printf '{"jdkPath":"%s","androidSdkPath":"%s"}\n' "$JAVA_HOME" "$ANDROID_HOME" > ~/.bubblewrap/config.json
           cat ~/.bubblewrap/config.json
 
