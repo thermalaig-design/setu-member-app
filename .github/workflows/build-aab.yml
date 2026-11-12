@@ -51,6 +51,9 @@ jobs:
           java-version: 17
 
       - uses: android-actions/setup-android@v3
+        with:
+          # default 'tools platform-tools' is not found in new cmdline-tools
+          packages: ''
 
       - name: Install Android SDK packages
         run: |
@@ -71,7 +74,10 @@ jobs:
       - name: Configure Bubblewrap
         run: |
           mkdir -p ~/.bubblewrap
+          test -x "$JAVA_HOME/bin/java" || { echo "::error::JAVA_HOME invalid: $JAVA_HOME"; exit 1; }
+          test -d "$ANDROID_HOME/build-tools/34.0.0" || { echo "::error::ANDROID_HOME missing build-tools: $ANDROID_HOME"; exit 1; }
           printf '{"jdkPath":"%s","androidSdkPath":"%s"}\n' "$JAVA_HOME" "$ANDROID_HOME" > ~/.bubblewrap/config.json
+          cat ~/.bubblewrap/config.json
 
       - name: Generate TWA manifest
         env:
