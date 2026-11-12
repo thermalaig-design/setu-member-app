@@ -94,6 +94,7 @@ jobs:
           BUBBLEWRAP_KEY_PASSWORD: ${{ secrets.KEY_PASS }}
         run: |
           # stdin closed so any unexpected prompt fails fast instead of hanging
+          bubblewrap update --skipVersionUpgrade < /dev/null
           bubblewrap build --skipPwaValidation < /dev/null
           ls -l app-release-bundle.aab
 
