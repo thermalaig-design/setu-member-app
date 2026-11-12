@@ -58,10 +58,23 @@ jobs:
       - name: Install Android SDK packages
         run: |
           yes | sdkmanager --licenses > /dev/null || true
-          sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.1.0" > /dev/null
+          sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.1.0"
 
       - name: Install Bubblewrap
         run: npm i -g @bubblewrap/cli
+
+      # fetch-h2's cookie jar rejects on cookie errors (e.g. "Cookie has domain set
+      # to a public suffix"), crashing Bubblewrap on any server that sends such a
+      # cookie. Make it ignore the error. Fails the step if the pattern changed.
+      - name: Patch Bubblewrap cookie jar
+        run: |
+          files=$(find "$(npm root -g)/@bubblewrap" -path '*fetch-h2/dist/lib/cookie-jar.js')
+          [ -n "$files" ] || { echo "::error::cookie-jar.js not found"; exit 1; }
+          for f in $files; do
+            perl -0pi -e 's/(this\._jar\.setCookie\(cookie, url, \(err, cookie\) => \{\s*if \(err\)\s*return )reject\(err\);/$1resolve(undefined);/' "$f"
+            grep -q 'return resolve(undefined)' "$f" || { echo "::error::cookie patch not applied: $f"; exit 1; }
+            echo "patched $f"
+          done
 
       - name: Decode keystore
         env:
@@ -98,6 +111,7 @@ jobs:
         env:
           BUBBLEWRAP_KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASS }}
           BUBBLEWRAP_KEY_PASSWORD: ${{ secrets.KEY_PASS }}
+          GRADLE_OPTS: -Xmx3g -Dorg.gradle.daemon=false
         run: |
           # Serve converted icons locally: Bubblewrap's fetch crashes on cookies
           # from public-suffix domains (e.g. .supabase.co).
@@ -110,10 +124,30 @@ jobs:
           bubblewrap update --skipVersionUpgrade < /dev/null
           bubblewrap build --skipPwaValidation < /dev/null
           ls -l app-release-bundle.aab
+          size=$(stat -c %s app-release-bundle.aab)
+          [ "$size" -gt 1000000 ] || { echo "::error::AAB too small ($size bytes)"; exit 1; }
+          # non-fatal: print signer certificate fingerprints (public info)
+          keytool -printcert -jarfile app-release-bundle.aab | grep -E 'Owner|SHA1|SHA256' || true
 
-      - name: Remove keystore
+      - name: Cleanup (icon server, keystore)
         if: always()
-        run: rm -f "$RUNNER_TEMP/release.keystore"
+        run: |
+          pkill -f "http.server 8765" || true
+          rm -f "$RUNNER_TEMP/release.keystore"
+
+      # twa-build/ holds no keystore or passwords (twa-manifest has only path+alias).
+      - name: Upload debug files
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aab-debug-${{ inputs.job_id }}
+          path: |
+            twa-build/twa-manifest.json
+            twa-build/app/build/reports/
+            twa-build/*.log
+            twa-build/build/reports/
+          retention-days: 2
+          if-no-files-found: ignore
 
       - uses: actions/upload-artifact@v4
         with:
