@@ -2,8 +2,12 @@
 // Builds twa-build/twa-manifest.json (Bubblewrap input) from a tenant's
 // dynamic PWA manifest.
 // Usage: node scripts/make-twa-manifest.mjs <origin> <slug> <packageId> <keystorePath> <keyAlias>
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, writeFile, rm, copyFile } from 'node:fs/promises';
+import { execFileSync } from 'node:child_process';
 import path from 'node:path';
+
+// Local server (started by the workflow) that serves twa-build/assets.
+const LOCAL_ICON_BASE = 'http://127.0.0.1:8765';
 
 const fail = (msg) => {
   console.error(`::error::${msg}`);
@@ -41,17 +45,54 @@ const resolve = (src) => new URL(src, manifestUrl).toString();
 const hasSize = (icon, size) => String(icon.sizes || '').split(/\s+/).includes(size);
 const isMaskable = (icon) => String(icon.purpose || '').split(/\s+/).includes('maskable');
 
-const icon512 =
-  icons.find((i) => hasSize(i, '512x512') && !isMaskable(i)) ||
-  icons.find((i) => hasSize(i, '512x512'));
-if (!icon512?.src) {
-  fail(
-    `Manifest ${manifestUrl} has no 512x512 icon (found sizes: ${
-      icons.map((i) => i.sizes).join(', ') || 'none'
-    }).`,
-  );
-}
-const maskable = icons.find((i) => hasSize(i, '512x512') && isMaskable(i));
+const area = (i) =>
+  Math.max(0, ...String(i.sizes || '').split(/\s+/).map((z) => parseInt(z, 10) || 0));
+const pickIcon = (list) =>
+  list.find((i) => hasSize(i, '512x512')) || [...list].sort((a, b) => area(b) - area(a))[0];
+const withSrc = icons.filter((i) => i && i.src);
+const normalIcon = pickIcon(withSrc.filter((i) => !isMaskable(i))) || pickIcon(withSrc);
+if (!normalIcon) fail(`Manifest ${manifestUrl} has no usable icons.`);
+const maskableIcon = pickIcon(withSrc.filter(isMaskable));
+
+// Bubblewrap's own fetch (tough-cookie) crashes on Set-Cookie headers for
+// public-suffix domains such as .supabase.co. So download the icons here with
+// Node's fetch, convert them to a real 512x512 PNG, and let Bubblewrap read
+// them from a local server instead (started by the workflow).
+const assetsDir = path.join('twa-build', 'assets');
+await mkdir(assetsDir, { recursive: true });
+
+const toPng = (input, output) => {
+  const args = [`${input}[0]`, '-background', 'none', '-resize', '512x512', '-gravity', 'center', '-extent', '512x512', `PNG32:${output}`];
+  for (const bin of ['magick', 'convert']) {
+    try {
+      execFileSync(bin, args, { stdio: 'pipe' });
+      return;
+    } catch (e) {
+      if (e.code !== 'ENOENT') fail(`ImageMagick failed on ${input}: ${e.stderr || e.message}`);
+    }
+  }
+  fail('ImageMagick (magick/convert) not found.');
+};
+
+const fetchIcon = async (icon, outName) => {
+  const url = resolve(icon.src);
+  let buf;
+  try {
+    const res = await fetch(url);
+    if (!res.ok) fail(`Icon download failed: HTTP ${res.status} for ${url}`);
+    buf = Buffer.from(await res.arrayBuffer());
+  } catch (err) {
+    fail(`Icon download failed for ${url}: ${err.message}`);
+  }
+  const raw = path.join(assetsDir, `${outName}.src`);
+  await writeFile(raw, buf);
+  toPng(raw, path.join(assetsDir, outName));
+  await rm(raw, { force: true });
+};
+
+await fetchIcon(normalIcon, 'icon-512.png');
+if (maskableIcon) await fetchIcon(maskableIcon, 'icon-maskable-512.png');
+else await copyFile(path.join(assetsDir, 'icon-512.png'), path.join(assetsDir, 'icon-maskable-512.png'));
 
 const name = String(manifest.name || manifest.short_name || slug).trim();
 const launcherName = String(manifest.short_name || name).trim().slice(0, 30);
@@ -71,8 +112,8 @@ const twa = {
   display: 'standalone',
   orientation: 'portrait',
   startUrl,
-  iconUrl: resolve(icon512.src),
-  ...(maskable ? { maskableIconUrl: resolve(maskable.src) } : {}),
+  iconUrl: `${LOCAL_ICON_BASE}/icon-512.png`,
+  maskableIconUrl: `${LOCAL_ICON_BASE}/icon-maskable-512.png`,
   themeColor: theme,
   themeColorDark: theme,
   navigationColor: theme,
@@ -100,7 +141,6 @@ const twa = {
   retainedBundles: [],
 };
 
-await mkdir('twa-build', { recursive: true });
 const out = path.join('twa-build', 'twa-manifest.json');
 await writeFile(out, JSON.stringify(twa, null, 2) + '\n');
 console.log(`Wrote ${out} for ${packageId} (${launcherName}), versionCode ${runNumber}`);

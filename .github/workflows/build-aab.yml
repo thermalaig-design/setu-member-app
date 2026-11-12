@@ -82,6 +82,12 @@ jobs:
           printf '{"jdkPath":"%s","androidSdkPath":"%s"}\n' "$JAVA_HOME" "$ANDROID_HOME" > ~/.bubblewrap/config.json
           cat ~/.bubblewrap/config.json
 
+      - name: Ensure ImageMagick
+        run: |
+          if ! command -v magick >/dev/null && ! command -v convert >/dev/null; then
+            sudo apt-get update -qq && sudo apt-get install -y -qq imagemagick
+          fi
+
       - name: Generate TWA manifest
         env:
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
@@ -93,6 +99,13 @@ jobs:
           BUBBLEWRAP_KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASS }}
           BUBBLEWRAP_KEY_PASSWORD: ${{ secrets.KEY_PASS }}
         run: |
+          # Serve converted icons locally: Bubblewrap's fetch crashes on cookies
+          # from public-suffix domains (e.g. .supabase.co).
+          python3 -m http.server 8765 --directory assets --bind 127.0.0.1 > "$RUNNER_TEMP/icon-server.log" 2>&1 &
+          SERVER_PID=$!
+          trap 'kill $SERVER_PID 2>/dev/null || true' EXIT
+          sleep 1
+          curl -fsS -o /dev/null http://127.0.0.1:8765/icon-512.png
           # stdin closed so any unexpected prompt fails fast instead of hanging
           bubblewrap update --skipVersionUpgrade < /dev/null
           bubblewrap build --skipPwaValidation < /dev/null
