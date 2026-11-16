@@ -21,13 +21,13 @@ jobs:
           script: |
             set -e
 
-            cd /var/www/app/staging
+            cd /var/www/app/live
 
-            echo "Fetching latest develop..."
+            echo "Fetching latest live..."
             GIT_SSH_COMMAND="ssh -i ~/.ssh/id_ed25519" git fetch origin
 
-            echo "Resetting server code to origin/develop..."
-            git reset --hard origin/develop
+            echo "Resetting server code to origin/live..."
+            git reset --hard origin/live
 
             echo "Checking deployed commit..."
             git log -1 --oneline
@@ -43,7 +43,7 @@ jobs:
             npm ci
 
             echo "Restarting backend..."
-            pm2 restart app-staging --update-env || pm2 start npm --name app-staging -- start
+            pm2 restart app-live --update-env || pm2 start npm --name app-live -- start
 
             pm2 save
 
