@@ -1,5 +1,6 @@
 node_modules/
 dist/
+dist-capacitor/
 .env
 backend/.env
 
@@ -9,3 +10,9 @@ backend/node_modules/
 app_logcat.txt
 full_app_log*.txt
 setu_*.png
+
+android/setu-release.jks
+android/keystore.properties
+
+# local archive, too large for GitHub
+android.7z

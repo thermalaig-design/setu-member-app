@@ -1,3 +1,4 @@
+import { track } from './services/analytics';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Check, ChevronDown, ChevronLeft, Heart, Home as HomeIcon, ShoppingCart, Trash2, X } from 'lucide-react';
@@ -545,6 +546,7 @@ function Cart() {
   const [wishlistItems, setWishlistItems] = useState(() => readWishlistItems());
   const [isCartLoading, setIsCartLoading] = useState(true);
   const [removalPrompt, setRemovalPrompt] = useState(null);
+  const [clearPromptOpen, setClearPromptOpen] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
   const [attributeMenu, setAttributeMenu] = useState(null);
   const [variantOptionsByItemKey, setVariantOptionsByItemKey] = useState({});
@@ -679,6 +681,7 @@ function Cart() {
         attributeValues: item.attribute_values || [],
       });
       setItems(updated);
+      track('cart_quantity_update', { product_id: String(item.id), quantity: Number(nextQuantity) });
       return updated;
     } catch (cartError) {
       showToast(cartError?.message || 'Unable To Update Cart');
@@ -904,6 +907,7 @@ function Cart() {
     closeAttributeMenu();
     try {
       const updated = await removeCartProduct(item.id, item.trust_id, { item });
+      track('remove_from_cart', { product_id: String(item.id) });
       setItems(updated);
       showToast(toastLabel);
       return updated;
@@ -944,6 +948,7 @@ function Cart() {
       }
 
       setItems(result?.cartItems || []);
+      track('cart_move_to_wishlist', { product_id: String(item.id) });
       showToast(result?.alreadyInWishlist ? 'Already In Wishlist – Removed From Cart' : 'Moved To Wishlist');
     } catch (cartError) {
       showToast(cartError?.message || 'Unable To Move To Wishlist');
@@ -975,13 +980,20 @@ function Cart() {
       return;
     }
 
+    track('product_open', { product_id: productId, category_id: categoryId, source: 'cart' });
     navigate(`/categories-products/list/${encodeURIComponent(categoryId)}/detail/${encodeURIComponent(productId)}`);
   };
 
-  const handleClearCart = async () => {
+  const handleClearCart = () => {
     closeAttributeMenu();
+    setClearPromptOpen(true);
+  };
+
+  const confirmClearCart = async () => {
+    setClearPromptOpen(false);
     try {
       const updated = await clearCartItems();
+      track('cart_clear');
       setItems(updated);
     } catch (cartError) {
       showToast(cartError?.message || 'Unable To Clear Cart');
@@ -1355,6 +1367,46 @@ function Cart() {
         </div>
       ) : null}
 
+      {clearPromptOpen ? (
+        <div className="cart-modal-overlay" onClick={() => setClearPromptOpen(false)}>
+          <div
+            className="cart-modal"
+            onClick={(event) => event.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="cart-clear-modal-title"
+            aria-describedby="cart-clear-modal-copy"
+          >
+            <div className="cart-modal-accent" />
+            <button type="button" className="cart-modal-close" onClick={() => setClearPromptOpen(false)} aria-label="Close">
+              <X size={18} />
+            </button>
+            <div className="cart-modal-header">
+              <div className="cart-modal-badge">
+                <Trash2 size={18} />
+              </div>
+              <div className="cart-modal-headings">
+                <h2 id="cart-clear-modal-title" className="cart-modal-title">
+                  {titleCaseText('Clear Cart?')}
+                </h2>
+                <p id="cart-clear-modal-copy" className="cart-modal-copy">
+                  {titleCaseText('All items will be removed from your cart.')}
+                </p>
+              </div>
+            </div>
+            <div className="cart-modal-actions cart-modal-actions--pair">
+              <button type="button" className="cart-modal-btn cart-modal-btn--ghost" onClick={() => setClearPromptOpen(false)}>
+                {titleCaseText('Cancel')}
+              </button>
+              <button type="button" className="cart-modal-btn cart-modal-btn--wishlist" onClick={confirmClearCart}>
+                <Trash2 className="h-4 w-4" />
+                {titleCaseText('Clear Cart')}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       {toastMessage ? (
         <div className="cart-toast" role="status" aria-live="polite">
           {normalizeText(toastMessage).toLowerCase().includes('removed') ? (
@@ -1687,7 +1739,7 @@ function Cart() {
         .cart-qty-btn {
           border: 0;
           background:color-mix(in srgb, var(--brand-navy) 4%, ${T.surface});
-          color: ${navbarTextColor};
+          color: var(--body-text-color);
           font-size: 18px;
           font-weight: 700;
           cursor: pointer;
@@ -1705,7 +1757,7 @@ function Cart() {
           align-items: center;
           justify-content: center;
           min-width: 0;
-          color: ${navbarTextColor};
+          color: var(--body-text-color);
           font-size: 14px;
           font-weight: 700;
           letter-spacing: 0.02em;
@@ -1998,12 +2050,18 @@ function Cart() {
           pointer-events: none;
           animation: cartToastIn 0.18s ease-out;
         }
+        .cart-modal-actions--pair {
+          grid-template-columns: 1fr 1fr;
+        }
         @media (min-width: 420px) {
           .cart-modal-actions {
             grid-template-columns: 1fr 1fr;
           }
           .cart-modal-btn--ghost {
             grid-column: 1 / -1;
+          }
+          .cart-modal-actions--pair .cart-modal-btn--ghost {
+            grid-column: auto;
           }
         }
         @keyframes cartModalIn {

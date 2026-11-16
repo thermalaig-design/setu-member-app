@@ -34,7 +34,7 @@ test('URL slug wins over a different slug already recorded for this window (fres
   const sessionStorage = installWindowStub({ pathname: '/app/siahh-niahh', standalone: true });
   sessionStorage.setItem('active_app_slug', 'backup');
 
-  assert.equal(getAppHomePath(), '/app/siahh-niahh');
+  assert.equal(getAppHomePath(), '/app/siahh-niahh/');
   // Also re-claims the window for the URL's tenant, so any later in-app
   // route that drops the slug still resolves to the correct tenant.
   assert.equal(readWindowTenantSlug(), 'siahh-niahh');
@@ -49,7 +49,12 @@ test('in-app navigation to a route without the slug stays inside the same tenant
   // Simulate an in-app SPA route (e.g. Notices) that drops the slug.
   globalThis.window.location.pathname = '/notices';
 
-  assert.equal(getAppHomePath(), '/app/siahh-niahh');
+  assert.equal(getAppHomePath(), '/app/siahh-niahh/');
+});
+
+test('Home path keeps the trailing slash so it stays inside the manifest scope /app/<slug>/', () => {
+  installWindowStub({ pathname: '/app/siahh-niahh/', standalone: true });
+  assert.equal(getAppHomePath(), '/app/siahh-niahh/');
 });
 
 test('never falls back to a different tenant when this window has no recorded slug', () => {

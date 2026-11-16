@@ -1,0 +1,157 @@
+name: Build tenant AAB
+
+on:
+  workflow_dispatch:
+    inputs:
+      slug:
+        description: Tenant slug
+        required: true
+        type: string
+      package_id:
+        description: Android package id (permanent per tenant)
+        required: true
+        type: string
+      job_id:
+        description: Backend job id (used for run-name and artifact name)
+        required: true
+        type: string
+
+# Backend finds the run by this name. Do not change.
+run-name: "aab-${{ inputs.job_id }}"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      SLUG: ${{ inputs.slug }}
+      PACKAGE_ID: ${{ inputs.package_id }}
+      JOB_ID: ${{ inputs.job_id }}
+      SITE_ORIGIN: ${{ vars.SITE_ORIGIN }}
+    steps:
+      - name: Validate inputs
+        run: |
+          [[ "$SLUG" =~ ^[a-z0-9-]{1,60}$ ]] || { echo "::error::Invalid slug"; exit 1; }
+          [[ "$PACKAGE_ID" =~ ^[a-zA-Z][a-zA-Z0-9_]*(\.[a-zA-Z][a-zA-Z0-9_]*)+$ ]] || { echo "::error::Invalid package_id"; exit 1; }
+          [[ "$JOB_ID" =~ ^[A-Za-z0-9_-]{1,64}$ ]] || { echo "::error::Invalid job_id"; exit 1; }
+          [[ "$SITE_ORIGIN" =~ ^https://[^/]+$ ]] || { echo "::error::Repo variable SITE_ORIGIN must be https://<domain> (no trailing slash)"; exit 1; }
+
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: android-actions/setup-android@v3
+        with:
+          # default 'tools platform-tools' is not found in new cmdline-tools
+          packages: ''
+
+      - name: Install Android SDK packages
+        run: |
+          yes | sdkmanager --licenses > /dev/null || true
+          sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.1.0"
+
+      - name: Install Bubblewrap
+        run: npm i -g @bubblewrap/cli
+
+      # fetch-h2's cookie jar rejects on cookie errors (e.g. "Cookie has domain set
+      # to a public suffix"), crashing Bubblewrap on any server that sends such a
+      # cookie. Make it ignore the error. Fails the step if the pattern changed.
+      - name: Patch Bubblewrap cookie jar
+        run: |
+          files=$(find "$(npm root -g)/@bubblewrap" -path '*fetch-h2/dist/lib/cookie-jar.js')
+          [ -n "$files" ] || { echo "::error::cookie-jar.js not found"; exit 1; }
+          for f in $files; do
+            perl -0pi -e 's/(this\._jar\.setCookie\(cookie, url, \(err, cookie\) => \{\s*if \(err\)\s*return )reject\(err\);/$1resolve(undefined);/' "$f"
+            grep -q 'return resolve(undefined)' "$f" || { echo "::error::cookie patch not applied: $f"; exit 1; }
+            echo "patched $f"
+          done
+
+      - name: Decode keystore
+        env:
+          KEYSTORE_B64: ${{ secrets.KEYSTORE_B64 }}
+        run: |
+          [ -n "$KEYSTORE_B64" ] || { echo "::error::KEYSTORE_B64 secret missing"; exit 1; }
+          echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.keystore"
+          chmod 600 "$RUNNER_TEMP/release.keystore"
+
+      - name: Configure Bubblewrap
+        run: |
+          mkdir -p ~/.bubblewrap
+          test -x "$JAVA_HOME/bin/java" || { echo "::error::JAVA_HOME invalid: $JAVA_HOME"; exit 1; }
+          test -d "$ANDROID_HOME/build-tools/36.1.0" || { echo "::error::ANDROID_HOME missing build-tools: $ANDROID_HOME"; exit 1; }
+          # Bubblewrap validatePath() needs <sdk>/tools or <sdk>/bin; runner SDK only has cmdline-tools
+          mkdir -p "$ANDROID_HOME/tools" 2>/dev/null || sudo mkdir -p "$ANDROID_HOME/tools"
+          ls "$ANDROID_HOME" "$ANDROID_HOME/build-tools"
+          printf '{"jdkPath":"%s","androidSdkPath":"%s"}\n' "$JAVA_HOME" "$ANDROID_HOME" > ~/.bubblewrap/config.json
+          cat ~/.bubblewrap/config.json
+
+      - name: Ensure ImageMagick
+        run: |
+          if ! command -v magick >/dev/null && ! command -v convert >/dev/null; then
+            sudo apt-get update -qq && sudo apt-get install -y -qq imagemagick
+          fi
+
+      - name: Generate TWA manifest
+        env:
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+        run: node scripts/make-twa-manifest.mjs "$SITE_ORIGIN" "$SLUG" "$PACKAGE_ID" "$RUNNER_TEMP/release.keystore" "$KEY_ALIAS"
+
+      - name: Build AAB
+        working-directory: twa-build
+        env:
+          BUBBLEWRAP_KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASS }}
+          BUBBLEWRAP_KEY_PASSWORD: ${{ secrets.KEY_PASS }}
+          GRADLE_OPTS: -Xmx3g -Dorg.gradle.daemon=false
+        run: |
+          # Serve converted icons locally: Bubblewrap's fetch crashes on cookies
+          # from public-suffix domains (e.g. .supabase.co).
+          python3 -m http.server 8765 --directory assets --bind 127.0.0.1 > "$RUNNER_TEMP/icon-server.log" 2>&1 &
+          SERVER_PID=$!
+          trap 'kill $SERVER_PID 2>/dev/null || true' EXIT
+          sleep 1
+          curl -fsS -o /dev/null http://127.0.0.1:8765/icon-512.png
+          # stdin closed so any unexpected prompt fails fast instead of hanging
+          bubblewrap update --skipVersionUpgrade < /dev/null
+          bubblewrap build --skipPwaValidation < /dev/null
+          ls -l app-release-bundle.aab
+          size=$(stat -c %s app-release-bundle.aab)
+          [ "$size" -gt 1000000 ] || { echo "::error::AAB too small ($size bytes)"; exit 1; }
+          # non-fatal: print signer certificate fingerprints (public info)
+          keytool -printcert -jarfile app-release-bundle.aab | grep -E 'Owner|SHA1|SHA256' || true
+
+      - name: Cleanup (icon server, keystore)
+        if: always()
+        run: |
+          pkill -f "http.server 8765" || true
+          rm -f "$RUNNER_TEMP/release.keystore"
+
+      # twa-build/ holds no keystore or passwords (twa-manifest has only path+alias).
+      - name: Upload debug files
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aab-debug-${{ inputs.job_id }}
+          path: |
+            twa-build/twa-manifest.json
+            twa-build/app/build/reports/
+            twa-build/*.log
+            twa-build/build/reports/
+          retention-days: 2
+          if-no-files-found: ignore
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: aab-${{ inputs.job_id }}
+          path: twa-build/app-release-bundle.aab
+          retention-days: 2
+          if-no-files-found: error

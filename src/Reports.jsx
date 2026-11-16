@@ -1,3 +1,4 @@
+import { track } from './services/analytics';
 import React, { useState, useEffect, useRef } from 'react';
 import { FileText, Plus, Calendar, Download, X, Home as HomeIcon, ChevronLeft, Upload, CheckCircle, AlertCircle, Image as ImageIcon, File, Menu } from 'lucide-react';
 import Sidebar from './features/sidebar/Sidebar';
@@ -161,6 +162,7 @@ export const ReportsContent = ({ onNavigate, variant = 'page' }) => {
       const data = await uploadUserReport(reportData, uploadForm.file);
 
       if (data.success) {
+        track('report_upload');
         setSuccess('Report uploaded successfully!');
         setUploadForm({ reportName: '', reportType: '', testDate: '', file: null });
         setFilePreview(null);
@@ -470,6 +472,7 @@ export const ReportsContent = ({ onNavigate, variant = 'page' }) => {
                   </div>
                   <a
                     href={report.file_url}
+                    data-track="report_download_click"
                     target="_blank"
                     rel="noopener noreferrer"
                     className="text-white p-2.5 rounded-xl transition-all flex-shrink-0 btn-brand"

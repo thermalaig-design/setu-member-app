@@ -1,3 +1,4 @@
+import { track } from './services/analytics';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeft, Building2, ChevronRight, Star } from 'lucide-react';
 import { fetchTrustById } from './services/trustService';
@@ -59,6 +60,7 @@ export const SponsorsContent = ({ onNavigate, onBack, variant = 'page' }) => {
 
   const openSponsor = (sponsor) => {
     if (!sponsor?.id) return;
+    track('sponsor_open', { sponsor_id: String(sponsor.id) });
     setSelectedSponsorId(sponsor.id);
     setPinnedSponsor(selectedTrustId, sponsor.id);
     onNavigate('sponsor-details');

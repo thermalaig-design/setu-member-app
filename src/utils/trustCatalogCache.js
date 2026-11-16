@@ -227,6 +227,7 @@ export const enrichPayloadWithPrices = async (payload, signal) => {
 export const fetchProductCategoryTree = async (signal) => {
   const trustCandidates = getTrustCandidates();
   let lastError = '';
+  let sawEmptyCatalog = false;
 
   for (const trustId of trustCandidates) {
     let query = supabase.rpc('get_products_by_trust_id', {
@@ -262,8 +263,12 @@ export const fetchProductCategoryTree = async (signal) => {
       };
     }
 
+    sawEmptyCatalog = true;
     lastError = `No categories returned for trust ${trustId}`;
   }
 
-  throw new Error(lastError || 'No categories found for the selected trust');
+  const failure = new Error(lastError || 'No categories found for the selected trust');
+  // Empty catalog is not a failure: callers show the onboarding/sample view instead of an error.
+  if (sawEmptyCatalog) failure.code = 'EMPTY_CATALOG';
+  throw failure;
 };

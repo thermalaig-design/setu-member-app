@@ -1,3 +1,4 @@
+import { track } from './services/analytics';
 import React, { useEffect, useState } from 'react';
 import { Calendar, Home as HomeIcon, Menu, X, ChevronRight, FileText } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
@@ -244,6 +245,7 @@ export const FacilitiesContent = ({ onNavigate, variant = 'page' }) => {
   const openFacilityDetail = (facilityId) => {
     const id = String(facilityId || '').trim();
     if (!id) return;
+    track('facility_open', { facility_id: id });
     sessionStorage.setItem(FACILITIES_SCROLL_KEY, String(window.scrollY || 0));
     navigate(`/facilities/${encodeURIComponent(id)}`);
   };

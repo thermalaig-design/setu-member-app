@@ -4,6 +4,7 @@ import { User, Phone, Menu, X, Calendar, Stethoscope, Home as HomeIcon, Mail, Al
 import { getDoctorsWithSchedule } from './services/supabaseService';
 import { bookAppointment } from './services/appointmentService';
 import { createUserNotification } from './services/api';
+import { track } from './services/analytics';
 import { supabase } from './services/supabaseClient';
 import Sidebar from './features/sidebar/Sidebar';
 import { registerSidebarState, useAndroidBack } from './hooks';
@@ -961,6 +962,8 @@ export const AppointmentsContent = ({
         }
       }
 
+      track('generate_lead', { lead_type: 'appointment' });
+
       // Store booked data and show success modal
       setBookedAppointmentData({ ...pendingAppointmentData, id: appointmentId });
       setShowSuccessModal(true);
@@ -968,6 +971,7 @@ export const AppointmentsContent = ({
 
     } catch (error) {
       console.error('âŒ Error booking appointment:', error);
+      track('api_error', { screen_name: 'appointments', code: 'book_appointment_failed' });
       setError(error.message || 'Failed to book appointment. Please try again.');
     } finally {
       setSubmitting(false);
@@ -1133,6 +1137,7 @@ export const AppointmentsContent = ({
               </div>
               <input
                 type="search"
+                data-track="search_click"
                 value={searchTerm}
                 onChange={(e) => handleSearchChange(e.target.value)}
                 placeholder="e.g. fever, heart, Dr. Sharma..."
@@ -1363,6 +1368,7 @@ export const AppointmentsContent = ({
                           View Details
                         </button>
                         <button
+                          data-track="appointment_click"
                           onClick={() => handleBookDoctor(doc)}
                           className="flex-1 py-3 bg-indigo-600 text-white rounded-2xl font-semibold text-sm active:scale-[0.98] transition-all hover:bg-indigo-700"
                         >
@@ -1450,7 +1456,7 @@ export const AppointmentsContent = ({
                 <p className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Contact</p>
                 <div className="flex items-center gap-2">
                   <Phone className="w-4 h-4 text-indigo-400 flex-shrink-0" />
-                  <a href={`tel:${doc.mobile}`} className="text-sm font-semibold text-indigo-600">{doc.mobile}</a>
+                  <a href={`tel:${doc.mobile}`} data-track="call_click" className="text-sm font-semibold text-indigo-600">{doc.mobile}</a>
                 </div>
               </div>
             )}
@@ -1589,6 +1595,7 @@ export const AppointmentsContent = ({
                 â† Back
               </button>
               <button
+                data-track="appointment_click"
                 onClick={() => { handleBookDoctor(doc); }}
                 className="flex-1 py-3 bg-indigo-600 text-white rounded-2xl font-semibold text-sm active:scale-[0.98] transition-all hover:bg-indigo-700"
               >

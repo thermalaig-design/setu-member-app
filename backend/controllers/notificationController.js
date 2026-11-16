@@ -1,8 +1,9 @@
+//
 import { supabase } from '../config/supabase.js';
 import { createCompatibleNotification } from '../services/notificationCompatibilityService.js';
 import { buildNotificationViewModel, mergeNotifications } from '../services/notificationSchemaMapper.js';
 import { isNotificationRelevantForUser } from '../services/notificationAudienceMatcher.js';
-import { resolveMemberIdForUser, resolveMemberIdsForUser, resolveMemberRolesForUser } from '../services/memberIdentityResolver.js';
+import { resolveMemberIdForUser, resolveMemberIdsForUser, resolveMemberRolesForUser, resolvePersonIdForUser } from '../services/memberIdentityResolver.js';
 
 // ─── Helper: today's date in IST ───────────────────────────────────────────
 const getTodayIST = () => {
@@ -52,6 +53,29 @@ const isNotificationVisibleToContext = (notification, context) => {
   return isNotificationRelevantForUser(notification, context);
 };
 
+// ?scope=all lists/updates across every trust the member belongs to (the in-app
+// Notifications screen). Without it the old behaviour (current trust only) is kept, which
+// Home still relies on for its per-trust unread counters.
+const isAllTrustsScope = (req) => normalizeText(req.query?.scope).toLowerCase() === 'all';
+
+// 'dismissed' = deleted by the member, 'expired' = closed out by the system.
+const HIDDEN_RECIPIENT_STATUSES = new Set(['dismissed', 'expired']);
+const isHiddenRecipientStatus = (status) => HIDDEN_RECIPIENT_STATUSES.has(normalizeText(status).toLowerCase());
+
+const attachTrustNames = async (notifications = []) => {
+  const trustIds = [...new Set(notifications.map((row) => normalizeText(row?.trust_id)).filter(Boolean))];
+  if (!trustIds.length) return notifications;
+
+  const { data, error } = await supabase.from('Trust').select('id, name').in('id', trustIds);
+  if (error || !data?.length) return notifications;
+
+  const nameById = new Map(data.map((row) => [String(row.id), row.name]));
+  return notifications.map((row) => ({
+    ...row,
+    trust_name: nameById.get(normalizeText(row?.trust_id)) || null,
+  }));
+};
+
 const hasRecipientAccess = async (notificationId, context) => {
   if (!notificationId || !context?.memberIds?.length) return false;
 
@@ -68,7 +92,7 @@ const hasRecipientAccess = async (notificationId, context) => {
     return false;
   }
 
-  return Boolean(data?.id && data?.status !== 'dismissed');
+  return Boolean(data?.id && !isHiddenRecipientStatus(data?.status));
 };
 
 const canAccessNotification = async (notification, context) => {
@@ -131,54 +155,132 @@ const syncRecipientReadState = async ({ userId, membersId = null, trustId = null
   });
 };
 
+// ─── Push tokens ────────────────────────────────────────────────────────────
+// The phone's FCM token lives in member_session.metadata (no dedicated table): a login row
+// holding `fcm_token` means "this device is currently logged in". Logout removes it again.
+const FCM_META_KEYS = ['fcm_token', 'fcm_updated_at', 'fcm_platform'];
+
+const stripFcmKeys = (metadata) => {
+  const next = { ...(metadata || {}) };
+  FCM_META_KEYS.forEach((key) => delete next[key]);
+  return next;
+};
+
+// Only login rows are touched: logout/autologout rows keep their copy of the token, which
+// the sender uses to ignore a token whose logout could not clear the login row (offline).
+const clearTokenFromLoginRows = async (token, exceptRowId = null) => {
+  const { data, error } = await supabase
+    .from('member_session')
+    .select('id, metadata')
+    .eq('action_type', 'login')
+    .eq('metadata->>fcm_token', token);
+  if (error) throw error;
+
+  const rows = (data || []).filter((row) => row.id !== exceptRowId);
+  await Promise.all(rows.map((row) => supabase
+    .from('member_session')
+    .update({ metadata: stripFcmKeys(row.metadata) })
+    .eq('id', row.id)));
+  return rows.length;
+};
+
+const findLoginRowsForPerson = async ({ personId, membersIdHint, userId }) => {
+  const keys = [...new Set([personId, membersIdHint].map(normalizeText).filter(Boolean))];
+  if (keys.length) {
+    const { data, error } = await supabase
+      .from('member_session')
+      .select('id, metadata, action_at')
+      .in('members_id', keys)
+      .eq('action_type', 'login')
+      .order('action_at', { ascending: false })
+      .order('id', { ascending: false })
+      .limit(25);
+    if (error) throw error;
+    if (data?.length) return data;
+  }
+
+  // Fallback for the few session rows whose members_id is not the person id.
+  const digits = normalizeText(userId).replace(/\D/g, '');
+  if (digits.length < 10) return [];
+  const last10 = digits.slice(-10);
+  const { data, error } = await supabase
+    .from('member_session')
+    .select('id, metadata, action_at')
+    .in('mobile', [last10, `91${last10}`])
+    .eq('action_type', 'login')
+    .order('action_at', { ascending: false })
+    .order('id', { ascending: false })
+    .limit(25);
+  if (error) throw error;
+  return data || [];
+};
+
 export const registerDeviceToken = async (req, res) => {
   try {
-    const { userId, token, platform } = req.body;
+    const token = normalizeText(req.body?.token);
+    const userId = normalizeText(req.body?.userId || req.body?.user_id);
+    const membersIdHint = normalizeText(req.body?.members_id || req.body?.membersId);
+    const previousToken = normalizeText(req.body?.previousToken);
+    const platform = normalizeText(req.body?.platform).toLowerCase() || null;
 
-    if (!userId || !token) {
-      return res.status(400).json({ success: false, message: 'userId and token are required' });
+    if (!token || (!userId && !membersIdHint)) {
+      return res.status(400).json({ success: false, message: 'token and userId (or members_id) are required' });
     }
 
-    const payload = {
-      user_id: String(userId).trim(),
-      token: String(token).trim(),
-      platform: String(platform || 'android').toLowerCase(),
-      is_active: true,
-      updated_at: new Date().toISOString(),
+    const personId = await resolvePersonIdForUser(userId, membersIdHint);
+    const loginRows = await findLoginRowsForPerson({ personId, membersIdHint, userId });
+
+    // Not logged in anywhere (no login row): nothing to attach the token to.
+    if (!loginRows.length) {
+      return res.json({ success: true, registered: false, message: 'No login session found; token not stored' });
+    }
+
+    const holdsToken = (row, value) => value && normalizeText(row?.metadata?.fcm_token) === value;
+    const target =
+      loginRows.find((row) => holdsToken(row, token)) ||            // same token again: just refresh
+      loginRows.find((row) => holdsToken(row, previousToken)) ||    // token rotated on this phone
+      loginRows.find((row) => !normalizeText(row?.metadata?.fcm_token)); // newest login row without a device
+
+    if (!target) {
+      return res.json({ success: true, registered: false, message: 'No free login session for this token' });
+    }
+
+    const metadata = {
+      ...(target.metadata || {}),
+      fcm_token: token,
+      fcm_updated_at: new Date().toISOString(),
+      ...(platform ? { fcm_platform: platform } : {}),
     };
 
-    const { error } = await supabase
-      .from('notification_devices')
-      .upsert(payload, { onConflict: 'user_id,token' });
-
-    if (error) {
-      return res.status(500).json({ success: false, message: error.message });
+    const { error: updateError } = await supabase
+      .from('member_session')
+      .update({ metadata })
+      .eq('id', target.id);
+    if (updateError) {
+      return res.status(500).json({ success: false, message: updateError.message });
     }
 
-    return res.json({ success: true, message: 'Device token registered' });
-  } catch {
+    // The same phone may have been logged in as someone else before: the token now belongs here.
+    await clearTokenFromLoginRows(token, target.id);
+
+    return res.json({ success: true, registered: true, message: 'Device token registered' });
+  } catch (error) {
+    console.error('Error registering device token:', error?.message || error);
     return res.status(500).json({ success: false, message: 'Server error' });
   }
 };
 
 export const unregisterDeviceToken = async (req, res) => {
   try {
-    const { token } = req.body;
+    const token = normalizeText(req.body?.token || req.query?.token);
     if (!token) {
       return res.status(400).json({ success: false, message: 'token is required' });
     }
 
-    const { error } = await supabase
-      .from('notification_devices')
-      .update({ is_active: false, updated_at: new Date().toISOString() })
-      .eq('token', String(token).trim());
-
-    if (error) {
-      return res.status(500).json({ success: false, message: error.message });
-    }
-
+    await clearTokenFromLoginRows(token);
     return res.json({ success: true, message: 'Device token unregistered' });
-  } catch {
+  } catch (error) {
+    console.error('Error unregistering device token:', error?.message || error);
     return res.status(500).json({ success: false, message: 'Server error' });
   }
 };
@@ -248,7 +350,8 @@ export const getNotifications = async (req, res) => {
       return res.status(400).json({ success: false, message: 'User ID is required' });
     }
 
-    const context = await buildNotificationAccessContext(userId, trustId, membersId);
+    const allTrusts = isAllTrustsScope(req);
+    const context = await buildNotificationAccessContext(userId, allTrusts ? '' : trustId, membersId);
     const normalizedUserId = context.userId;
     const { memberIds } = context;
 
@@ -291,7 +394,7 @@ export const getNotifications = async (req, res) => {
         directNotifications = directRows.filter((row) => {
           const recipientStatus = recipientStatusByNotification.get(row.id);
           return (
-            recipientStatus !== 'dismissed' &&
+            !isHiddenRecipientStatus(recipientStatus) &&
             isNotExpired(row) &&
             matchesTrustScope(row, context.trustId)
           );
@@ -310,7 +413,7 @@ export const getNotifications = async (req, res) => {
 
     const relevantNotifications = (allNotificationRows || []).filter((row) => {
       if (!isNotExpired(row)) return false;
-      if (recipientStatusByNotification.get(row.id) === 'dismissed') return false;
+      if (isHiddenRecipientStatus(recipientStatusByNotification.get(row.id))) return false;
       const isRelevant = isNotificationVisibleToContext(row, context);
       return isRelevant;
     });
@@ -322,7 +425,7 @@ export const getNotifications = async (req, res) => {
         source: 'new_schema',
       }, normalizedUserId));
 
-    const uniqueNotifications = mergeNotifications(mappedNotifications);
+    const uniqueNotifications = await attachTrustNames(mergeNotifications(mappedNotifications));
 
     res.json({ success: true, data: uniqueNotifications });
   } catch (error) {
@@ -358,7 +461,9 @@ export const markAsRead = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Notification not found' });
     }
 
-    const context = await buildNotificationAccessContext(userId, trustId, membersId);
+    // A notification can belong to any of the member's trusts (the list shows all of them),
+    // so access is not limited to the trust currently selected in the app.
+    const context = await buildNotificationAccessContext(userId, '', membersId);
     if (!(await canAccessNotification(existingNotification, context))) {
       return res.status(403).json({ success: false, message: 'Unauthorized to update this notification' });
     }
@@ -366,7 +471,7 @@ export const markAsRead = async (req, res) => {
     await syncRecipientReadState({
       userId,
       membersId,
-      trustId,
+      trustId: existingNotification.trust_id || trustId,
       notificationIds: [id],
       isRead: true,
     });
@@ -381,6 +486,7 @@ export const markAsRead = async (req, res) => {
 // Mark all as read
 export const markAllAsRead = async (req, res) => {
   try {
+    const allTrusts = isAllTrustsScope(req);
     const userId = req.headers['user-id'];
     const trustId = req.headers['trust-id'];
     const membersId = req.headers['members-id'];
@@ -389,7 +495,7 @@ export const markAllAsRead = async (req, res) => {
       return res.status(400).json({ success: false, message: 'User ID is required' });
     }
 
-    const context = await buildNotificationAccessContext(userId, trustId, membersId);
+    const context = await buildNotificationAccessContext(userId, allTrusts ? '' : trustId, membersId);
     const normalizedUserId = context.userId;
     const { memberIds } = context;
 
@@ -416,7 +522,7 @@ export const markAllAsRead = async (req, res) => {
     });
     const directNotificationIdSet = new Set(
       recipientRows
-        .filter((row) => row?.status !== 'dismissed')
+        .filter((row) => !isHiddenRecipientStatus(row?.status))
         .map((row) => row.notification_id)
         .filter(Boolean)
     );
@@ -434,7 +540,7 @@ export const markAllAsRead = async (req, res) => {
       .filter((notification) => {
         if (!isNotExpired(notification)) return false;
         if (!matchesTrustScope(notification, context.trustId)) return false;
-        if (recipientStatusByNotification.get(notification.id) === 'dismissed') return false;
+        if (isHiddenRecipientStatus(recipientStatusByNotification.get(notification.id))) return false;
         return directNotificationIdSet.has(notification.id) || isNotificationRelevantForUser(notification, context);
       })
       .map((notification) => notification.id);
@@ -445,13 +551,26 @@ export const markAllAsRead = async (req, res) => {
 
     const uniqueNotificationIds = [...new Set(relevantNotificationIds)];
 
-    await syncRecipientReadState({
-      userId: normalizedUserId,
-      membersId,
-      trustId,
-      notificationIds: uniqueNotificationIds,
-      isRead: true,
+    // Recipient rows are created per trust membership, so with ?scope=all each
+    // notification is synced against its own trust.
+    const idsByTrust = new Map();
+    uniqueNotificationIds.forEach((notificationId) => {
+      const notificationTrust = allTrusts
+        ? normalizeText((allNotifications || []).find((row) => row.id === notificationId)?.trust_id) || normalizeText(trustId)
+        : normalizeText(trustId);
+      if (!idsByTrust.has(notificationTrust)) idsByTrust.set(notificationTrust, []);
+      idsByTrust.get(notificationTrust).push(notificationId);
     });
+
+    for (const [groupTrustId, groupIds] of idsByTrust) {
+      await syncRecipientReadState({
+        userId: normalizedUserId,
+        membersId,
+        trustId: groupTrustId || null,
+        notificationIds: groupIds,
+        isRead: true,
+      });
+    }
 
     res.json({ success: true, message: `Marked ${uniqueNotificationIds.length} notifications as read` });
   } catch (error) {
@@ -600,7 +719,7 @@ export const deleteNotification = async (req, res) => {
       return res.status(400).json({ success: false, message: 'User ID is required' });
     }
 
-    const context = await buildNotificationAccessContext(userId, trustId, membersId);
+    const context = await buildNotificationAccessContext(userId, '', membersId);
 
     const { data: existingNotification, error: fetchError } = await supabase
       .from('notification')
@@ -626,7 +745,7 @@ export const deleteNotification = async (req, res) => {
     await syncRecipientStatus({
       userId,
       membersId,
-      trustId,
+      trustId: existingNotification.trust_id || trustId,
       notificationIds: [id],
       status: 'dismissed',
     });

@@ -23,6 +23,7 @@ import { ReferralContent } from './Referral';
 import { AddCommunityContent } from './AddCommunity';
 import { UserPanelContent } from './components/PersistentUserPanel';
 import { OtherMembershipsContent } from './OtherMemberships';
+import { resolveAssetUrl } from './utils/assetUrl';
 import { useAppTheme } from './context/ThemeContext';
 import { useTenant } from './context/TenantContext';
 import { shouldSkipTrustReassignment } from './utils/tenantTrustSelection';
@@ -267,6 +268,14 @@ const pinBaseTrustFirst = (trusts = []) => {
   return [baseTrust, ...remaining];
 };
 
+// Fallback when the selected Trust is missing: the logged-in app's own
+// (base) Trust if the member has it, else the first active one.
+const pickFallbackTrust = (trusts = []) =>
+  trusts.find((trust) => String(trust?.id || '').trim() === BASE_TRUST_ID && trust?.is_active !== false)
+  || trusts.find((trust) => trust?.is_active !== false)
+  || trusts[0]
+  || null;
+
 const TRUST_ICON_CACHE_KEY = 'trust_icon_url_cache_v1';
 const readTrustIconUrlCache = () => {
   try {
@@ -285,21 +294,6 @@ const buildCacheBustedIconUrl = (iconUrl, versionToken) => {
   if (!versionToken) return src;
   const separator = src.includes('?') ? '&' : '?';
   return `${src}${separator}v=${encodeURIComponent(String(versionToken))}`;
-};
-
-// Resolves a possibly-local asset path against Vite's configured base
-// ('/' in dev, '/_setu-app/' in production) instead of the hardcoded site
-// root. Local icons (e.g. '/icons/quick-access/notices.svg') are only ever
-// deployed under that base, so a bare '/' path resolves against the wrong
-// host location — most visibly on white-label tenant hosts. Full remote
-// URLs (Supabase storage, CDNs, data URIs) are left untouched.
-const resolveAssetUrl = (path) => {
-  const value = String(path || '').trim();
-  if (!value) return '';
-  if (/^([a-z][a-z0-9+.-]*:)?\/\//i.test(value) || value.startsWith('data:')) return value;
-  if (!value.startsWith('/')) return value;
-  const base = String(import.meta.env.BASE_URL || '/').replace(/\/+$/, '');
-  return `${base}${value}`;
 };
 
 const resolveTrustIconToken = (trust, fallback = '1') =>
@@ -379,13 +373,24 @@ const QuickActionIcon = memo(({ src, alt }) => {
     return <HelpCircle className="h-[18px] w-[18px]" style={{ color: 'var(--body-text-color)' }} />;
   }
 
+  // The image is used as a mask so the glyph takes the theme colour; the <img>
+  // stays (invisible) only to detect load failures and give the mask its alt text.
+  const maskValue = `url("${resolvedSrc}") center / contain no-repeat`;
   return (
-    <img
-      src={resolvedSrc}
-      alt={alt}
-      className="h-[18px] w-[18px] object-contain"
-      onError={() => setFailedSrc(resolvedSrc)}
-    />
+    <span
+      role="img"
+      aria-label={alt}
+      className="relative inline-block h-[18px] w-[18px]"
+      style={{ backgroundColor: 'var(--quick-actions-icon-color)', WebkitMask: maskValue, mask: maskValue }}
+    >
+      <img
+        src={resolvedSrc}
+        alt=""
+        aria-hidden="true"
+        className="absolute inset-0 h-full w-full opacity-0"
+        onError={() => setFailedSrc(resolvedSrc)}
+      />
+    </span>
   );
 }, (prevProps, nextProps) => prevProps.src === nextProps.src && prevProps.alt === nextProps.alt);
 
@@ -777,9 +782,9 @@ const Home = ({ onNavigate, onLogout }) => {
           setStrictTrustApiState('success');
           return;
         }
-        const effectiveTrust = (selectedExists
-          ? apiTrusts.find((trust) => normalizeTrustId(trust?.id) === currentSelected)
-          : apiTrusts.find((trust) => trust?.is_active !== false) || apiTrusts[0]) || null;
+        const effectiveTrust = selectedExists
+          ? apiTrusts.find((trust) => normalizeTrustId(trust?.id) === currentSelected) || null
+          : pickFallbackTrust(apiTrusts);
 
         if (effectiveTrust?.id) {
           const effectiveTrustId = normalizeTrustId(effectiveTrust.id);
@@ -1219,12 +1224,13 @@ const Home = ({ onNavigate, onLogout }) => {
       });
 
       setTrustIconVersionById((prev) => {
-        const now = Date.now();
+        // Token comes only from the Trust row, so the icon URL stays the same
+        // (browser-cached, no flicker) until the logo actually changes.
         const next = { ...prev };
         Object.values(byId).forEach((trust) => {
           const id = normalizeTrustId(trust?.id);
           if (!id) return;
-          next[id] = `${resolveTrustIconToken(trust, '1')}-${now}`;
+          next[id] = resolveTrustIconToken(trust, '1');
         });
         return next;
       });
@@ -1287,7 +1293,7 @@ const Home = ({ onNavigate, onLogout }) => {
         });
         setTrustIconVersionById((prev) => ({
           ...prev,
-          [normalizedFreshId]: `${resolveTrustIconToken(freshTrust, '1')}-${Date.now()}`,
+          [normalizedFreshId]: resolveTrustIconToken(freshTrust, '1'),
         }));
         if (freshTrust?.icon_url) {
           setTrustIconUrlById((prev) => {
@@ -1362,9 +1368,9 @@ const Home = ({ onNavigate, onLogout }) => {
         hasLoadedMemberTrusts.current = true;
         return;
       }
-      const effectiveTrust = (selectedExists
-        ? apiTrusts.find((trust) => normalizeTrustId(trust?.id) === normalizedSelected)
-        : apiTrusts.find((trust) => trust?.is_active !== false) || apiTrusts[0]) || null;
+      const effectiveTrust = selectedExists
+        ? apiTrusts.find((trust) => normalizeTrustId(trust?.id) === normalizedSelected) || null
+        : pickFallbackTrust(apiTrusts);
 
       if (effectiveTrust?.id) {
         const effectiveTrustId = normalizeTrustId(effectiveTrust.id);
@@ -1519,6 +1525,42 @@ const Home = ({ onNavigate, onLogout }) => {
     };
   }, [selectedTrustId, trustInfo?.id]);
 
+  // "Home trust" = where the user came from: the pinned tenant on a PWA /
+  // slug route, otherwise the default trust. Derived on every render rather
+  // than stored, so it can never go stale or leak between PWA windows. The
+  // Trust List chips follow THIS trust's feature_trustlist flag, so landing on
+  // another trust whose flag is off cannot strand the user without chips.
+  const [mountTrustId] = useState(selectedTrustId);
+  const homeTrustId = normalizeTrustId(pinnedTenantTrustId)
+    || normalizeTrustId(defaultTrust?.id)
+    || normalizeTrustId(import.meta.env.VITE_DEFAULT_TRUST_ID || '')
+    || normalizeTrustId(mountTrustId);
+  const isViewingHomeTrust = !homeTrustId || homeTrustId === normalizeTrustId(selectedTrustId);
+
+  // null = not known yet; the chips stay visible until the flag says otherwise.
+  const [homeTrustListOn, setHomeTrustListOn] = useState(null);
+  useEffect(() => {
+    // On the home trust itself ff() already covers it.
+    if (!homeTrustId || isViewingHomeTrust) return undefined;
+    let cancelled = false;
+    const loadHomeFlag = async (force = false) => {
+      const result = await fetchFeatureFlags(homeTrustId, { force });
+      if (!cancelled && result.success) {
+        setHomeTrustListOn(isFeatureVisible(result.flags, 'feature_trustlist'));
+      }
+    };
+    loadHomeFlag(true);
+    const handleFocus = () => loadHomeFlag(true);
+    const handleVisibility = () => { if (document.visibilityState === 'visible') loadHomeFlag(true); };
+    window.addEventListener('focus', handleFocus);
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => {
+      cancelled = true;
+      window.removeEventListener('focus', handleFocus);
+      document.removeEventListener('visibilitychange', handleVisibility);
+    };
+  }, [homeTrustId, isViewingHomeTrust]);
+
   const handleTrustSelect = async (trustId) => {
     const normalizedId = normalizeTrustId(trustId);
     const isApiAuthoritative = hasAuthoritativeApiMemberships();
@@ -1593,7 +1635,7 @@ const Home = ({ onNavigate, onLogout }) => {
         }));
         setTrustIconVersionById((prev) => ({
           ...prev,
-          [normalizedId]: `${resolveTrustIconToken(freshTrust, '1')}-${Date.now()}`,
+          [normalizedId]: resolveTrustIconToken(freshTrust, '1'),
         }));
         if (freshTrust?.icon_url) {
           setTrustIconUrlById((prev) => {
@@ -2620,7 +2662,7 @@ const Home = ({ onNavigate, onLogout }) => {
     const shouldBlinkForUnread = trustUnreadCount > 0;
     const trustChipAnimations = [
       isAnimatingSelection ? 'trustChipMoveToFront 520ms cubic-bezier(0.22, 1, 0.36, 1)' : null,
-      shouldBlinkForUnread ? 'trustChipUnreadPulse 1.5s ease-in-out infinite' : null,
+      shouldBlinkForUnread ? 'trustChipUnreadPulse 1.6s ease-in-out infinite' : null,
     ].filter(Boolean).join(', ');
 
     return (
@@ -2632,7 +2674,7 @@ const Home = ({ onNavigate, onLogout }) => {
           if (node) trustChipRefs.current[normalizedTrustId] = node;
           else delete trustChipRefs.current[normalizedTrustId];
         }}
-        className="flex-shrink-0 w-[3rem] h-[3rem] rounded-full flex items-center justify-center overflow-visible transition-all duration-200 relative"
+        className={`flex-shrink-0 w-[3rem] h-[3rem] rounded-full flex items-center justify-center overflow-visible transition-all duration-200 relative${shouldBlinkForUnread ? ' trust-chip-unread' : ''}`}
         style={{
           border: isActive
             ? `2.5px solid ${theme.primary}`
@@ -2645,8 +2687,10 @@ const Home = ({ onNavigate, onLogout }) => {
           animation: trustChipAnimations || 'none',
           '--trust-ring-color': theme.primary,
           '--trust-ring-glow': `color-mix(in srgb, ${theme.primary} 45%, ${theme.accent || theme.secondary})`,
+          '--trust-badge-text': onPrimaryText,
         }}
         title={trust?.name || ''}
+        aria-label={shouldBlinkForUnread ? `${trust?.name || 'Trust'}: ${trustUnreadCount} new` : (trust?.name || 'Trust')}
       >
         <TrustChipIcon
           iconUrl={trust?.icon_url || trustIconUrlById[normalizedTrustId]}
@@ -2654,12 +2698,17 @@ const Home = ({ onNavigate, onLogout }) => {
           versionToken={trustIconVersionById[normalizedTrustId] || resolveTrustIconToken(trust, '')}
           state={isActive}
         />
-        
+        {shouldBlinkForUnread ? (
+          <span className="trust-chip-unread-badge" aria-hidden="true">
+            {trustUnreadCount > 9 ? '9+' : trustUnreadCount}
+          </span>
+        ) : null}
       </button>
     );
   };
 
-  const shouldShowTrustSelector = trustList.length > 0 && ff('feature_trustlist');
+  const trustListAllowed = isViewingHomeTrust ? ff('feature_trustlist') : homeTrustListOn !== false;
+  const shouldShowTrustSelector = trustList.length > 0 && trustListAllowed;
   const showTrustSelector = shouldShowTrustSelector;
   const surfaceColor = getThemeToken(theme, 'accent_bg', null)
     || theme?.accentBg
@@ -2900,13 +2949,43 @@ const Home = ({ onNavigate, onLogout }) => {
               type="button"
               onClick={() => onNavigate('user-panel')}
               aria-label="User Panel"
+              data-coach="add-products"
               className="w-10 h-10 rounded-2xl flex items-center justify-center transition-all active:scale-95"
               style={{
                 background: 'color-mix(in srgb, var(--navbar-bg) 72%, var(--surface-color))',
                 boxShadow: 'none',
               }}
             >
-              <Plus className="h-[22px] w-[22px]" style={{ color: navbarTextColor }} />
+              <svg
+                className="plus-spark-icon h-7 w-7"
+                viewBox="0 0 24 24"
+                fill="none"
+                strokeWidth="2.2"
+                strokeLinecap="round"
+                aria-hidden="true"
+                style={{ color: navbarTextColor }}
+              >
+                <path d="M5 12h14M12 5v14" stroke="currentColor" />
+                <g className="plus-spark-arms">
+                  <path pathLength="100" d="M12 12H5" />
+                  <path pathLength="100" d="M12 12h7" />
+                  <path pathLength="100" d="M12 12V5" />
+                  <path pathLength="100" d="M12 12v7" />
+                </g>
+              </svg>
+              <style>{`
+                .plus-spark-icon { overflow: visible; }
+                .plus-spark-arms { stroke: color-mix(in srgb, currentColor 30%, #ffffff); stroke-width: 2.6; filter: drop-shadow(0 0 2px currentColor) drop-shadow(0 0 4px currentColor); }
+                .plus-spark-arms path { stroke-dasharray: 100 200; stroke-dashoffset: 100; opacity: 0; animation: plus-spark-run 2.2s ease-in-out infinite; }
+                @keyframes plus-spark-run {
+                  0% { stroke-dashoffset: 100; opacity: 0; }
+                  8% { opacity: 1; }
+                  45% { stroke-dashoffset: 0; opacity: 1; }
+                  85% { stroke-dashoffset: -100; opacity: 0.8; }
+                  100% { stroke-dashoffset: -100; opacity: 0; }
+                }
+                @media (prefers-reduced-motion: reduce) { .plus-spark-arms { display: none; } }
+              `}</style>
             </button>
             {ff('feature_notifications') ? (
               <div className="relative">
@@ -3047,83 +3126,61 @@ const Home = ({ onNavigate, onLogout }) => {
         {showMemberBannerFeature && (userProfile?.name || showSelectedTrustMemberBanner) && (
           <div className="px-4 pb-3">
             <div
-              className="rounded-[22px] px-3 py-2"
+              className="member-card relative overflow-hidden rounded-xl px-2.5 py-1.5"
               style={{
-                background: showSelectedTrustMemberBanner
-                  ? 'linear-gradient(135deg, #121212 0%, #1b1b1b 55%, #2a2a2a 100%)'
-                  : `linear-gradient(135deg, ${applyOpacity(theme.accent, 0.6)}, ${theme.accentBg})`,
-                border: `1px solid ${showSelectedTrustMemberBanner ? 'rgba(212, 160, 23, 0.5)' : applyOpacity(theme.primary, 0.08)}`,
-                boxShadow: showSelectedTrustMemberBanner
-                  ? '0 14px 32px rgba(212, 160, 23, 0.18)'
-                  : 'none',
+                background: 'color-mix(in srgb, var(--navbar-text) 12%, transparent)',
+                border: '1px solid color-mix(in srgb, var(--navbar-text) 22%, transparent)',
               }}
             >
-              <div className="flex items-center gap-2 min-w-0 justify-between">
-                <div className='flex gap-2'>
+              <span className="member-card-shine" aria-hidden="true" />
+              <div className="relative flex items-center gap-2.5 min-w-0">
                 {userProfile?.profilePhotoUrl ? (
                   <img
                     src={userProfile.profilePhotoUrl}
                     alt={userProfile.name}
-                    className="w-10 h-10 rounded-full object-cover flex-shrink-0"
-                    style={{ border: `1.5px solid ${showSelectedTrustMemberBanner ? '#d4a017' : theme.primary}` }}
+                    className="member-card-avatar w-8 h-8 rounded-full object-cover flex-shrink-0"
+                    style={{ border: '2px solid color-mix(in srgb, var(--navbar-text) 70%, transparent)' }}
                   />
                 ) : (
                   <div
-                    className="w-10 h-10 rounded-full flex items-center justify-center text-[12px] font-bold flex-shrink-0"
+                    className="member-card-avatar w-8 h-8 rounded-full flex items-center justify-center text-[12px] font-bold flex-shrink-0"
                     style={{
-                      background: showSelectedTrustMemberBanner
-                        ? 'linear-gradient(135deg, #7c5a00 0%, #d4a017 100%)'
-                        : appButtonBg,
-                      color: showSelectedTrustMemberBanner ? '#fffdf5' : onPrimaryText,
-                    
+                      background: appButtonBg,
+                      color: onPrimaryText,
+                      border: '2px solid color-mix(in srgb, var(--navbar-text) 70%, transparent)',
                     }}
                   >
                     {(userProfile?.name || currentUser?.name || 'M').charAt(0).toUpperCase()}
                   </div>
                 )}
 
-                <div >
                 <div className="min-w-0 flex-1">
                   {userProfile?.name ? (
-                    <div className="flex items-center min-w-0">
-                      <p className="text-[14px] font-semibold truncate leading-snug relative top-[3px]" style={{ color: showSelectedTrustMemberBanner ? '#f8f0c5' : headingColor }}>
-                        <span className="font-extrabold">{userProfile.name}</span>
-                      </p>
-                    </div>
+                    <p className="text-[14px] font-extrabold truncate leading-tight" style={{ color: navbarTextColor }}>
+                      {userProfile.name}
+                    </p>
+                  ) : null}
+                  {showSelectedTrustMemberBanner && selectedTrustMembership?.role ? (
+                    <p
+                      className="text-[10px] font-semibold uppercase tracking-[0.08em] truncate leading-tight"
+                      style={{ color: 'color-mix(in srgb, var(--navbar-text) 75%, transparent)' }}
+                    >
+                      {selectedTrustMembership.role}
+                    </p>
                   ) : null}
                 </div>
-                <div>
-                  {showSelectedTrustMemberBanner && selectedTrustMembership?.role ? (
-                  <span
-                    className="inline-flex items-center  text-[10px] uppercase tracking-[0.1em] flex-shrink-0"
-                    style={{
-                      // background: 'linear-gradient(135deg, #5a3f00 0%, #d4a017 100%)',
-                      color: '#fff8db',
-                      // border: '1px solid rgba(255, 227, 133, 0.5)',
-                    }}
-                  >
-                    {/* <Crown className="h-3.5 w-3.5 flex-shrink-0" /> */}
-                    <span className="truncate">{selectedTrustMembership.role}</span>
-                  </span>
-                ) : null}
-                  </div>
-                </div>
-                </div>
-                <div>
+
                 {showSelectedTrustMemberBanner && selectedTrustMembership?.membership_number ? (
                   <span
-                    className="inline-flex items-center gap-1.5 rounded-full px-2 py-1 text-[10px] font-extrabold uppercase tracking-[0.12em]  flex-shrink-0"
+                    className="rounded-full px-2 py-0.5 text-[10px] font-bold tracking-[0.06em] flex-shrink-0"
                     style={{
-                      background: 'linear-gradient(135deg, #5a3f00 0%, #d4a017 100%)',
-                      color: '#fff8db',
-                      border: '1px solid rgba(255, 227, 133, 0.5)',
+                      background: 'color-mix(in srgb, var(--navbar-text) 18%, transparent)',
+                      color: navbarTextColor,
                     }}
                   >
-                    <Crown className="h-3.5 w-3.5 flex-shrink-0" />
-                    <span className="truncate">{selectedTrustMembership.membership_number}</span>
+                    {selectedTrustMembership.membership_number}
                   </span>
                 ) : null}
-                </div>
               </div>
             </div>
           </div>
@@ -3149,7 +3206,7 @@ const Home = ({ onNavigate, onLogout }) => {
             trustList: showTrustSelector && (selectedTrust || otherTrusts.length > 0) ? (
               <div key="trustList">
                 <div
-                  className="flex items-center gap-2 px-4 py-2"
+                  className="flex items-center gap-2 px-4 py-1"
                   style={{
                     animation: resolveAnimation('trustList', 'cards'),
                   }}
@@ -3161,7 +3218,7 @@ const Home = ({ onNavigate, onLogout }) => {
                   ) : null}
                   {otherTrusts.length > 0 ? (
                     <div
-                      className="flex min-w-0 flex-1 gap-2 overflow-x-auto overscroll-x-contain py-2 pl-2"
+                      className="flex min-w-0 flex-1 gap-2.5 overflow-x-auto overscroll-x-contain py-3 pl-3 pr-2"
                       style={{
                         scrollbarWidth: 'none',
                         background: 'transparent',
@@ -3188,8 +3245,18 @@ const Home = ({ onNavigate, onLogout }) => {
               >
                 <div className="flex items-stretch">
                   <div className="overflow-hidden flex-1 py-2">
-                    <div className="marquee-track flex">
-                      {[...marqueeUpdates, ...marqueeUpdates].map((msg, i) => (
+                    {/* One "set" is repeated until it is wider than the screen, then
+                        the set is doubled; translating -50% loops seamlessly even when
+                        there is only one short message. */}
+                    <div
+                      className="marquee-track flex"
+                      style={{ animationDuration: `${Math.max(20, Math.max(marqueeUpdates.length, 6) * 6)}s` }}
+                    >
+                      {(() => {
+                        const repeat = Math.max(1, Math.ceil(6 / marqueeUpdates.length));
+                        const set = Array.from({ length: repeat }, () => marqueeUpdates).flat();
+                        return [...set, ...set];
+                      })().map((msg, i) => (
                         <span key={i} className="whitespace-nowrap text-xs font-semibold px-6" style={{ color: 'var(--marquee-text)' }}>⭐ {msg}</span>
                       ))}
                     </div>
@@ -3204,22 +3271,6 @@ const Home = ({ onNavigate, onLogout }) => {
                 </div>
               ) : (
               <div className="relative px-4 mt-5 mb-3" style={{ animation: resolveAnimation('gallery', 'zoomIn') }} key="gallery">
-                <div className="pointer-events-none absolute -top-1.5 left-7 z-20 ">
-                  <span
-                    className="inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[10px] font-extrabold uppercase tracking-[0.18em] relative top-[12px]  flex-shrink-0"
-                    style={{
-                      color: onPrimaryText,
-                      background: `linear-gradient(135deg, ${applyOpacity(theme.primary, 0.94)}, ${applyOpacity(theme.secondary, 0.88)})`,
-                      border: `1px solid ${applyOpacity(theme.secondary, 0.42)}`,
-                      boxShadow: `0 10px 22px ${applyOpacity(theme.primary, 0.34)}, 0 2px 6px ${applyOpacity(theme.secondary, 0.18)}`,
-                      backdropFilter: 'blur(10px)',
-                      textShadow: '0 1px 2px rgba(0, 0, 0, 0.18)',
-                    }}
-                  >
-                    <span className="h-1.5 w-1.5 rounded-full" style={{ background: onPrimaryText }} />
-                    Gallery
-                  </span>
-                </div>
 
                 <div
                   className="rounded-3xl overflow-hidden"
@@ -3237,7 +3288,7 @@ const Home = ({ onNavigate, onLogout }) => {
                       </div>
                     </div>
                   ) : carouselImages.length > 0 ? (
-                    <ImageSlider images={carouselImages} onNavigate={onNavigate} />
+                    <ImageSlider images={carouselImages} onNavigate={onNavigate} showCounter={false} />
                   ) : (
                     <button
                       onClick={() => onNavigate('gallery')}
@@ -3335,7 +3386,7 @@ const Home = ({ onNavigate, onLogout }) => {
                   if (tileBatch.length > 0) groups.push({ type: 'tiles', items: tileBatch });
 
                   return groups.map((group, groupIndex) => {
-                    const spacingClass = groupIndex > 0 ? 'mt-4' : '';
+                    const spacingClass = groupIndex > 0 ? 'mt-7' : '';
                     if (group.type === 'content') {
                       const { action, ContentRenderer } = group;
                       const contentKey = action.route === 'products'
@@ -3610,6 +3661,39 @@ const Home = ({ onNavigate, onLogout }) => {
 
 
       <style>{`
+        .member-card {
+          animation: memberCardIn 0.45s cubic-bezier(0.22, 1, 0.36, 1) both;
+        }
+        .member-card-avatar {
+          animation: memberAvatarPop 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) 0.12s both;
+        }
+        .member-card-shine {
+          position: absolute;
+          top: 0;
+          bottom: 0;
+          left: 0;
+          width: 40%;
+          pointer-events: none;
+          background: linear-gradient(105deg, transparent 0%, color-mix(in srgb, var(--navbar-text) 28%, transparent) 50%, transparent 100%);
+          transform: translateX(-120%);
+          animation: memberCardShine 1.1s ease-out 0.5s 1 both;
+        }
+        @keyframes memberCardIn {
+          from { opacity: 0; transform: translateY(8px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes memberAvatarPop {
+          from { opacity: 0; transform: scale(0.7); }
+          to { opacity: 1; transform: scale(1); }
+        }
+        @keyframes memberCardShine {
+          from { transform: translateX(-120%); }
+          to { transform: translateX(380%); }
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .member-card, .member-card-avatar { animation: none; }
+          .member-card-shine { display: none; }
+        }
         .marquee-track {
           display: flex;
           animation: marquee-scroll 30s linear infinite;
@@ -3680,19 +3764,68 @@ const Home = ({ onNavigate, onLogout }) => {
           }
         }
 
+        /* Unread: theme colours, but strong enough to read on a dark page
+           (the ring brightens toward white at the peak). */
         @keyframes trustChipUnreadPulse {
           0%, 100% {
             border-color: var(--trust-ring-color);
             box-shadow:
-              0 0 0 0 color-mix(in srgb, var(--trust-ring-glow) 0%, transparent),
-              0 4px 12px color-mix(in srgb, var(--brand-navy) 22%, transparent);
+              0 0 0 2px color-mix(in srgb, var(--trust-ring-glow) 40%, transparent),
+              0 0 10px 2px color-mix(in srgb, var(--trust-ring-glow) 50%, transparent);
           }
           50% {
-            border-color: color-mix(in srgb, var(--trust-ring-color) 68%, var(--surface-color));
+            border-color: color-mix(in srgb, var(--trust-ring-color) 65%, #ffffff);
             box-shadow:
-              0 0 0 7px color-mix(in srgb, var(--trust-ring-glow) 28%, transparent),
-              0 8px 18px color-mix(in srgb, var(--trust-ring-glow) 32%, transparent);
+              0 0 0 3px color-mix(in srgb, var(--trust-ring-glow) 60%, transparent),
+              0 0 18px 5px color-mix(in srgb, var(--trust-ring-glow) 70%, transparent);
           }
+        }
+
+        @keyframes trustChipUnreadRipple {
+          0% { transform: scale(1); opacity: 0.85; }
+          100% { transform: scale(1.45); opacity: 0; }
+        }
+
+        @keyframes trustChipBadgePop {
+          0%, 100% { transform: scale(1); }
+          50% { transform: scale(1.18); }
+        }
+
+        .trust-chip-unread::after {
+          content: '';
+          position: absolute;
+          inset: -3px;
+          border-radius: 9999px;
+          border: 2px solid var(--trust-ring-color);
+          pointer-events: none;
+          animation: trustChipUnreadRipple 1.6s ease-out infinite;
+        }
+
+        .trust-chip-unread-badge {
+          position: absolute;
+          top: -5px;
+          right: -6px;
+          z-index: 2;
+          min-width: 18px;
+          height: 18px;
+          padding: 0 4px;
+          border-radius: 9999px;
+          background: var(--trust-ring-color);
+          color: var(--trust-badge-text, #fff);
+          font-size: 10px;
+          font-weight: 700;
+          line-height: 18px;
+          text-align: center;
+          border: 2px solid var(--app-page-bg, #1a1a1a);
+          box-shadow: 0 2px 8px color-mix(in srgb, var(--trust-ring-glow) 70%, transparent);
+          pointer-events: none;
+          animation: trustChipBadgePop 1.6s ease-in-out infinite;
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+          .trust-chip-unread,
+          .trust-chip-unread::after,
+          .trust-chip-unread-badge { animation: none !important; }
         }
 
         /* Hide scrollbar on home page content */

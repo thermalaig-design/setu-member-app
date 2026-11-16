@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
@@ -14,9 +14,10 @@ import { useAppTheme } from './context/ThemeContext';
 import { getProfile } from './services/api';
 import { resolveOrderHistoryMemberId } from './services/orderHistoryService';
 import { openRazorpayCheckout } from './services/paymentService';
+import { track } from './services/analytics';
 import { supabase } from './services/supabaseClient';
 import { applyOpacity } from './utils/colorUtils';
-import { clearCartItems, getCartItemPricing, getCartSummary, readCartItems, refreshCartCache, subscribeCart } from './utils/productCart';
+import { clearCartItems, forgetCartPurchaseRefs, getCartItemPricing, getCartSummary, readCartItems, refreshCartCache, subscribeCart } from './utils/productCart';
 import { getNavbarThemeStyles } from './utils/themeUtils';
 import { getAppHomePath } from './utils/tenantNavigation';
 
@@ -25,9 +26,9 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-
 const T = {
   page: 'var(--page-bg, var(--app-page-bg))',
   surface: 'var(--surface-color)',
-  text: 'var(--surface-color)',
-  muted: 'color-mix(in srgb, var(--surface-color) 64%, var(--surface-color))',
-  line: 'color-mix(in srgb, var(--surface-color) 12%, transparent)',
+  text: 'var(--body-text-color)',
+  muted: 'color-mix(in srgb, var(--body-text-color) 62%, var(--surface-color))',
+  line: 'color-mix(in srgb, var(--body-text-color) 12%, transparent)',
 };
 
 const normalizeText = (value) => {
@@ -278,6 +279,9 @@ function CreateOrder() {
   const [_locationStatus, setLocationStatus] = useState('');
   const [_isCapturingLocation, setIsCapturingLocation] = useState(false);
   const [showSuccessPopup, setShowSuccessPopup] = useState(false);
+  const [paymentOutcome, setPaymentOutcome] = useState('');
+  // Remembers saved pending purchases so a retry with the same cart does not create duplicates.
+  const pendingOrderRef = useRef({ signature: '', purchaseIds: [] });
 
   const trustId = normalizeText(
     checkoutTrustIdFromUrl
@@ -527,27 +531,47 @@ function CreateOrder() {
         return;
       }
 
-      const runPurchaseRequests = async (status) => {
-        const purchaseRequests = buildPurchaseRequests(items, memberId, trustId, status);
+      const cartSignature = `${trustId}:${items
+        .map((item) => `${item.key || item.id}x${getCartItemPricing(item).quantity}`)
+        .sort()
+        .join('|')}`;
+
+      const savePendingOrder = async () => {
+        if (pendingOrderRef.current.signature === cartSignature && pendingOrderRef.current.purchaseIds.length > 0) {
+          return pendingOrderRef.current.purchaseIds;
+        }
+
+        const purchaseRequests = buildPurchaseRequests(items, memberId, trustId, 'order_payment_pending');
+        const purchaseIds = [];
         for (const request of purchaseRequests) {
           const { data, error: rpcError } = await supabase.rpc('manage_purchase_by_member', request);
           if (rpcError) throw rpcError;
 
           if (data && typeof data === 'object' && !Array.isArray(data) && data.success === false) {
-            throw new Error(normalizeText(data.message) || 'Unable to save your purchase right now.');
+            throw new Error(normalizeText(data.error) || normalizeText(data.message) || 'Unable to save your purchase right now.');
           }
+
+          const purchaseId = normalizeText(data?.id);
+          if (!isUuid(purchaseId)) {
+            throw new Error('Unable to save your purchase right now.');
+          }
+          purchaseIds.push(purchaseId);
         }
+
+        pendingOrderRef.current = { signature: cartSignature, purchaseIds };
+        // These rows are orders now; a later add to cart must create a fresh cart row.
+        forgetCartPurchaseRefs(trustId, purchaseIds);
+        return purchaseIds;
       };
 
-      if (selectedTrustPaymentGateway === true) {
-        // Convert the cart rows into a pending order before Razorpay opens, so a
-        // dropped/closed checkout still leaves a traceable pending order in the DB.
-        await runPurchaseRequests('order_payment_pending');
+      // The app never marks an order paid; only the server does, after Razorpay confirms.
+      const purchaseIds = await savePendingOrder();
 
+      if (selectedTrustPaymentGateway === true) {
         try {
-          await openRazorpayCheckout({
-            amountInRupees: summary.totalAmount,
-            receipt: `order_${trustId}_${Date.now()}`,
+          const result = await openRazorpayCheckout({
+            trustId,
+            purchaseIds,
             name: trustName,
             description: `Order payment for ${trustName}`,
             prefill: {
@@ -555,17 +579,22 @@ function CreateOrder() {
               email: customerInfo.email || form.email,
               contact: customerInfo.mobile || form.mobile,
             },
-            notes: { trust_id: trustId, member_id: memberId },
+            themeColor: theme.primary,
           });
+          setPaymentOutcome(result.status);
         } catch (paymentError) {
-          setError(paymentError?.message || 'Payment was not completed. Please try again.');
+          setError(
+            paymentError?.code === 'PAYMENT_CANCELLED'
+              ? 'Payment was cancelled. Your order is saved — tap Pay to try again.'
+              : paymentError?.message || 'Payment was not completed. Please try again.'
+          );
           return;
         }
-
-        await runPurchaseRequests('order_payment_done');
       } else {
-        await runPurchaseRequests('order_payment_pending');
+        setPaymentOutcome('pending_offline');
       }
+
+      pendingOrderRef.current = { signature: '', purchaseIds: [] };
 
       try {
         await clearCartItems(trustId, { sync: false });
@@ -573,6 +602,7 @@ function CreateOrder() {
         // Ignore cart cleanup issues and continue to the success modal.
       }
 
+      track('generate_lead', { lead_type: 'order' });
       setShowSuccessPopup(true);
     } catch (err) {
       console.error('Checkout purchase save failed:', err);
@@ -616,6 +646,7 @@ function CreateOrder() {
   };
 
   const isCheckoutDataLoading = isCartLoading || isCustomerDetailsLoading || isTrustSettingsLoading;
+  const isSubmitButtonDisabled = isCheckoutDataLoading || isSubmitting;
 
   const successPopup = showSuccessPopup && typeof document !== 'undefined'
     ? createPortal(
@@ -642,7 +673,7 @@ function CreateOrder() {
                   {trustName}
                 </h2>
                 <p className="text-[11px] font-bold uppercase tracking-[0.24em]" style={{ color: theme.primary }}>
-                  Order confirmed
+                  {paymentOutcome === 'paid' || paymentOutcome === 'processing' || paymentOutcome === 'paid_needs_attention' ? 'Payment received' : 'Order confirmed'}
                 </p>
               </div>
             </div>
@@ -653,7 +684,10 @@ function CreateOrder() {
           <p className="mt-4 text-sm leading-6" style={{ color: theme.secondary }}>
             Thank You for shopping from us.
             <br />
-            {trustName} team will contact you within 24 hours.
+            {paymentOutcome === 'paid' && 'Payment received. Your order is confirmed.'}
+            {paymentOutcome === 'processing' && 'Payment received, confirming your order. It will show in Order History shortly.'}
+            {paymentOutcome === 'paid_needs_attention' && `Payment received. The ${trustName} team will activate your order shortly.`}
+            {(!paymentOutcome || paymentOutcome === 'pending_offline') && `${trustName} team will contact you within 24 hours.`}
           </p>
           <button
             type="button"
@@ -735,7 +769,7 @@ function CreateOrder() {
               <ShoppingBag className="h-7 w-7" style={{ color: '#fff' }} />
             </div>
             <div>
-              <p className="text-xl font-extrabold" style={{ color: 'var(--surface-color)' }}>
+              <p className="text-xl font-extrabold" style={{ color: T.text }}>
                 Loading your cart
               </p>
               <p className="mt-2 text-sm leading-6" style={{ color: T.muted }}>
@@ -749,7 +783,7 @@ function CreateOrder() {
               <ShoppingBag className="h-7 w-7" style={{ color: '#fff' }} />
             </div>
             <div>
-              <p className="text-xl font-extrabold" style={{ color: 'var(--surface-color)' }}>
+              <p className="text-xl font-extrabold" style={{ color: T.text }}>
                 Your cart is empty
               </p>
               <p className="mt-2 text-sm leading-6" style={{ color: T.muted }}>
@@ -761,8 +795,8 @@ function CreateOrder() {
               onClick={() => navigate('/cart')}
               className="min-h-[46px] rounded-2xl px-5 text-sm font-extrabold transition-transform active:scale-[0.99]"
               style={{
-                background: `linear-gradient(135deg, ${applyOpacity(theme.accent, 0.85)}, ${theme.accentBg})`,
-                color: '#fff',
+                background: 'var(--app-button-bg)',
+                color: 'var(--app-button-text)',
               }}
             >
               Go to cart
@@ -777,7 +811,7 @@ function CreateOrder() {
                     <p className="text-xs font-bold uppercase tracking-[0.24em]" style={{ color: theme.primary }}>
                       Customer Details
                     </p>
-                    <h2 className="mt-1 text-xl font-extrabold" style={{ color: 'var(--surface-color)' }}>
+                    <h2 className="mt-1 text-xl font-extrabold" style={{ color: T.text }}>
                       Your profile details
                     </h2>
                   </div>
@@ -816,7 +850,7 @@ function CreateOrder() {
                           <span className="block h-4 w-2/3 rounded-full animate-pulse" style={skeletonLineStyle} />
                         </div>
                       ) : (
-                        <p className="mt-0.5 truncate text-sm font-semibold" style={{ color: 'var(--surface-color)' }}>
+                        <p className="mt-0.5 truncate text-sm font-semibold" style={{ color: T.text }}>
                           {customerInfo.fullName || 'Not available'}<br/>
                           {customerInfo.mobile || 'Not available'}<br/>
                           {customerInfo.email || null}
@@ -849,7 +883,7 @@ function CreateOrder() {
                         <p className="text-xs font-bold uppercase tracking-[0.24em]" style={{ color: theme.primary }}>
                           Order summary
                         </p>
-                        <h2 className="mt-1 text-xl font-extrabold" style={{ color: 'var(--surface-color)' }}>
+                        <h2 className="mt-1 text-xl font-extrabold" style={{ color: T.text }}>
                           Review your order
                         </h2>
                       </>
@@ -893,7 +927,7 @@ function CreateOrder() {
                       >
                         <div className="flex items-start justify-between gap-3">
                           <div className="min-w-0 flex-1">
-                            <p className="truncate text-sm font-extrabold" style={{ color: 'var(--surface-color)' }}>
+                            <p className="truncate text-sm font-extrabold" style={{ color: T.text }}>
                               {item.product_name}
                             </p>
                             {item.category_name ? (
@@ -906,7 +940,7 @@ function CreateOrder() {
                             <p className="text-[11px] font-bold uppercase tracking-[0.18em]" style={{ color: theme.primary }}>
                               Qty {pricing.quantity}
                             </p>
-                            <p className="mt-1 text-sm font-extrabold" style={{ color: 'var(--surface-color)' }}>
+                            <p className="mt-1 text-sm font-extrabold" style={{ color: T.text }}>
                               {formatCurrency(pricing.totalAmount)}
                             </p>
                           </div>
@@ -967,31 +1001,31 @@ function CreateOrder() {
                     <>
                       <div className="flex items-center justify-between gap-3 py-1 text-sm" style={{ color: T.muted }}>
                         <span>Products</span>
-                        <strong style={{ color: 'var(--surface-color)' }}>{summary.distinctItems}</strong>
+                        <strong style={{ color: T.text }}>{summary.distinctItems}</strong>
                       </div>
                       <div className="flex items-center justify-between gap-3 py-1 text-sm" style={{ color: T.muted }}>
                         <span>Total quantity</span>
-                        <strong style={{ color: 'var(--surface-color)' }}>{summary.totalQuantity}</strong>
+                        <strong style={{ color: T.text }}>{summary.totalQuantity}</strong>
                       </div>
                       <div className="flex items-center justify-between gap-3 py-1 text-sm" style={{ color: T.muted }}>
                         <span>Subtotal</span>
-                        <strong style={{ color: 'var(--surface-color)' }}>{formatCurrency(summary.subtotal)}</strong>
+                        <strong style={{ color: T.text }}>{formatCurrency(summary.subtotal)}</strong>
                       </div>
                       <div className="flex items-center justify-between gap-3 py-1 text-sm" style={{ color: T.muted }}>
                         <span>Taxes</span>
-                        <strong style={{ color: 'var(--surface-color)' }}>{formatCurrency(summary.taxAmount)}</strong>
+                        <strong style={{ color: T.text }}>{formatCurrency(summary.taxAmount)}</strong>
                       </div>
                       {hasDeliveryCharge ? (
                         <div className="flex items-center justify-between gap-3 py-1 text-sm" style={{ color: T.muted }}>
                           <span>Delivery</span>
-                          <strong style={{ color: 'var(--surface-color)' }}>{formatCurrency(summary.transportAmount)}</strong>
+                          <strong style={{ color: T.text }}>{formatCurrency(summary.transportAmount)}</strong>
                         </div>
                       ) : null}
                       <div className="mt-2 flex items-center justify-between gap-3 border-t pt-3" style={{ borderColor: T.line }}>
                         <span className="text-sm font-semibold" style={{ color: T.muted }}>
                           Grand total
                         </span>
-                        <strong className="text-lg" style={{ color: 'var(--surface-color)' }}>
+                        <strong className="text-lg" style={{ color: T.text }}>
                           {formatCurrency(summary.totalAmount)}
                         </strong>
                       </div>
@@ -1011,7 +1045,7 @@ function CreateOrder() {
                   </div>
                 ) : null}
 
-                <div className="mt-5 grid gap-3">
+                <div className="mt-5 grid grid-cols-2 gap-3">
                   <button
                     type="button"
                     onClick={() => navigate('/cart')}
@@ -1027,24 +1061,20 @@ function CreateOrder() {
                   <button
                     type="submit"
                     form="create-order-form"
-                    className="min-h-[50px] rounded-2xl px-4 text-sm font-extrabold transition-transform active:scale-[0.99]"
+                    disabled={isSubmitButtonDisabled}
+                    className="min-h-[50px] rounded-2xl px-4 text-sm font-extrabold transition-all active:scale-[0.99] disabled:cursor-not-allowed disabled:active:scale-100"
                     style={{
-                      background: `linear-gradient(135deg, ${applyOpacity(theme.accent, 0.85)}, ${theme.accentBg})`,
-                      color: '#fff',
+                      background: 'var(--app-button-bg)',
+                      color: 'var(--app-button-text)',
+                      opacity: isSubmitButtonDisabled ? 0.5 : 1,
                     }}
                   >
-                    {isTrustSettingsLoading
-                      ? 'Loading trust settings...'
-                      : isCustomerDetailsLoading
-                        ? 'Loading profile...'
-                        : isSubmitting
-                          ? 'Processing...'
-                          : 'Pay now'}
+                    {isSubmitting ? 'Processing...' : selectedTrustPaymentGateway === true ? 'Pay' : 'Confirm'}
                   </button>
                 </div>
 
                 <p className="mt-3 text-center text-[11px] leading-5" style={{ color: T.muted }}>
-                  By tapping Pay now, you confirm the order details above.
+                  By tapping {selectedTrustPaymentGateway === true ? 'Pay' : 'Confirm'}, you confirm the order details above.
                 </p>
               </div>
             </aside>

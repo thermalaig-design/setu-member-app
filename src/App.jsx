@@ -1,8 +1,10 @@
 import React, { useState, useEffect, useRef, useLayoutEffect } from 'react';
-import { Routes, Route, useNavigate, useLocation, useParams, Navigate } from 'react-router-dom';
+import { Routes, Route, useNavigate, useLocation, useParams, Navigate, matchPath } from 'react-router-dom';
 import { LocalNotifications } from '@capacitor/local-notifications';
 import { ThemeContext } from './context/ThemeContext';
 import { GalleryProvider } from './context/GalleryContext';
+import ConnectionLostPage from './components/ConnectionLostPage';
+import { isConnectionFailed, subscribeConnectionStatus } from './utils/connectionStatus';
 import Login from './Login';
 import VIPLogin from './VIPLogin';
 import Home from './Home';
@@ -30,6 +32,7 @@ import Wishlist from './Wishlist';
 import Cart from './Cart';
 import CreateOrder from './CreateOrder';
 import OrderHistory from './OrderHistory';
+import OrderDetails from './OrderDetails';
 import ExecutiveBody from './ExecutiveBody';
 import Notifications from './Notifications';
 import HealthcareTrusteeDirectory from './HealthcareTrusteeDirectory';
@@ -47,19 +50,21 @@ import PrivacyPolicy from './PrivacyPolicy';
 import Gallery from './Gallery';
 import OtherMemberships from './OtherMemberships';
 import AdminUserProfiles from './admin/AdminUserProfiles';
+import AdminPayments from './admin/AdminPayments';
 import ContactUs from './ContactUs';
 import MyFamily from './MyFamily';
 import NominationDetails from './NominationDetails';
 import AddCommunity from './AddCommunity';
 import TrustIdCard from './TrustIdCard';
 import AppVersionUpdatePrompt from './components/AppVersionUpdatePrompt';
+import PageTrackingListener from './components/PageTrackingListener';
 import TenantLanding from './TenantLanding';
 import { useTenant, getTenantSlugFromPath } from './context/TenantContext';
 import { getCurrentNotificationContext, matchesNotificationForContext } from './services/notificationAudience';
-import { initPushNotifications } from './services/pushNotificationService';
 import { createUserNotification } from './services/api';
 import { syncTrustVersion } from './services/trustVersionService';
 import { logUserSessionEvent } from './services/sessionAuditService';
+import { initPushNotifications, unregisterPushToken } from './services/pushNotificationService';
 import { applyThemeCssVariables, scopeCustomCss } from './utils/themeUtils';
 import { clearLoginTermsPromptPending } from './utils/legalContent';
 import { colorToHex } from './utils/colorUtils';
@@ -78,6 +83,36 @@ import {
   useTheme,
   useInAppUpdate
 } from './hooks';
+
+
+import { trackScreen } from './services/analytics';
+
+// Dynamic IDs (event/order/product/tenant slug etc.) screen name mein na jayein
+const TRACKED_ROUTE_PATTERNS = [
+  '/notices/:noticeId',
+  '/facilities/:facilityId',
+  '/events/:eventId',
+  '/achievements/:achievementId',
+  '/categories-products/list/:categoryId/detail/:productId',
+  '/categories-products/list/:categoryId',
+  '/order-history/:orderId',
+  '/app/:appSlug/*',
+  '/app/:appSlug',
+];
+
+const getScreenName = (pathname) => {
+  const matched = TRACKED_ROUTE_PATTERNS.find((pattern) => matchPath(pattern, pathname));
+  const name = (matched || pathname).replace(/^\/+/, '').replace(/\/\*$/, '').replace(/:/g, '');
+  return name || 'home';
+};
+
+const RouteTracker = () => {
+  const { pathname } = useLocation();
+  useEffect(() => {
+    trackScreen(getScreenName(pathname));
+  }, [pathname]);
+  return null;
+};
 
 const LAST_THEME_CACHE_KEY = 'last_theme_cache_v3';
 const LEGACY_LAST_THEME_CACHE_KEYS = ['last_theme_cache_v2', 'last_theme_cache_v1'];
@@ -388,10 +423,9 @@ const HospitalTrusteeApp = () => {
     ? defaultThemeTrust.id
     : (activeTrustId || defaultThemeTrust.id);
   const { theme: appTheme, refreshTheme } = useTheme(resolvedThemeTrustId);
+  const [connectionLost, setConnectionLost] = useState(isConnectionFailed());
+  useEffect(() => subscribeConnectionStatus(setConnectionLost), []);
   const notificationLightColorRef = useRef('');
-  const pushInitCleanupRef = useRef(null);
-  const pushInitAttemptedRef = useRef(false);
-  const lastLoggedInStateRef = useRef(false);
 
   useLayoutEffect(() => {
     if (!resolvedThemeTrustId) return;
@@ -418,44 +452,6 @@ const HospitalTrusteeApp = () => {
   useAndroidKeyboard();
   useInAppUpdate();
 
-  useEffect(() => {
-    const isLoggedIn = localStorage.getItem('isLoggedIn') === 'true';
-    const wasLoggedIn = lastLoggedInStateRef.current;
-    lastLoggedInStateRef.current = isLoggedIn;
-
-    if (!isLoggedIn) {
-      if (wasLoggedIn && typeof pushInitCleanupRef.current === 'function') {
-        pushInitCleanupRef.current();
-        pushInitCleanupRef.current = null;
-      }
-      pushInitAttemptedRef.current = false;
-      return undefined;
-    }
-
-    if (pushInitAttemptedRef.current) return undefined;
-
-    pushInitAttemptedRef.current = true;
-    const setupPushNotifications = async () => {
-      try {
-        const cleanup = await initPushNotifications();
-        if (typeof cleanup === 'function') {
-          pushInitCleanupRef.current = cleanup;
-        }
-      } catch (error) {
-        console.warn('Push notification init skipped:', error?.message || error);
-      }
-    };
-
-    setupPushNotifications();
-  }, [location.pathname]);
-
-  useEffect(() => () => {
-    if (typeof pushInitCleanupRef.current === 'function') {
-      pushInitCleanupRef.current();
-      pushInitCleanupRef.current = null;
-    }
-  }, []);
-
   const clearAuthAndRedirectToLogin = async (reason = 'logout', explicitUser = null) => {
     let currentUser = explicitUser;
     if (!currentUser) {
@@ -466,14 +462,17 @@ const HospitalTrusteeApp = () => {
         currentUser = null;
       }
     }
+    // Stop pushes to this phone; the token is also stored on the logout row (offline safety net).
+    const pushToken = await unregisterPushToken();
     await logUserSessionEvent({
       user: currentUser,
       actionType: reason === 'autologout' ? 'autologout' : 'logout',
-      extra: { source: 'app-shell', reason }
+      extra: { source: 'app-shell', reason, ...(pushToken ? { fcm_token: pushToken } : {}) }
     });
     const resetTrust = resolveDefaultThemeTrust();
     localStorage.removeItem('isLoggedIn');
     localStorage.removeItem('user');
+    localStorage.removeItem('setu_session_token');
     localStorage.removeItem(LAST_VISITED_ROUTE_KEY);
     clearLoginTermsPromptPending();
     if (resetTrust.id) {
@@ -639,15 +638,33 @@ const HospitalTrusteeApp = () => {
     };
   }, [refreshTheme]);
 
+  // Register this phone for push once a user is logged in (also on app start while logged in).
+  // initPushNotifications is idempotent per user, so running on route changes is cheap.
+  useEffect(() => {
+    if (localStorage.getItem('isLoggedIn') !== 'true') return;
+    initPushNotifications();
+  }, [location.pathname]);
+
   // Push tap deep link fallback
   useEffect(() => {
     const shouldOpen = localStorage.getItem('openNotificationsFromPush');
     const isLoggedIn = localStorage.getItem('isLoggedIn');
     if (shouldOpen === '1' && isLoggedIn) {
       localStorage.removeItem('openNotificationsFromPush');
-      navigate('/notifications');
+      navigate('/');
     }
   }, [location.pathname, navigate]);
+
+  // Push tap arrives after the first render on a cold start, so the effect above has already run.
+  useEffect(() => {
+    const openFromPushTap = () => {
+      if (localStorage.getItem('isLoggedIn') !== 'true') return;
+      localStorage.removeItem('openNotificationsFromPush');
+      navigate('/');
+    };
+    window.addEventListener('pushNotificationClicked', openFromPushTap);
+    return () => window.removeEventListener('pushNotificationClicked', openFromPushTap);
+  }, [navigate]);
 
   // â”€â”€â”€ Birthday Notification Check (Direct Supabase) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   useEffect(() => {
@@ -1133,6 +1150,8 @@ const HospitalTrusteeApp = () => {
       }}
     >
       <AppVersionUpdatePrompt trustId={resolvedThemeTrustId} />
+      <PageTrackingListener />
+      <RouteTracker />
       <Routes>
         <Route
           path="/login"
@@ -1425,6 +1444,16 @@ const HospitalTrusteeApp = () => {
           }
         />
         <Route
+          path="/order-history/:orderId"
+          element={
+            <ProtectedRoute>
+              <FeatureGuard featureKey="feature_order_history">
+                <OrderDetails />
+              </FeatureGuard>
+            </ProtectedRoute>
+          }
+        />
+        <Route
           path="/executive-body"
           element={
             <ProtectedRoute>
@@ -1616,6 +1645,14 @@ const HospitalTrusteeApp = () => {
           }
         />
         <Route
+          path="/admin-payments"
+          element={
+            <ProtectedRoute>
+              <AdminPayments onNavigate={handleNavigate} />
+            </ProtectedRoute>
+          }
+        />
+        <Route
           path="/other-memberships"
           element={
             <ProtectedRoute>
@@ -1675,6 +1712,7 @@ const HospitalTrusteeApp = () => {
         >
           {appContent}
         </div>
+        {connectionLost ? <ConnectionLostPage /> : null}
       </GalleryProvider>
     </ThemeContext.Provider>
   );

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 
-const ImageSlider = ({ images, autoPlayInterval = 3000, onNavigate, onImageClick }) => {
+const ImageSlider = ({ images, autoPlayInterval = 3000, onNavigate, onImageClick, showCounter = true }) => {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isDragging, setIsDragging] = useState(false);
   const [translateX, setTranslateX] = useState(0);
@@ -164,7 +164,7 @@ const ImageSlider = ({ images, autoPlayInterval = 3000, onNavigate, onImageClick
       )}
 
       {/* Image counter */}
-      {images.length > 1 && (
+      {showCounter && images.length > 1 && (
         <div className="absolute top-3 right-3 px-2 py-1 rounded-full bg-black/50 text-white text-xs font-semibold">
           {currentIndex + 1} / {images.length}
         </div>

@@ -25,20 +25,20 @@ const source = fs.readFileSync(
 
 // --- Root cause is still present in Android's own path, unchanged --------
 
-test('Android: handleOpenTrustWebApp is still async, still awaits the RPC, still calls window.open after it — untouched', () => {
-  const start = source.indexOf('const handleOpenTrustWebApp = async (link) => {');
-  assert.ok(start !== -1, 'expected handleOpenTrustWebApp to still exist, unmodified');
+test('Android: handleOpenTrustWebApp reads web_app_url from the stored active-trust membership — no RPC, no await — then calls window.open', () => {
+  const start = source.indexOf('const handleOpenTrustWebApp = (link) => {');
+  assert.ok(start !== -1, 'expected handleOpenTrustWebApp to exist');
   const end = source.indexOf('\n  };', start);
   const body = source.slice(start, end);
 
-  assert.match(body, /await supabase\.rpc\('manage_user_panel_by_trust_details'/);
+  assert.match(body, /getStoredMembershipForTrust\(trustId\)\?\.web_app_url/);
   assert.match(body, /window\.open\(webAppUrl, '_blank', 'noopener,noreferrer'\);/);
-  // The window.open call must come AFTER the await, textually — this is
-  // the exact shape iOS blocks; Android's own path must keep it exactly as
-  // it always was.
-  const awaitIdx = body.indexOf('await supabase.rpc');
-  const openIdx = body.indexOf('window.open(webAppUrl');
-  assert.ok(awaitIdx !== -1 && openIdx !== -1 && awaitIdx < openIdx);
+  assert.doesNotMatch(body, /await /);
+  assert.doesNotMatch(body, /\.rpc\(/);
+});
+
+test('OtherMemberships no longer calls the manage_user_panel_by_trust_details RPC anywhere', () => {
+  assert.doesNotMatch(source, /manage_user_panel_by_trust_details/);
 });
 
 test('Android: the <div role="button" onClick={onClick}> card path is untouched and still calls handleOpenTrustWebApp on tap', () => {
@@ -57,33 +57,23 @@ test('source guard: isIOSDevice is a plain, browser-neutral UA check (iPad/iPhon
   assert.doesNotMatch(body, /CriOS|Safari\//);
 });
 
-test('source guard: fetchTrustWebAppUrl is a wholly separate function from handleOpenTrustWebApp — no shared/refactored code path', () => {
-  assert.match(source, /const fetchTrustWebAppUrl = useCallback\(async \(trustId\) => \{/);
-  // The two functions must never call each other.
-  const fetchStart = source.indexOf('const fetchTrustWebAppUrl = useCallback(async (trustId) => {');
-  const fetchEnd = source.indexOf('}, []);', fetchStart);
-  const fetchBody = source.slice(fetchStart, fetchEnd);
-  assert.doesNotMatch(fetchBody, /handleOpenTrustWebApp/);
-  assert.doesNotMatch(fetchBody, /window\.open/);
-});
-
-test('source guard: the prefetch effect is gated on isIOS, keyed on trustLinks, and runs independently of any click handler', () => {
-  const effectStart = source.indexOf('if (!isIOS) return undefined;');
+test('source guard: the prefetch effect is gated on isIOS, keyed on trustLinks, reads the stored membership (no network) and runs independently of any click handler', () => {
+  const effectStart = source.indexOf('if (!isIOS) return;');
   assert.ok(effectStart !== -1, 'expected a useEffect gated on isIOS for the prefetch');
-  const effectEnd = source.indexOf('}, [isIOS, trustLinks, fetchTrustWebAppUrl]);', effectStart);
+  const effectEnd = source.indexOf('}, [isIOS, trustLinks]);', effectStart);
   assert.ok(effectEnd !== -1);
   const effectBody = source.slice(effectStart, effectEnd);
 
   assert.match(effectBody, /normalizeText\(link\?\.trust_id \|\| link\?\.Trust\?\.id\)/);
-  assert.match(effectBody, /fetchTrustWebAppUrl\(id\)\.then\(\(url\) => \{/);
-  assert.match(effectBody, /setTrustWebAppUrls\(\(prev\) => \(\{ \.\.\.prev, \[id\]: url \}\)\)/);
+  assert.match(effectBody, /getStoredMembershipForTrust\(id\)\?\.web_app_url/);
+  assert.match(effectBody, /setTrustWebAppUrls\(/);
+  assert.doesNotMatch(effectBody, /await |\.rpc\(|fetch\(/);
   // Never triggered by a tap/onClick inside this effect.
   assert.doesNotMatch(effectBody, /onClick/);
 });
 
-test('source guard: trustWebAppUrls / trustWebAppUrlRequestedRef are declared once and only populated by the prefetch effect, not by handleOpenTrustWebApp', () => {
+test('source guard: trustWebAppUrls is declared once and only populated by the prefetch effect, not by handleOpenTrustWebApp', () => {
   assert.match(source, /const \[trustWebAppUrls, setTrustWebAppUrls\] = useState\(\{\}\);/);
-  assert.match(source, /const trustWebAppUrlRequestedRef = useRef\(new Set\(\)\);/);
 
   const handleStart = source.indexOf('const handleOpenTrustWebApp = async (link) => {');
   const handleEnd = source.indexOf('\n  };', handleStart);

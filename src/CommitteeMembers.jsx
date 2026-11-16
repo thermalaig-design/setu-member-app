@@ -250,6 +250,7 @@ const CommitteeMembers = ({ committeeData, onNavigateBack, previousScreenName })
             <Search className="h-4 w-4" style={{ color: cardBg }} />
             <input
               type="text"
+              data-track="search_click"
               value={searchQuery}
               onChange={(e) => {
                 setSearchQuery(e.target.value);

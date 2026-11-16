@@ -5,6 +5,7 @@ import { useAppTheme } from './context/ThemeContext';
 import { applyOpacity } from './utils/colorUtils';
 import { fetchDonationMembersByTrust, getDonationFormPrefill } from './services/donationService';
 import { TRUST_VERSION_UPDATED_EVENT } from './services/trustVersionService';
+import { track } from './services/analytics';
 
 const DonationForm = () => {
   const theme = useAppTheme();
@@ -32,6 +33,7 @@ const DonationForm = () => {
       setMembers(rows);
     } catch (err) {
       setMembers([]);
+      track('api_error', { screen_name: 'donation_form', code: 'load_donation_details_failed' });
       setError(err?.message || 'Unable to load donation details.');
     } finally {
       setLoading(false);
@@ -145,7 +147,7 @@ const DonationForm = () => {
                   <div className="space-y-2 text-sm">
                     <div className="flex items-center gap-2">
                       <PhoneCall className="h-4 w-4" style={{ color: theme.primary }} />
-                      <a href={`tel:${member.mobile || ''}`} style={{ color: 'var(--advertisement-description)' }}>
+                      <a href={`tel:${member.mobile || ''}`} data-track="call_click" style={{ color: 'var(--advertisement-description)' }}>
                         {member.mobile || '-'}
                       </a>
                     </div>

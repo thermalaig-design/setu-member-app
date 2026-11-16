@@ -4,6 +4,7 @@ import { useBackNavigation } from './hooks';
 import { specialLogin } from './services/authService';
 import { fetchDirectoryData } from './services/directoryService';
 import { logUserSessionEvent } from './services/sessionAuditService';
+import { track, trackLogin } from './services/analytics';
 import { persistUserSession } from './utils/storageUtils';
 import { setLoginTermsPromptPending } from './utils/legalContent';
 import { useAppTheme } from './context/ThemeContext';
@@ -49,6 +50,7 @@ function SpecialOTPVerification() {
         String(localStorage.getItem('selected_trust_id') || TRUST_ID || '')
       );
       if (!result.success) {
+        track('api_error', { screen_name: 'special_otp_verification', code: 'passcode_verify_failed' });
         setError(result.message || 'Invalid passcode. Please try again.');
         setLoading(false);
         return;
@@ -92,12 +94,14 @@ function SpecialOTPVerification() {
         try { sessionStorage.removeItem('trust_selected_in_session'); } catch { /* ignore */ }
         try { sessionStorage.removeItem(OTP_FLOW_KEY); } catch { /* ignore */ }
         setLoginTermsPromptPending();
+        trackLogin();
         navigate('/', { replace: true });
       } else {
         setError('User data not found. Please try again.');
       }
     } catch (error) {
       console.error('❌ Error verifying special login:', error);
+      track('api_error', { screen_name: 'special_otp_verification', code: 'passcode_verify_exception' });
       setError('Failed to verify passcode. Please try again.');
     } finally {
       setLoading(false);

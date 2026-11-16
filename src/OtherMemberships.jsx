@@ -1,8 +1,9 @@
-import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react';
+import { track } from './services/analytics';
+import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Plus, X, Menu, Home as HomeIcon,
-  AlertCircle, Building2, Loader2, ChevronRight, BadgeCheck
+  AlertCircle, Building2, Loader2, ChevronRight, BadgeCheck, LayoutGrid
 } from 'lucide-react';
 import Sidebar from './features/sidebar/Sidebar';
 import TrustIdCard from './TrustIdCard';
@@ -10,9 +11,11 @@ import { useAppTheme } from './context/ThemeContext';
 import { applyOpacity } from './utils/colorUtils';
 import { getNavbarThemeStyles, getThemeToken } from './utils/themeUtils';
 import { fetchActiveTrustsByMobile } from './services/trustService';
+import { getStoredMembershipForTrust } from './utils/trustMembershipLinks';
 import { isFeatureVisible } from './services/featureFlags';
 import { useFeatureFlags } from './hooks/useFeatureFlags';
 import { getAppHomePath } from './utils/tenantNavigation';
+import { trackAction } from './services/pageTrackingService';
 
 // ─── Supabase helpers ──────────────────────────────────────────────────────
 
@@ -22,14 +25,12 @@ const getSupabase = async () => {
 };
 
 // iOS Safari/Chrome (both WebKit) block window.open() the instant it fires
-// outside the synchronous call stack of a user gesture — including after an
-// `await` on a Supabase call, which is exactly how handleOpenTrustWebApp
-// below opens a trust's web app on Android. Detecting iOS here lets
-// TrustLinkTile render a real `<a href target="_blank">` for this platform
-// instead (see its own comment), which a normal, non-JS-driven navigation
-// is never subject to that restriction. Deliberately local to this file —
-// Android's own card-tap path (handleOpenTrustWebApp) is untouched and
-// never reads this.
+// outside the synchronous call stack of a user gesture (e.g. after an
+// `await`). Detecting iOS here lets TrustLinkTile render a real
+// `<a href target="_blank">` for this platform (see its own comment), which a
+// normal, non-JS-driven navigation is never subject to that restriction.
+// Deliberately local to this file — Android's own card-tap path
+// (handleOpenTrustWebApp) never reads this.
 const isIOSDevice = () => {
   if (typeof navigator === 'undefined') return false;
   const ua = navigator.userAgent || '';
@@ -573,16 +574,12 @@ const OtherMemberships = ({ onNavigate, variant = 'page' }) => {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [trustCardModalData, setTrustCardModalData] = useState(null);
   const [openingTrustId, setOpeningTrustId] = useState('');
-  // iOS-only: trust_id -> resolved web_app_url ('' once resolved-but-missing,
-  // undefined while still in flight), populated by the prefetch effect below
-  // as soon as trustLinks load — NOT on tap. This is what lets the iOS
-  // TrustLinkTile render a real, synchronous <a href> instead of Android's
-  // async-then-window.open() path (handleOpenTrustWebApp), which iOS Safari/
-  // Chrome silently block as a popup once it runs after an await. Android
-  // never reads this map — handleOpenTrustWebApp keeps doing its own
-  // per-click fetch exactly as before.
+  // iOS-only: trust_id -> web_app_url from the stored active-trust membership
+  // ('' when that trust has none, undefined before the effect below first runs),
+  // populated as soon as trustLinks load — NOT on tap. This is what lets the iOS
+  // TrustLinkTile render a real, synchronous <a href> for iOS Safari/Chrome.
+  // Android never reads this map — handleOpenTrustWebApp looks the URL up on tap.
   const [trustWebAppUrls, setTrustWebAppUrls] = useState({});
-  const trustWebAppUrlRequestedRef = useRef(new Set());
   const isIOS = useMemo(() => isIOSDevice(), []);
 
   // Delete state
@@ -590,6 +587,10 @@ const OtherMemberships = ({ onNavigate, variant = 'page' }) => {
 
   const sortedOtherMems = useMemo(() => sortMembershipsAlphabetically(otherMems), [otherMems]);
   const sortedTrustLinks = useMemo(() => sortMembershipsAlphabetically(trustLinks), [trustLinks]);
+  // On the home page only the first tiles show; the full list lives on /other-memberships.
+  const HOME_TRUST_TILE_LIMIT = 3;
+  const hasMoreTrustLinks = isHomeVariant && sortedTrustLinks.length > HOME_TRUST_TILE_LIMIT;
+  const visibleTrustLinks = isHomeVariant ? sortedTrustLinks.slice(0, HOME_TRUST_TILE_LIMIT) : sortedTrustLinks;
   const showCreateNewApp = isFeatureVisible(featureFlags, 'feature_add_community');
 
   // ── fetch data ──
@@ -702,9 +703,11 @@ const OtherMemberships = ({ onNavigate, variant = 'page' }) => {
   // ── handlers ──
   const handleDelete = async (id) => {
     if (!window.confirm('Remove this membership record?')) return;
+    trackAction('membership_remove_confirmed', { membership_id: id });
     setDeletingId(id);
     try {
       await deleteOtherMembership(id);
+      track('membership_remove');
       setOtherMems(prev => prev.filter(m => m.id !== id));
     } catch (err) {
       alert('Failed to delete: ' + (err?.message || 'Unknown error'));
@@ -714,6 +717,7 @@ const OtherMemberships = ({ onNavigate, variant = 'page' }) => {
   };
 
   const handleCreateNewApp = () => {
+    trackAction('create_new_app_clicked');
     if (onNavigate) {
       onNavigate('add-community');
       return;
@@ -721,20 +725,18 @@ const OtherMemberships = ({ onNavigate, variant = 'page' }) => {
     navigate('/add-community');
   };
 
-  const handleOpenTrustWebApp = async (link) => {
+  const handleOpenTrustWebApp = (link) => {
     const trustId = normalizeText(link?.trust_id || link?.Trust?.id);
     if (!trustId || openingTrustId) return;
 
+    track('membership_app_open', { trust_id: trustId });
+    trackAction('app_clicked', {
+      trust_id: trustId,
+      trust_name: normalizeText(link?.Trust?.name || link?.organisation_name),
+    });
     setOpeningTrustId(trustId);
     try {
-      const supabase = await getSupabase();
-      const { data, error } = await supabase.rpc('manage_user_panel_by_trust_details', {
-        p_action: 'view',
-        p_trust_id: trustId,
-      });
-      if (error) throw error;
-
-      const webAppUrl = normalizeText(data?.[0]?.web_app_url);
+      const webAppUrl = normalizeText(getStoredMembershipForTrust(trustId)?.web_app_url);
       if (!webAppUrl) {
         throw new Error('This trust does not have a web app link yet.');
       }
@@ -748,53 +750,34 @@ const OtherMemberships = ({ onNavigate, variant = 'page' }) => {
     }
   };
 
-  // iOS-only prefetch: the same RPC handleOpenTrustWebApp above calls on
-  // tap, called here instead the moment a trust_id is first seen in
-  // trustLinks — well before any user gesture, so its result is already in
-  // trustWebAppUrls by the time a tap needs it (see TrustLinkTile's href).
-  // Kept fully independent from handleOpenTrustWebApp (never shared/
-  // refactored together) so Android's tap-time path is untouched no matter
-  // what changes here. Returns '' (not null/undefined) on any failure or a
-  // missing web_app_url, so callers can tell "resolved, nothing there"
-  // apart from "still in flight" (trustWebAppUrls[id] === undefined).
-  const fetchTrustWebAppUrl = useCallback(async (trustId) => {
-    try {
-      const supabase = await getSupabase();
-      const { data, error } = await supabase.rpc('manage_user_panel_by_trust_details', {
-        p_action: 'view',
-        p_trust_id: trustId,
-      });
-      if (error) throw error;
-      return normalizeText(data?.[0]?.web_app_url);
-    } catch (err) {
-      console.warn('iOS trust web app url prefetch failed:', trustId, err);
-      return '';
-    }
-  }, []);
-
+  // iOS-only prefetch: reads each trust's web_app_url from the stored
+  // active-trust membership the moment a trust_id is seen in trustLinks — well
+  // before any user gesture, so it is already in trustWebAppUrls by the time a
+  // tap needs it (see TrustLinkTile's href). No network request. Kept
+  // independent from handleOpenTrustWebApp so Android's tap-time path is
+  // untouched. Stores '' (not null/undefined) for a missing web_app_url, so
+  // callers can tell "nothing there" apart from "not read yet"
+  // (trustWebAppUrls[id] === undefined). Re-runs when trustLinks change, so a
+  // url that arrives with a membership refresh is picked up.
   useEffect(() => {
-    if (!isIOS) return undefined;
-    const ids = [...new Set(
-      trustLinks
-        .map((link) => normalizeText(link?.trust_id || link?.Trust?.id))
-        .filter(Boolean)
-    )];
-    const pending = ids.filter((id) => !trustWebAppUrlRequestedRef.current.has(id));
-    if (pending.length === 0) return undefined;
-    pending.forEach((id) => trustWebAppUrlRequestedRef.current.add(id));
-
-    let cancelled = false;
-    pending.forEach((id) => {
-      fetchTrustWebAppUrl(id).then((url) => {
-        if (cancelled) return;
-        setTrustWebAppUrls((prev) => ({ ...prev, [id]: url }));
-      });
+    if (!isIOS) return;
+    const next = {};
+    trustLinks.forEach((link) => {
+      const id = normalizeText(link?.trust_id || link?.Trust?.id);
+      if (id) next[id] = normalizeText(getStoredMembershipForTrust(id)?.web_app_url);
     });
-
-    return () => { cancelled = true; };
-  }, [isIOS, trustLinks, fetchTrustWebAppUrl]);
+    setTrustWebAppUrls((prev) => {
+      const changed = Object.keys(next).some((id) => prev[id] !== next[id]);
+      return changed ? { ...prev, ...next } : prev;
+    });
+  }, [isIOS, trustLinks]);
 
   const openTrustIdCard = (link) => {
+    track('trust_id_card_open');
+    trackAction('trust_id_card_opened', {
+      trust_id: normalizeText(link?.trust_id || link?.Trust?.id),
+      trust_name: normalizeText(link?.Trust?.name || link?.organisation_name),
+    });
     const cardData = enrichTrustCardData(link);
     try {
       sessionStorage.setItem(TRUST_ID_CARD_CACHE_KEY, JSON.stringify(cardData));
@@ -945,6 +928,93 @@ const OtherMemberships = ({ onNavigate, variant = 'page' }) => {
     );
   };
 
+  // Setu's dark theme keeps its fixed gold look; a light tenant theme gets
+  // colors derived from that theme instead so the cards don't clash.
+  const resolveTileTheme = () => isLightTheme
+      ? {
+          cardBg: `linear-gradient(155deg, ${applyOpacity(colors.secondary, 0.1)} 0%, ${applyOpacity('var(--surface-color)', 0.98)} 62%, ${applyOpacity(colors.primary, 0.06)} 100%)`,
+          border: applyOpacity(colors.primary, 0.22),
+          borderHover: applyOpacity(colors.primary, 0.55),
+          shadow: `0 8px 24px ${applyOpacity(colors.secondary, 0.14)}, inset 0 1px 0 rgba(255,255,255,0.5)`,
+          shadowHover: `0 16px 36px ${applyOpacity(colors.secondary, 0.18)}, 0 0 0 1px ${applyOpacity(colors.primary, 0.16)}, inset 0 1px 0 rgba(255,255,255,0.6)`,
+          accentLine: `linear-gradient(90deg, transparent, ${applyOpacity(colors.primary, 0.7)} 40%, ${applyOpacity(colors.accent, 0.9)} 60%, transparent)`,
+          glow: `radial-gradient(circle, ${applyOpacity(colors.primary, 0.08)}, transparent 70%)`,
+          avatarFrame: `linear-gradient(135deg, ${applyOpacity(colors.primary, 0.3)}, ${applyOpacity(colors.primary, 0.05)})`,
+          badgeText: colors.primary,
+          badgeBg: applyOpacity(colors.primary, 0.08),
+          badgeBorder: applyOpacity(colors.primary, 0.22),
+          nameColor: 'var(--heading-color)',
+          legalColor: 'var(--advertisement-description)',
+        }
+      : {
+          cardBg: 'linear-gradient(155deg, rgba(28,31,45,0.98) 0%, rgba(13,15,24,0.99) 62%, rgba(20,17,10,0.99) 100%)',
+          border: 'rgba(226, 178, 39, 0.22)',
+          borderHover: 'rgba(226, 178, 39, 0.6)',
+          shadow: '0 8px 24px rgba(0,0,0,0.34), inset 0 1px 0 rgba(255,255,255,0.05)',
+          shadowHover: '0 16px 36px rgba(0,0,0,0.4), 0 0 0 1px rgba(226,178,39,0.18), inset 0 1px 0 rgba(255,255,255,0.07)',
+          accentLine: 'linear-gradient(90deg, transparent, rgba(226,178,39,0.75) 40%, rgba(255,213,110,0.95) 60%, transparent)',
+          glow: 'radial-gradient(circle, rgba(226,178,39,0.10), transparent 70%)',
+          avatarFrame: 'linear-gradient(135deg, rgba(226,178,39,0.35), rgba(226,178,39,0.05))',
+          badgeText: 'rgba(226,178,39,0.75)',
+          badgeBg: 'rgba(226,178,39,0.08)',
+          badgeBorder: 'rgba(226,178,39,0.22)',
+          nameColor: '#f6f2e6',
+          legalColor: 'rgba(224,230,241,0.58)',
+        };
+
+  // Home variant shows only the first few apps; this tile opens the full list page.
+  const ViewMoreTile = ({ count, onClick }) => {
+    const tile = resolveTileTheme();
+    return (
+      <div
+        className={`other-membership-card${isLightTheme ? ' other-membership-card--light' : ''}`}
+        role="button"
+        tabIndex={0}
+        onClick={onClick}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            onClick();
+          }
+        }}
+        style={{
+          position: 'relative',
+          background: tile.cardBg,
+          border: `1px solid ${tile.border}`,
+          borderRadius: '18px',
+          padding: '14px 13px 12px',
+          cursor: 'pointer',
+          minWidth: 0,
+          overflow: 'hidden',
+          display: 'flex',
+          flexDirection: 'column',
+          justifyContent: 'center',
+          alignItems: 'center',
+          gap: '8px',
+          textAlign: 'center',
+          boxShadow: tile.shadow,
+        }}
+      >
+        <div style={{
+          position: 'absolute', top: 0, left: 0, right: 0, height: '2.5px',
+          background: tile.accentLine,
+          borderRadius: '18px 18px 0 0',
+        }} />
+        <div style={{ padding: '3px', borderRadius: '13px', background: tile.avatarFrame }}>
+          <div style={{ width: 36, height: 36, display: 'flex', alignItems: 'center', justifyContent: 'center', color: tile.nameColor }}>
+            <LayoutGrid size={20} />
+          </div>
+        </div>
+        <span style={{ fontSize: '12.5px', fontWeight: 800, color: tile.nameColor, letterSpacing: '-0.01em' }}>
+          View more
+        </span>
+        <span style={{ fontSize: '9.5px', fontWeight: 500, color: tile.legalColor }}>
+          All {count} apps
+        </span>
+      </div>
+    );
+  };
+
   const TrustLinkTile = ({ link, onClick, onOpenCard, isLoading, isIOS, resolvedUrl }) => {
     const trustName = link.Trust?.name || link.organisation_name || '-';
     const legalName = normalizeText(
@@ -977,6 +1047,7 @@ const OtherMemberships = ({ onNavigate, variant = 'page' }) => {
     // absent (resolvedUrl === '') — both cancel the navigation and surface
     // a real message, never a silent no-op.
     const handleIosClick = (event) => {
+      trackAction('app_clicked', { trust_id: trustId, trust_name: trustName, device_os: 'ios' });
       if (resolvedUrl) return;
       event.preventDefault();
       alert(
@@ -991,39 +1062,7 @@ const OtherMemberships = ({ onNavigate, variant = 'page' }) => {
       onOpenCard?.();
     };
 
-    // Setu's dark theme keeps its fixed gold look; a light tenant theme gets
-    // colors derived from that theme instead so the cards don't clash.
-    const tile = isLightTheme
-      ? {
-          cardBg: `linear-gradient(155deg, ${applyOpacity(colors.secondary, 0.1)} 0%, ${applyOpacity('var(--surface-color)', 0.98)} 62%, ${applyOpacity(colors.primary, 0.06)} 100%)`,
-          border: applyOpacity(colors.primary, 0.22),
-          borderHover: applyOpacity(colors.primary, 0.55),
-          shadow: `0 8px 24px ${applyOpacity(colors.secondary, 0.14)}, inset 0 1px 0 rgba(255,255,255,0.5)`,
-          shadowHover: `0 16px 36px ${applyOpacity(colors.secondary, 0.18)}, 0 0 0 1px ${applyOpacity(colors.primary, 0.16)}, inset 0 1px 0 rgba(255,255,255,0.6)`,
-          accentLine: `linear-gradient(90deg, transparent, ${applyOpacity(colors.primary, 0.7)} 40%, ${applyOpacity(colors.accent, 0.9)} 60%, transparent)`,
-          glow: `radial-gradient(circle, ${applyOpacity(colors.primary, 0.08)}, transparent 70%)`,
-          avatarFrame: `linear-gradient(135deg, ${applyOpacity(colors.primary, 0.3)}, ${applyOpacity(colors.primary, 0.05)})`,
-          badgeText: colors.primary,
-          badgeBg: applyOpacity(colors.primary, 0.08),
-          badgeBorder: applyOpacity(colors.primary, 0.22),
-          nameColor: 'var(--heading-color)',
-          legalColor: 'var(--advertisement-description)',
-        }
-      : {
-          cardBg: 'linear-gradient(155deg, rgba(28,31,45,0.98) 0%, rgba(13,15,24,0.99) 62%, rgba(20,17,10,0.99) 100%)',
-          border: 'rgba(226, 178, 39, 0.22)',
-          borderHover: 'rgba(226, 178, 39, 0.6)',
-          shadow: '0 8px 24px rgba(0,0,0,0.34), inset 0 1px 0 rgba(255,255,255,0.05)',
-          shadowHover: '0 16px 36px rgba(0,0,0,0.4), 0 0 0 1px rgba(226,178,39,0.18), inset 0 1px 0 rgba(255,255,255,0.07)',
-          accentLine: 'linear-gradient(90deg, transparent, rgba(226,178,39,0.75) 40%, rgba(255,213,110,0.95) 60%, transparent)',
-          glow: 'radial-gradient(circle, rgba(226,178,39,0.10), transparent 70%)',
-          avatarFrame: 'linear-gradient(135deg, rgba(226,178,39,0.35), rgba(226,178,39,0.05))',
-          badgeText: 'rgba(226,178,39,0.75)',
-          badgeBg: 'rgba(226,178,39,0.08)',
-          badgeBorder: 'rgba(226,178,39,0.22)',
-          nameColor: '#f6f2e6',
-          legalColor: 'rgba(224,230,241,0.58)',
-        };
+    const tile = resolveTileTheme();
 
     // iOS ONLY: a real <a href target="_blank"> so the navigation is a
     // direct, synchronous result of the tap — the fix for the iOS App
@@ -1272,7 +1311,7 @@ const OtherMemberships = ({ onNavigate, variant = 'page' }) => {
         }}
       >
         <button
-          onClick={() => setIsMenuOpen((prev) => !prev)}
+          onClick={() => { trackAction('menu_clicked'); setIsMenuOpen((prev) => !prev); }}
           className="p-2 rounded-xl transition-colors"
           style={{ color: navbarTheme?.textColor || 'var(--navbar-text)', background: 'transparent' }}
         >
@@ -1282,7 +1321,7 @@ const OtherMemberships = ({ onNavigate, variant = 'page' }) => {
           Other Memberships
         </h1>
         <button
-          onClick={() => (onNavigate ? onNavigate('home') : navigate(getAppHomePath()))}
+          onClick={() => { trackAction('home_clicked'); return (onNavigate ? onNavigate('home') : navigate(getAppHomePath())); }}
           className="p-2 rounded-xl transition-colors"
           style={{ color: navbarTheme?.textColor || 'var(--navbar-text)', background: 'transparent' }}
         >
@@ -1295,7 +1334,7 @@ const OtherMemberships = ({ onNavigate, variant = 'page' }) => {
 	      )}
 
       {/* ── Content ── */}
-      <div className="other-memberships-content" style={{ width: '100%', margin: '0 auto', boxSizing: 'border-box' }}>
+      <div className="other-memberships-content" style={{ width: '100%', margin: '0 auto', boxSizing: 'border-box', ...(isHomeVariant ? { padding: 0 } : null) }}>
         {/* Loading spinner */}
         {loading && trustLinks.length === 0 && (
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '60px 0' }}>
@@ -1309,7 +1348,7 @@ const OtherMemberships = ({ onNavigate, variant = 'page' }) => {
           <div style={{ background: colors.errorBg, border: '1.5px solid var(--advertisement-card-border)', borderRadius: '16px', padding: '20px', textAlign: 'center', marginBottom: '16px' }}>
             <AlertCircle size={24} color={colors.error} style={{ margin: '0 auto 8px', display: 'block' }} />
             <p style={{ color: colors.error, fontSize: '14px', fontWeight: 600, margin: '0 0 12px' }}>{error}</p>
-            <button onClick={loadData} style={{ padding: '8px 20px', background: colors.primary, color: colors.onPrimary, border: 'none', borderRadius: '10px', fontSize: '13px', fontWeight: 700, cursor: 'pointer' }}>Retry</button>
+            <button onClick={() => { trackAction('retry_clicked'); loadData(); }} style={{ padding: '8px 20px', background: colors.primary, color: colors.onPrimary, border: 'none', borderRadius: '10px', fontSize: '13px', fontWeight: 700, cursor: 'pointer' }}>Retry</button>
           </div>
         )}
 
@@ -1340,7 +1379,7 @@ const OtherMemberships = ({ onNavigate, variant = 'page' }) => {
                 }}
               >
                 <Plus size={20} />
-                Create New App
+                Create My App
               </button>
             )}
 
@@ -1369,7 +1408,7 @@ const OtherMemberships = ({ onNavigate, variant = 'page' }) => {
                 className="other-memberships-grid"
                 style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', columnGap: '9px', rowGap: '10px' }}
               >
-                {sortedTrustLinks.map((link, index) => (
+                {visibleTrustLinks.map((link, index) => (
                   <TrustLinkTile
                     key={link.id || index}
                     link={link}
@@ -1380,6 +1419,12 @@ const OtherMemberships = ({ onNavigate, variant = 'page' }) => {
                     resolvedUrl={trustWebAppUrls[normalizeText(link?.trust_id || link?.Trust?.id)]}
                   />
                 ))}
+                {hasMoreTrustLinks ? (
+                  <ViewMoreTile
+                    count={sortedTrustLinks.length}
+                    onClick={() => (onNavigate ? onNavigate('other-memberships') : navigate('/other-memberships'))}
+                  />
+                ) : null}
               </div>
             )}
 

@@ -521,12 +521,49 @@ export const verifyOTP = async (phoneNumber, otp, options = {}) => {
       success: true,
       message: response?.message || 'OTP verified',
       loginMethod,
-      usedSecretCode
+      usedSecretCode,
+      loginProof: response?.loginProof || ''
     };
   } catch (error) {
     console.error('Error verifying OTP:', error?.message || error);
     return { success: false, message: error?.message || 'Invalid OTP or secret code' };
   }
+};
+
+/**
+ * Exchange the OTP loginProof + selected member for a signed SETU session token
+ */
+export const completeSetuLogin = async ({ loginProof, memberId, trustId }) => {
+  return postAuthJson('/complete-login', {
+    loginProof,
+    memberId,
+    trustId: trustId || null
+  });
+};
+
+/**
+ * Request a short-lived (60s) User Panel auto-login token
+ */
+export const getUserPanelToken = async (setuSessionToken) => {
+  if (!AUTH_API_URL) {
+    throw new Error('Missing VITE_AUTH_API_URL');
+  }
+
+  const base = AUTH_API_URL.endsWith('/') ? AUTH_API_URL.slice(0, -1) : AUTH_API_URL;
+  const response = await fetch(`${base}/user-panel-token`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${setuSessionToken}`
+    },
+    body: JSON.stringify({})
+  });
+
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || data?.success === false) {
+    throw new Error(data?.message || 'Unable to create User Panel login token');
+  }
+  return data;
 };
 
 /**

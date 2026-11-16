@@ -718,7 +718,6 @@ const buildAndroidIntentUrl = (httpsUrl, { includeFallback = true } = {}) => {
 // 404s in production. Resolve against BASE_URL so this works on any host.
 const SETU_POWERED_LOGO = `${String(import.meta.env.BASE_URL || '/').replace(/\/+$/, '')}/assets/setu-logo.png`;
 const SETU_DOWNLOAD_URL = 'https://teiltd.in/app-download';
-
 // --- Contrast-safe tenant theming -----------------------------------------
 // Trusts can set arbitrary pwa_theme_color / pwa_background_color values
 // (including #ffffff). These helpers make sure body/heading text always
@@ -2309,6 +2308,25 @@ function TenantLanding({ onNavigate, onLogout, isMember } = {}) {
           <p style={{ ...styles.notAvailableText, color: palette.textSecondary }}>
             Your access request for {tenantTrust.name} is pending approval. You'll be able to open the app once an admin approves your request.
           </p>
+          <a
+            href={SETU_DOWNLOAD_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{
+              display: 'block',
+              marginTop: '18px',
+              padding: '13px 18px',
+              borderRadius: '12px',
+              background: accentGradient,
+              color: accent.text,
+              fontSize: '15px',
+              fontWeight: 700,
+              textDecoration: 'none',
+              boxShadow: `0 10px 26px ${accentGlow(0.4)}`
+            }}
+          >
+            Download Setu App
+          </a>
         </div>
       </div>
     );

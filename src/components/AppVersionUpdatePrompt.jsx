@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { AlertTriangle, Clock3, Download } from 'lucide-react';
-import { fetchShareAppLinksByTrustId } from '../services/trustService';
+import { buildShareAppLinksFromMembership, getStoredMembershipForTrust } from '../utils/trustMembershipLinks';
 import { getShareAppTargetLink } from '../utils/shareApp';
 import { TRUST_APP_VERSION } from '../constants/appVersion';
 
@@ -9,7 +9,9 @@ const APP_UPDATE_SNOOZE_MS = 24 * 60 * 60 * 1000;
 const APP_UPDATE_SNOOZE_PREFIX = 'app_update_snooze_v1_';
 
 const normalizeVersionNumber = (value) => {
-  const parsed = Number(String(value ?? '').trim());
+  const text = String(value ?? '').trim();
+  if (!text) return null;
+  const parsed = Number(text);
   return Number.isFinite(parsed) ? parsed : null;
 };
 
@@ -82,10 +84,11 @@ const AppVersionUpdatePrompt = ({ trustId }) => {
     }
 
     try {
-      const links = await fetchShareAppLinksByTrustId(normalizedTrustId);
+      const membership = getStoredMembershipForTrust(normalizedTrustId);
+      const links = buildShareAppLinksFromMembership(membership);
       if (requestIdRef.current !== currentRequestId) return;
 
-      const remoteVersion = normalizeVersionNumber(links?.version);
+      const remoteVersion = normalizeVersionNumber(membership?.version);
       const localVersion = normalizeVersionNumber(TRUST_APP_VERSION);
       const updateLink = getShareAppTargetLink(links || {}, Capacitor.getPlatform(), '');
 
@@ -147,11 +150,17 @@ const AppVersionUpdatePrompt = ({ trustId }) => {
       }
     };
 
+    // The version now comes from the stored membership, which is rewritten
+    // when memberships refresh after login — re-read it then.
     window.addEventListener('focus', onFocus);
+    window.addEventListener('trust-changed', onFocus);
+    window.addEventListener('user-profile-updated', onFocus);
     document.addEventListener('visibilitychange', onVisibilityChange);
 
     return () => {
       window.removeEventListener('focus', onFocus);
+      window.removeEventListener('trust-changed', onFocus);
+      window.removeEventListener('user-profile-updated', onFocus);
       document.removeEventListener('visibilitychange', onVisibilityChange);
     };
   }, [evaluateUpdateState]);

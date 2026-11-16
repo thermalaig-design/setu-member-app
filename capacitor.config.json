@@ -1,7 +1,7 @@
 {
   "appId": "com.Setu.app",
   "appName": "Setu",
-  "webDir": "dist",
+  "webDir": "dist-capacitor",
   "bundledWebRuntime": false,
   "plugins": {
     "StatusBar": {

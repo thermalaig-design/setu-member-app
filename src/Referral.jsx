@@ -1,3 +1,4 @@
+import { track } from './services/analytics';
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { User, Users, Clock, FileText, UserPlus, Bell, ChevronRight, LogOut, Heart, Shield, Plus, ArrowRight, Pill, ShoppingCart, Calendar, Stethoscope, Building2, Phone, QrCode, Monitor, Brain, Package, FileCheck, Search, Filter, MapPin, Star, HelpCircle, BookOpen, Video, Headphones, Menu, X, Home as HomeIcon, Settings, Eye, Edit2, Info, CheckCircle2, ArrowLeft } from 'lucide-react';
 import { createReferral, getUserReferrals, getReferralCounts, updateReferral, deleteReferral } from './services/api';
@@ -279,6 +280,7 @@ export const ReferralContent = ({
       const response = await deleteReferral(referralId);
 
       if (response.success) {
+        track('reference_delete');
         alert('Referral deleted successfully!');
         await refreshData();
         if (selectedReferral?.id === referralId) {
@@ -303,6 +305,7 @@ export const ReferralContent = ({
       const response = await updateReferral(referralId, updateData);
 
       if (response.success) {
+        track('reference_update');
         alert('Referral updated successfully!');
         setEditingReferral(null);
         await refreshData();
@@ -402,6 +405,7 @@ export const ReferralContent = ({
       const response = await createReferral(referralData);
 
       if (response.success) {
+        track('reference_submit');
         alert('Referral sent successfully');
         setNewReference({
           patientName: '',

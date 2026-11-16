@@ -1,3 +1,4 @@
+import { track } from './services/analytics';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowUpDown, Building, Check, Home as HomeIcon, Mail, Menu, Search, User, Users, X } from 'lucide-react';
@@ -103,6 +104,7 @@ export const DirectoryContent = ({ onNavigate, variant = 'page' }) => {
   const [profilePhotos, setProfilePhotos] = useState({});
   const [activeRole, setActiveRole] = useState('all');
   const [configuredDirectoryRoles, setConfiguredDirectoryRoles] = useState([]);
+  const [inactiveDirectoryRoles, setInactiveDirectoryRoles] = useState([]);
   const [sortMode, setSortMode] = useState('name-asc');
   const [isSortMenuOpen, setIsSortMenuOpen] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
@@ -220,19 +222,25 @@ export const DirectoryContent = ({ onNavigate, variant = 'page' }) => {
     const loadDirectoryViewRoles = async () => {
       const trustId = selectedTrustId || null;
       if (!trustId) {
-        if (active) setConfiguredDirectoryRoles([]);
+        if (active) {
+          setConfiguredDirectoryRoles([]);
+          setInactiveDirectoryRoles([]);
+        }
         return;
       }
 
-      const response = await getDirectoryViewRoles(trustId);
+      const response = await getDirectoryViewRoles(trustId, { includeInactive: true });
       if (!active) return;
 
       if (!response?.success) {
         setConfiguredDirectoryRoles([]);
+        setInactiveDirectoryRoles([]);
         return;
       }
 
+      const isInactiveRow = (item) => normalizeRole(item?.status) === 'inactive';
       const normalizedRoles = (response.data || [])
+        .filter((item) => !isInactiveRow(item))
         .map((item) => {
           const label = normalizeText(item?.role);
           const id = normalizeRole(label);
@@ -243,6 +251,18 @@ export const DirectoryContent = ({ onNavigate, variant = 'page' }) => {
         .filter((item, index, list) => list.findIndex((entry) => entry.id === item.id) === index);
 
       setConfiguredDirectoryRoles(normalizedRoles);
+
+      // A role marked inactive hides its members, unless the same role is also
+      // configured as active.
+      const activeIds = new Set(normalizedRoles.map((item) => item.id));
+      setInactiveDirectoryRoles(
+        Array.from(new Set(
+          (response.data || [])
+            .filter(isInactiveRow)
+            .map((item) => normalizeRole(item?.role))
+            .filter((id) => id && !activeIds.has(id))
+        ))
+      );
     };
 
     void loadDirectoryViewRoles();
@@ -337,9 +357,15 @@ export const DirectoryContent = ({ onNavigate, variant = 'page' }) => {
     };
   }, [members]);
 
+  const visibleMembers = useMemo(() => {
+    if (inactiveDirectoryRoles.length === 0) return members;
+    const hidden = new Set(inactiveDirectoryRoles);
+    return members.filter((item) => !hidden.has(normalizeRole(item?.role || item?.type) || 'member'));
+  }, [members, inactiveDirectoryRoles]);
+
   const roleCounts = useMemo(() => {
     const counts = new Map();
-    members.forEach((item) => {
+    visibleMembers.forEach((item) => {
       const rawRole = normalizeText(item?.role || item?.type);
       const roleKey = normalizeRole(rawRole) || 'member';
       counts.set(roleKey, {
@@ -349,7 +375,7 @@ export const DirectoryContent = ({ onNavigate, variant = 'page' }) => {
       });
     });
     return counts;
-  }, [members]);
+  }, [visibleMembers]);
 
   const visibleRoleFilters = useMemo(() => {
     if (configuredDirectoryRoles.length > 0) {
@@ -375,10 +401,10 @@ export const DirectoryContent = ({ onNavigate, variant = 'page' }) => {
 
   const filteredMembers = useMemo(() => {
     const normalizedQuery = String(query || '').trim().toLowerCase();
-    let roleFiltered = members;
+    let roleFiltered = visibleMembers;
 
     if (activeRole !== 'all') {
-      roleFiltered = members.filter((item) => {
+      roleFiltered = visibleMembers.filter((item) => {
         const role = normalizeRole(item?.role || item?.type) || 'member';
         return role === activeRole;
       });
@@ -401,7 +427,7 @@ export const DirectoryContent = ({ onNavigate, variant = 'page' }) => {
         .toLowerCase();
       return haystack.includes(normalizedQuery);
     });
-  }, [members, query, activeRole]);
+  }, [visibleMembers, query, activeRole]);
 
   const sortedMembers = useMemo(() => {
     const items = [...filteredMembers];
@@ -435,7 +461,7 @@ export const DirectoryContent = ({ onNavigate, variant = 'page' }) => {
     return items;
   }, [filteredMembers, sortMode, query]);
 
-  const isSearchActive = Boolean(String(query || '').trim()) || activeRole !== 'all';
+  const isSearchActive = Boolean(String(query || '').trim()) || activeRole !== 'all' || visibleMembers.length !== members.length;
   const effectiveTotalForPagination = isSearchActive
     ? sortedMembers.length
     : Math.max(totalCount, sortedMembers.length);
@@ -454,6 +480,7 @@ export const DirectoryContent = ({ onNavigate, variant = 'page' }) => {
 
   const openMemberDetails = (item) => {
     if (item?.Privacy === true) return;
+    track('member_open');
     const resolvedPhotoUrl = resolveMemberPhotoUrl(item);
     const memberData = {
       'S. No.': item?.['S. No.'] || item?.id || 'N/A',
@@ -540,6 +567,7 @@ export const DirectoryContent = ({ onNavigate, variant = 'page' }) => {
           <Search className="h-4 w-4" style={{ color: 'var(--advertisement-card-bg)' }} />
           <input
             type="text"
+            data-track="search_click"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search by name, company, role, membership, mobile"

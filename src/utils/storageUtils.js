@@ -52,6 +52,13 @@ const compactMembership = (membership = {}) => ({
   membership_number: membership?.membership_number || membership?.['Membership number'] || null,
   qr_code: membership?.qr_code || null,
   trust_status: membership?.trust_status ?? null,
+  version: membership?.version ?? null,
+  web_app_url: membership?.web_app_url || null,
+  instagram_link: membership?.instagram_link || null,
+  facebook_link: membership?.facebook_link || null,
+  whatsapp_link: membership?.whatsapp_link || null,
+  linkedin_link: membership?.linkedin_link || null,
+  youtube_url: membership?.youtube_url || null,
   source: membership?.source || null,
 });
 
@@ -87,7 +94,9 @@ export const hasAnyTrustMembership = (user = {}) =>
 
 export const compactUserForStorage = (user = {}) => {
   const memberships = Array.isArray(user?.hospital_memberships) ? user.hospital_memberships : [];
-  const compactMemberships = memberships.slice(0, 25).map(compactMembership);
+  // No cap: a truncated list can drop the logged-in app's Trust (memberships
+  // are alphabetical), and Home then falls back to a different Trust.
+  const compactMemberships = memberships.map(compactMembership);
   const normalizedMembersId = isUuid(user?.members_id) ? String(user.members_id).trim() : null;
   const normalizedMemberId = isUuid(user?.member_id) ? String(user.member_id).trim() : normalizedMembersId;
   const compactMemberIds = Array.from(
@@ -176,6 +185,7 @@ export const clearTenantUserSession = () => {
   try {
     localStorage.removeItem(USER_STORAGE_KEY);
     localStorage.removeItem(LOGGED_IN_STORAGE_KEY);
+    localStorage.removeItem('setu_session_token');
     localStorage.removeItem('selected_trust_id');
     localStorage.removeItem('selected_trust_name');
     localStorage.removeItem('last_selected_trust_id');

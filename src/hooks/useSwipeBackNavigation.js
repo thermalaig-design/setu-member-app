@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { useLocation } from 'react-router-dom';
+import { useNavigation } from '../context/ImprovedNavigationProvider';
 
 /**
  * Swipe-back navigation hook
@@ -12,11 +13,11 @@ import { useLocation, useNavigate } from 'react-router-dom';
 export const useSwipeBackNavigation = (options = {}) => {
   const {
     enabled = true,
-    edgeWidth = 24,       // px from left edge to start gesture
+    edgeWidth = 30,       // px from left edge to start gesture
     minSwipeDistance = 60 // minimum horizontal distance to trigger
   } = options;
 
-  const navigate = useNavigate();
+  const { goBack } = useNavigation();
   const location = useLocation();
   const touchStartX = useRef(0);
   const touchStartY = useRef(0);
@@ -57,7 +58,7 @@ export const useSwipeBackNavigation = (options = {}) => {
       if (startX > edgeWidth) return;
 
       // Require mostly horizontal swipe
-      if (deltaX < minSwipeDistance || deltaY > 40) return;
+      if (deltaX < minSwipeDistance || deltaY > 60) return;
 
       // Root screens where we SHOULD NOT navigate back
       const rootScreens = ['/', '/home', '/login'];
@@ -65,8 +66,8 @@ export const useSwipeBackNavigation = (options = {}) => {
         return;
       }
 
-      // Navigate back in history
-      navigate(-1);
+      // Same logic as the Android back button (sidebar, page handlers, parent route)
+      goBack();
     };
 
     // Use passive listeners to keep scroll performance smooth
@@ -79,7 +80,7 @@ export const useSwipeBackNavigation = (options = {}) => {
       window.removeEventListener('touchmove', handleTouchMove);
       window.removeEventListener('touchend', handleTouchEnd);
     };
-  }, [enabled, edgeWidth, minSwipeDistance, location.pathname, navigate]);
+  }, [enabled, edgeWidth, minSwipeDistance, location.pathname, goBack]);
 };
 
 

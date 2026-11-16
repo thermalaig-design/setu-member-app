@@ -1,11 +1,13 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useBackNavigation } from './hooks';
-import { verifyOTP } from './services/authService';
+import { verifyOTP, completeSetuLogin } from './services/authService';
 import { fetchDirectoryData } from './services/directoryService';
 import { fetchActiveTrustsByMobile, fetchMemberTrustMemberships, fetchTrustById, fetchTrustByAppSlug } from './services/trustService';
 import { logUserSessionEvent } from './services/sessionAuditService';
 import { trackMetaEvent } from './services/metaEvents';
+import { track, trackLogin } from './services/analytics';
+import { getSystemInfoMetadata } from './services/systemInfoService';
 import { persistUserSession } from './utils/storageUtils';
 import { setLoginTermsPromptPending } from './utils/legalContent';
 import { useTenant } from './context/TenantContext';
@@ -116,6 +118,7 @@ function OTPVerification() {
     : (user ? [user] : []);
   const [otpVerified, setOtpVerified] = useState(false);
   const [verifiedLoginMethod, setVerifiedLoginMethod] = useState('otp');
+  const [loginProof, setLoginProof] = useState('');
   const [selectedAccountId, setSelectedAccountId] = useState(accountCandidates[0]?.members_id || accountCandidates[0]?.id || '');
   const phoneNumber = location.state?.phoneNumber || '';
   const isOtpFlowAllowed = sessionStorage.getItem(OTP_FLOW_KEY) === 'normal';
@@ -158,7 +161,9 @@ function OTPVerification() {
     return accountCandidates.find((account) => String(account?.members_id || account?.id || '') === selectedId) || accountCandidates[0];
   };
 
-  const completeLogin = async (selectedUser, loginMethod = 'otp') => {
+  // `proof` is passed explicitly on the single-account path, where the
+  // loginProof state set a moment earlier has not re-rendered yet.
+  const completeLogin = async (selectedUser, loginMethod = 'otp', proof = loginProof) => {
     const allAccountMemberIds = Array.from(new Set(
       (Array.isArray(accountCandidates) ? accountCandidates : [])
         .map((account) => account?.members_id || account?.id || null)
@@ -318,16 +323,6 @@ function OTPVerification() {
       return false;
     }
 
-    await logUserSessionEvent({
-      user: enrichedUser,
-      actionType: 'login',
-      extra: {
-        source: 'otp',
-        login_method: loginMethod,
-        trust_id: normalizeText(TRUST_ID || authDefaultTrust.id) || null
-      }
-    });
-
     const selectedMemberships = Array.isArray(enrichedUser?.hospital_memberships) ? enrichedUser.hospital_memberships : [];
     const baseTrustId = normalizeText(TRUST_ID || authDefaultTrust.id);
     const baseMembership = selectedMemberships.find((membership) => normalizeText(membership?.trust_id) === baseTrustId) || null;
@@ -347,6 +342,32 @@ function OTPVerification() {
       baseMembershipTrustId: normalizeText(baseMembership?.trust_id),
       fallbackMembershipTrustId: normalizeText(fallbackMembership?.trust_id)
     });
+
+    // Server-verified session token (used later for User Panel auto-login).
+    // Never fabricated client-side: on failure the SETU login proceeds without
+    // it and the User Panel falls back to its normal login page.
+    try { localStorage.removeItem('setu_session_token'); } catch { /* ignore */ }
+    const sessionMemberId = normalizeText(
+      selectedUser?.members_id || selectedUser?.member_id || selectedUser?.id
+    );
+    if (proof && sessionMemberId) {
+      try {
+        const sessionResult = await completeSetuLogin({
+          loginProof: proof,
+          memberId: sessionMemberId,
+          trustId: selectedTrustId || null
+        });
+        if (sessionResult?.setuSessionToken) {
+          localStorage.setItem('setu_session_token', sessionResult.setuSessionToken);
+        }
+      } catch (err) {
+        console.warn('[OTP] complete-login failed:', err?.message || err);
+      }
+    }
+
+    // Final member + trust are settled here; {} on web or on any failure.
+    const systemInfo = await getSystemInfoMetadata();
+
     const selectedTrustName = isTenantAuth
       ? (tenantTrustName || normalizeText(localStorage.getItem('selected_trust_name')))
       : normalizeText(
@@ -355,6 +376,27 @@ function OTPVerification() {
         authDefaultTrust?.name ||
         localStorage.getItem('selected_trust_name')
       );
+
+    // The session row's trust_name must name the same Trust as its trust_id,
+    // not enrichedUser.trust (the first active membership).
+    const selectedTrustMembership = selectedMemberships.find(
+      (membership) => normalizeText(membership?.trust_id) === normalizeText(selectedTrustId)
+    );
+    const loginTrustName = isTenantAuth
+      ? selectedTrustName
+      : normalizeText(selectedTrustMembership?.trust_name) || selectedTrustName;
+
+    await logUserSessionEvent({
+      user: enrichedUser,
+      actionType: 'login',
+      extra: {
+        ...systemInfo,
+        source: 'otp',
+        login_method: loginMethod,
+        trust_id: selectedTrustId || null,
+        trust_name: loginTrustName || null
+      }
+    });
 
     localStorage.setItem('selected_trust_id', String(selectedTrustId));
     localStorage.setItem(LAST_SELECTED_TRUST_ID_KEY, String(selectedTrustId));
@@ -374,7 +416,8 @@ function OTPVerification() {
     // (see tenantNavigation.js), which would otherwise drop tenant identity
     // for a tenant login completed in an ordinary browser tab (not yet
     // installed). Non-tenant auth is completely unchanged.
-    navigate(isTenantAuth ? `/app/${tenantSlug}` : getAppHomePath(), { replace: true });
+    // Trailing slash keeps the URL inside the manifest scope '/app/<slug>/'.
+    navigate(isTenantAuth ? `/app/${tenantSlug}/` : getAppHomePath(), { replace: true });
     return true;
   };
 
@@ -402,11 +445,13 @@ function OTPVerification() {
         trustId: normalizeText(authDefaultTrust.id)
       });
       if (!result.success) {
+        track('api_error', { screen_name: 'otp_verification', code: 'otp_verify_failed' });
         setError(result.message || 'Invalid OTP. Please try again.');
         setLoading(false);
         return;
       }
       setVerifiedLoginMethod(result?.loginMethod === 'secret_code' ? 'secret_code' : 'otp');
+      setLoginProof(result.loginProof || '');
 
       if (!user) {
         setError('User data not found. Please go back and try again.');
@@ -418,6 +463,7 @@ function OTPVerification() {
       // TODO: verify-otp / check-phone responses expose no new-user flag yet; once the
       // backend returns one, send this only for new users.
       trackMetaEvent('fb_mobile_complete_registration', { fb_registration_method: 'phone_otp' });
+      trackLogin();
 
       if (accountCandidates.length > 1) {
         setError('');
@@ -428,9 +474,14 @@ function OTPVerification() {
         return;
       }
 
-      await completeLogin(accountCandidates[0] || user, result?.loginMethod === 'secret_code' ? 'secret_code' : 'otp');
+      await completeLogin(
+        accountCandidates[0] || user,
+        result?.loginMethod === 'secret_code' ? 'secret_code' : 'otp',
+        result.loginProof || ''
+      );
     } catch (err) {
       console.error('[OTP] Verify error:', err);
+      track('api_error', { screen_name: 'otp_verification', code: 'otp_verify_exception' });
       setError(
         otpVerified
           ? 'Failed to continue with selected account. Please try again.'
