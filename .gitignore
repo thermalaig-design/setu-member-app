@@ -3,6 +3,7 @@ dist/
 dist-capacitor/
 .env
 backend/.env
+android
 
 backend/node_modules/
 .vite/
