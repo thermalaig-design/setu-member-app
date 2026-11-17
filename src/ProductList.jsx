@@ -10,6 +10,7 @@ import { useAppTheme } from './context/ThemeContext';
 import { supabase } from './services/supabaseClient';
 import { track } from './services/analytics';
 import { colorToHex } from './utils/colorUtils';
+import { getDisplayPricing } from './utils/productPricing';
 import { getNavbarThemeStyles } from './utils/themeUtils';
 import {
   getWishlistKey,
@@ -661,7 +662,7 @@ const buildScopedProducts = (categoryId, categories) => {
 };
 
 const getComparablePrice = (price) => {
-  const value = Number(price?.price_after_discount ?? price?.total_payable ?? price?.mrp);
+  const value = getDisplayPricing(price)?.total ?? Number(price?.price_after_discount ?? price?.total_payable ?? price?.mrp);
   return Number.isFinite(value) ? value : Number.MAX_SAFE_INTEGER;
 };
 
@@ -1080,9 +1081,13 @@ function SortSheet({ open, onClose, value, onChange, primaryColor }) {
 
 const Price = ({ price, size = 'md' }) => {
   const big = size === 'lg';
-  const mrp = Number(price?.mrp ?? price?.price_after_discount ?? price?.total_payable);
-  const salePrice = Number(price?.price_after_discount ?? price?.total_payable ?? price?.mrp);
-  const discountPct = Number(price?.discount_pct ?? 0);
+  // Always show the all-inclusive amount (price after discount + GST + other charges).
+  const display = getDisplayPricing(price);
+  const salePrice = display
+    ? display.total
+    : Number(price?.price_after_discount ?? price?.total_payable ?? price?.mrp);
+  const mrp = display?.mrpTotal ?? salePrice;
+  const discountPct = display?.hasDiscount ? display.discountPct : 0;
 
   if (!price || !Number.isFinite(salePrice)) {
     return (
@@ -1702,11 +1707,11 @@ const ProductList = ({ categoryId, onBack, onOpenProduct }) => {
         .ws-whitedoor-c1, .ws-whitedoor-c2 { position: absolute; top: 0; width: 14px; height: 14px; border-radius: 999px; border: 1.5px solid ${T.ink}; }
         .ws-whitedoor-c1 { left: 0; } .ws-whitedoor-c2 { left: 6px; }
 
-        .ws-breadcrumb { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 14px 18px 0; font-size: 11.5px; color: ${T.inkSoft}; }
+        .ws-breadcrumb { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 14px 18px 0; font-size: 11.5px; font-weight: 600; color: color-mix(in srgb, var(--page-text-color, var(--body-text-color)) 85%, transparent); }
         .ws-breadcrumb-link { border: 0; background: none; padding: 0; color: inherit; font: inherit; cursor: pointer; text-align: left; }
         .ws-breadcrumb-link:active { opacity: 0.72; }
         .ws-breadcrumb-link:focus-visible { outline: 2px solid ${T.clay}; outline-offset: 3px; border-radius: 4px; }
-        .ws-breadcrumb-separator { color: ${T.inkFaint}; }
+        .ws-breadcrumb-separator { color: color-mix(in srgb, var(--page-text-color, var(--body-text-color)) 55%, transparent); }
         .ws-plp-toolbar { display: flex; flex-direction: column; gap: 10px; padding: 12px 18px; }
         .ws-plp-search {
           display: flex;

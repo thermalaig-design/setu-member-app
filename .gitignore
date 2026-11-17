@@ -4,6 +4,8 @@ dist-capacitor/
 .env
 backend/.env
 android
+android/
+ios/
 
 backend/node_modules/
 .vite/

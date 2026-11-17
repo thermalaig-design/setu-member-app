@@ -27,6 +27,7 @@ import {
   isTrustCatalogCacheFresh,
   readTrustCatalogCache,
 } from './utils/trustCatalogCache';
+import { lockBodyScroll } from './utils/scrollLock';
 
 const T = {
   text: 'var(--body-text-color)',
@@ -536,9 +537,26 @@ const CartSummarySkeleton = () => (
   </div>
 );
 
+// Dark page = the theme's page-text colour (always chosen to contrast with the
+// page background) is light.
+const isPageDark = () => {
+  if (typeof document === 'undefined') return false;
+  const probe = document.createElement('div');
+  probe.style.color = 'var(--page-text-color, var(--body-text-color))';
+  probe.style.display = 'none';
+  document.body.appendChild(probe);
+  const match = getComputedStyle(probe).color.match(/rgba?\(([^)]+)\)/);
+  document.body.removeChild(probe);
+  if (!match) return false;
+  const [r, g, b] = match[1].split(',').map((n) => parseFloat(n) / 255);
+  const lin = (c) => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
+  return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b) > 0.5;
+};
+
 function Cart() {
   const navigate = useNavigate();
   const theme = useAppTheme();
+  const pageDark = useMemo(() => isPageDark(), [theme]); // eslint-disable-line react-hooks/exhaustive-deps
   const primaryColor = theme?.primary || 'var(--brand-red)';
   const navbarTheme = getNavbarThemeStyles(theme);
   const navbarTextColor = navbarTheme?.textColor || 'var(--navbar-text)';
@@ -607,12 +625,7 @@ function Cart() {
   useEffect(() => {
     if (!removalPrompt || typeof document === 'undefined') return undefined;
 
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-
-    return () => {
-      document.body.style.overflow = previousOverflow;
-    };
+    return lockBodyScroll();
   }, [removalPrompt]);
   useEffect(() => {
     if (removalPrompt) {
@@ -1001,7 +1014,7 @@ function Cart() {
   };
 
   return (
-    <main className="cart-page">
+    <main className={`cart-page${pageDark ? ' cart-page--dark' : ''}`}>
       <div
         className="theme-navbar sticky top-0 z-20"
         style={{
@@ -1031,7 +1044,7 @@ function Cart() {
               <h1 className="truncate text-lg font-extrabold tracking-wide" style={{ color: navbarTextColor }}>
                 {titleCaseText('Cart')}
               </h1>
-              <p className="mt-0.5 text-[11px] font-medium" style={{ color: T.muted }}>
+              <p className="mt-0.5 text-[11px] font-medium" style={{ color: pageDark ? 'color-mix(in srgb, var(--navbar-text) 78%, transparent)' : T.muted }}>
                 {summary.totalQuantity > 0
                   ? titleCaseText(`${summary.totalQuantity} item${summary.totalQuantity === 1 ? '' : 's'} in cart`)
                   : titleCaseText('Your shopping cart')}
@@ -1240,7 +1253,7 @@ function Cart() {
                     navigate(checkoutTrustId ? `/create-order?trustId=${encodeURIComponent(checkoutTrustId)}` : '/create-order');
                   }}
                 >
-                  {titleCaseText('Create order')}
+                  {titleCaseText('Confirm order')}
                 </button>
                 <button type="button" className="cart-secondary-btn" onClick={handleClearCart}>
                   {titleCaseText('Clear cart')}
@@ -1906,6 +1919,70 @@ function Cart() {
           color: var(--brand-navy);
           border: 1px solid color-mix(in srgb, var(--brand-navy) 18%, transparent);
         }
+        .cart-page--dark {
+          --ct-ink: var(--page-text-color, var(--body-text-color));
+          --ct-strong: var(--page-strong-color, var(--ct-ink));
+        }
+        .cart-page--dark .cart-card { border-bottom-color: color-mix(in srgb, var(--ct-ink) 16%, transparent); }
+        .cart-page--dark .cart-name { color: var(--ct-strong); }
+        .cart-page--dark .cart-price,
+        .cart-page--dark .cart-price-main { color: var(--page-price-color, var(--ct-ink)); }
+        .cart-page--dark .cart-mrp,
+        .cart-page--dark .cart-price-breakdown { color: color-mix(in srgb, var(--ct-ink) 62%, transparent); }
+        .cart-page--dark .cart-attribute-chip {
+          background: color-mix(in srgb, var(--ct-ink) 8%, transparent);
+          border-color: color-mix(in srgb, var(--ct-ink) 18%, transparent);
+          color: color-mix(in srgb, var(--ct-ink) 80%, transparent);
+        }
+        .cart-page--dark .cart-attribute-chip--interactive {
+          background: color-mix(in srgb, var(--ct-ink) 10%, transparent);
+          border-color: color-mix(in srgb, var(--ct-ink) 28%, transparent);
+          color: var(--ct-strong);
+        }
+        .cart-page--dark .cart-attribute-chip-icon { color: color-mix(in srgb, var(--ct-ink) 70%, transparent); }
+        .cart-page--dark .cart-image {
+          background: color-mix(in srgb, var(--ct-ink) 8%, transparent);
+        }
+        .cart-page--dark .cart-qty-control {
+          background: color-mix(in srgb, var(--ct-ink) 8%, transparent);
+          border-color: color-mix(in srgb, var(--ct-ink) 24%, transparent);
+        }
+        .cart-page--dark .cart-qty-btn {
+          background: color-mix(in srgb, var(--ct-ink) 12%, transparent);
+          color: var(--ct-strong);
+        }
+        .cart-page--dark .cart-qty-value { color: var(--ct-strong); }
+        .cart-page--dark .cart-remove {
+          background: color-mix(in srgb, var(--ct-ink) 12%, transparent);
+          border-color: color-mix(in srgb, var(--ct-ink) 22%, transparent);
+          color: var(--ct-strong);
+        }
+        .cart-page--dark .cart-summary {
+          background: color-mix(in srgb, var(--ct-ink) 8%, transparent);
+          border-color: color-mix(in srgb, var(--ct-ink) 16%, transparent);
+          box-shadow: 0 14px 30px color-mix(in srgb, black 30%, transparent);
+        }
+        .cart-page--dark .cart-summary-row { color: color-mix(in srgb, var(--ct-ink) 70%, transparent); }
+        .cart-page--dark .cart-summary-row strong { color: var(--ct-strong); }
+        .cart-page--dark .cart-summary-total { border-top-color: color-mix(in srgb, var(--ct-ink) 20%, transparent); }
+        .cart-page--dark .cart-secondary-btn {
+          background: color-mix(in srgb, var(--ct-ink) 10%, transparent);
+          border-color: color-mix(in srgb, var(--ct-ink) 30%, transparent);
+          color: var(--ct-strong);
+        }
+        .cart-page--dark .ws-skeleton { background: color-mix(in srgb, var(--ct-ink) 12%, transparent); }
+        .cart-page--dark .ws-skeleton::after {
+          background: linear-gradient(
+            180deg,
+            transparent 0%,
+            color-mix(in srgb, var(--ct-ink) 18%, transparent) 48%,
+            transparent 100%
+          );
+          opacity: 0.7;
+        }
+        .cart-page--dark .ws-skeleton-img { border-color: color-mix(in srgb, var(--ct-ink) 16%, transparent); }
+        .cart-page--dark .cart-skeleton-button--secondary { background: color-mix(in srgb, var(--ct-ink) 8%, transparent); }
+        .cart-page--dark .cart-summary--skeleton .cart-summary-row--total { border-top-color: color-mix(in srgb, var(--ct-ink) 16%, transparent); }
         .cart-modal-overlay {
           position: fixed;
           inset: 0;

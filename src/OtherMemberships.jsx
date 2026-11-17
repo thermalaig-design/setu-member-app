@@ -16,6 +16,7 @@ import { isFeatureVisible } from './services/featureFlags';
 import { useFeatureFlags } from './hooks/useFeatureFlags';
 import { getAppHomePath } from './utils/tenantNavigation';
 import { trackAction } from './services/pageTrackingService';
+import { lockBodyScroll, releaseStaleScrollLock } from './utils/scrollLock';
 
 // ─── Supabase helpers ──────────────────────────────────────────────────────
 
@@ -526,6 +527,24 @@ const isLightBackground = (bgColor) => {
   return getRelativeLuminance(rgb) > 0.6;
 };
 
+// Theme-derived palette for the dark look. Every colour is a color-mix() of
+// the tenant's own primary/secondary tokens (plus neutral black/white for
+// depth), so nothing is hardcoded and it re-tints with the theme.
+const mixPct = (a, pct, b) => `color-mix(in srgb, ${a} ${pct}%, ${b})`;
+const mixAlpha = (c, alpha) => mixPct(c, Math.round(alpha * 100), 'transparent');
+const buildDarkPalette = (primary, secondary) => {
+  const ink = mixPct(secondary, 45, 'black');
+  return {
+    gold: primary,
+    goldLight: mixPct(primary, 55, 'white'),
+    ink,
+    inkHi: mixPct(secondary, 80, 'black'),
+    inkWarm: mixPct(primary, 8, ink),
+    name: mixPct(primary, 8, 'white'),
+    legal: mixPct(secondary, 12, 'white'),
+  };
+};
+
 const OtherMemberships = ({ onNavigate, variant = 'page' }) => {
   const navigate = useNavigate();
   const isHomeVariant = variant === 'home';
@@ -565,6 +584,7 @@ const OtherMemberships = ({ onNavigate, variant = 'page' }) => {
   // card styling; only tenants with a light page background get theme-driven
   // card colors instead.
   const isLightTheme = useMemo(() => isLightBackground(colors.bg), [colors.bg]);
+  const om = buildDarkPalette(colors.primary, colors.secondary);
 
   // ── state ──
   const [trustLinks, setTrustLinks] = useState(initialTrustLinks); // from reg_members-backed user payload
@@ -638,14 +658,8 @@ const OtherMemberships = ({ onNavigate, variant = 'page' }) => {
 
   // Clear any temporary global scroll-lock styles left by previous screens.
   useEffect(() => {
-    if (isHomeVariant) return undefined;
-    document.documentElement.style.overflow = '';
-    document.documentElement.style.position = '';
-    document.body.style.overflow = '';
-    document.body.style.position = '';
-    document.body.style.width = '';
-    document.body.style.top = '';
-    document.body.style.touchAction = '';
+    if (isHomeVariant) return;
+    releaseStaleScrollLock();
   }, [isHomeVariant]);
 
   useEffect(() => {
@@ -654,23 +668,14 @@ const OtherMemberships = ({ onNavigate, variant = 'page' }) => {
   }, [loadData, initialTrustLinks.length]);
 
   useEffect(() => {
-    if (isHomeVariant) return undefined;
-    if (isMenuOpen) {
-      const y = window.scrollY;
-      Object.assign(document.body.style, { overflow: 'hidden', position: 'fixed', width: '100%', top: `-${y}px` });
-    } else {
-      const y = parseInt(document.body.style.top || '0', 10) * -1;
-      Object.assign(document.body.style, { overflow: '', position: '', width: '', top: '' });
-      window.scrollTo(0, Number.isFinite(y) ? y : 0);
-    }
-    return () => Object.assign(document.body.style, { overflow: '', position: '', width: '', top: '' });
+    if (isHomeVariant || !isMenuOpen) return undefined;
+    return lockBodyScroll();
   }, [isMenuOpen, isHomeVariant]);
 
   useEffect(() => {
     if (!trustCardModalData) return undefined;
 
-    const y = window.scrollY;
-    Object.assign(document.body.style, { overflow: 'hidden', position: 'fixed', width: '100%', top: `-${y}px` });
+    const releaseScroll = lockBodyScroll();
 
     const handleKeyDown = (event) => {
       if (event.key === 'Escape') {
@@ -682,9 +687,7 @@ const OtherMemberships = ({ onNavigate, variant = 'page' }) => {
 
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
-      const restoredY = parseInt(document.body.style.top || '0', 10) * -1;
-      Object.assign(document.body.style, { overflow: '', position: '', width: '', top: '' });
-      window.scrollTo(0, Number.isFinite(restoredY) ? restoredY : 0);
+      releaseScroll();
     };
   }, [trustCardModalData]);
 
@@ -853,7 +856,7 @@ const OtherMemberships = ({ onNavigate, variant = 'page' }) => {
         <div style={{ padding: '16px 16px 14px' }}>
           {/* Header row */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '14px' }}>
-            <TrustAvatar trust={m.Trust || { name: trustName, icon_url: null }} />
+            {TrustAvatar({ trust: m.Trust || { name: trustName, icon_url: null } })}
             <div style={{ flex: 1, minWidth: 0 }}>
               <h3 style={{ fontSize: '15px', fontWeight: 800, color: 'var(--heading-color)', margin: '0 0 5px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 {trustName}
@@ -947,19 +950,19 @@ const OtherMemberships = ({ onNavigate, variant = 'page' }) => {
           legalColor: 'var(--advertisement-description)',
         }
       : {
-          cardBg: 'linear-gradient(155deg, rgba(28,31,45,0.98) 0%, rgba(13,15,24,0.99) 62%, rgba(20,17,10,0.99) 100%)',
-          border: 'rgba(226, 178, 39, 0.22)',
-          borderHover: 'rgba(226, 178, 39, 0.6)',
-          shadow: '0 8px 24px rgba(0,0,0,0.34), inset 0 1px 0 rgba(255,255,255,0.05)',
-          shadowHover: '0 16px 36px rgba(0,0,0,0.4), 0 0 0 1px rgba(226,178,39,0.18), inset 0 1px 0 rgba(255,255,255,0.07)',
-          accentLine: 'linear-gradient(90deg, transparent, rgba(226,178,39,0.75) 40%, rgba(255,213,110,0.95) 60%, transparent)',
-          glow: 'radial-gradient(circle, rgba(226,178,39,0.10), transparent 70%)',
-          avatarFrame: 'linear-gradient(135deg, rgba(226,178,39,0.35), rgba(226,178,39,0.05))',
-          badgeText: 'rgba(226,178,39,0.75)',
-          badgeBg: 'rgba(226,178,39,0.08)',
-          badgeBorder: 'rgba(226,178,39,0.22)',
-          nameColor: '#f6f2e6',
-          legalColor: 'rgba(224,230,241,0.58)',
+          cardBg: `linear-gradient(155deg, ${om.inkHi} 0%, ${om.ink} 62%, ${om.inkWarm} 100%)`,
+          border: mixAlpha(om.gold, 0.22),
+          borderHover: mixAlpha(om.gold, 0.6),
+          shadow: `0 8px 24px ${mixAlpha('black', 0.34)}, inset 0 1px 0 ${mixAlpha('white', 0.05)}`,
+          shadowHover: `0 16px 36px ${mixAlpha('black', 0.4)}, 0 0 0 1px ${mixAlpha(om.gold, 0.18)}, inset 0 1px 0 ${mixAlpha('white', 0.07)}`,
+          accentLine: `linear-gradient(90deg, transparent, ${mixAlpha(om.gold, 0.75)} 40%, ${mixAlpha(om.goldLight, 0.95)} 60%, transparent)`,
+          glow: `radial-gradient(circle, ${mixAlpha(om.gold, 0.10)}, transparent 70%)`,
+          avatarFrame: `linear-gradient(135deg, ${mixAlpha(om.gold, 0.35)}, ${mixAlpha(om.gold, 0.05)})`,
+          badgeText: mixAlpha(om.gold, 0.75),
+          badgeBg: mixAlpha(om.gold, 0.08),
+          badgeBorder: mixAlpha(om.gold, 0.22),
+          nameColor: om.name,
+          legalColor: mixAlpha(om.legal, 0.58),
         };
 
   // Home variant shows only the first few apps; this tile opens the full list page.
@@ -1129,7 +1132,7 @@ const OtherMemberships = ({ onNavigate, variant = 'page' }) => {
               borderRadius: '13px',
               background: tile.avatarFrame,
             }}>
-              <TrustAvatar trust={link.Trust || { name: trustName, icon_url: null }} size={36} />
+              {TrustAvatar({ trust: link.Trust || { name: trustName, icon_url: null }, size: 36 })}
             </div>
             <span style={{
               fontSize: '7px',
@@ -1233,7 +1236,7 @@ const OtherMemberships = ({ onNavigate, variant = 'page' }) => {
             borderRadius: '13px',
             background: tile.avatarFrame,
           }}>
-            <TrustAvatar trust={link.Trust || { name: trustName, icon_url: null }} size={36} />
+            {TrustAvatar({ trust: link.Trust || { name: trustName, icon_url: null }, size: 36 })}
           </div>
           <span style={{
             fontSize: '7px',
@@ -1294,6 +1297,7 @@ const OtherMemberships = ({ onNavigate, variant = 'page' }) => {
         overflow: 'visible',
         fontFamily: "var(--font-family, 'Inter', sans-serif)",
         boxSizing: 'border-box',
+        '--om-gold': om.gold,
       }}
     >
       {/* ── Header ── */}
@@ -1396,7 +1400,7 @@ const OtherMemberships = ({ onNavigate, variant = 'page' }) => {
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                   {sortedOtherMems.map((m, idx) => (
-                    <MembershipCard key={m.id} m={m} index={idx} showGoldenMembershipBadge={false} />
+                    <React.Fragment key={m.id}>{MembershipCard({ m, index: idx, showGoldenMembershipBadge: false })}</React.Fragment>
                   ))}
                 </div>
               </div>
@@ -1409,21 +1413,22 @@ const OtherMemberships = ({ onNavigate, variant = 'page' }) => {
                 style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', columnGap: '9px', rowGap: '10px' }}
               >
                 {visibleTrustLinks.map((link, index) => (
-                  <TrustLinkTile
-                    key={link.id || index}
-                    link={link}
-                    onClick={() => handleOpenTrustWebApp(link)}
-                    onOpenCard={() => openTrustIdCard(link)}
-                    isLoading={openingTrustId === normalizeText(link?.trust_id || link?.Trust?.id)}
-                    isIOS={isIOS}
-                    resolvedUrl={trustWebAppUrls[normalizeText(link?.trust_id || link?.Trust?.id)]}
-                  />
+                  <React.Fragment key={link.id || index}>
+                    {TrustLinkTile({
+                      link,
+                      onClick: () => handleOpenTrustWebApp(link),
+                      onOpenCard: () => openTrustIdCard(link),
+                      isLoading: openingTrustId === normalizeText(link?.trust_id || link?.Trust?.id),
+                      isIOS,
+                      resolvedUrl: trustWebAppUrls[normalizeText(link?.trust_id || link?.Trust?.id)],
+                    })}
+                  </React.Fragment>
                 ))}
                 {hasMoreTrustLinks ? (
-                  <ViewMoreTile
-                    count={sortedTrustLinks.length}
-                    onClick={() => (onNavigate ? onNavigate('other-memberships') : navigate('/other-memberships'))}
-                  />
+                  ViewMoreTile({
+                    count: sortedTrustLinks.length,
+                    onClick: () => (onNavigate ? onNavigate('other-memberships') : navigate('/other-memberships')),
+                  })
                 ) : null}
               </div>
             )}

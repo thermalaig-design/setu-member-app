@@ -3,6 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { ChevronLeft, Home as HomeIcon, ShoppingCart, Shirt, Sparkles, Heart, Briefcase, Dumbbell, Baby, Footprints, Lamp, Droplet, Palette, Gem, RefreshCw, X } from "lucide-react";
 import { useAppTheme } from './context/ThemeContext';
 import { supabase } from './services/supabaseClient';
+import { formatInr, getDisplayPricing } from './utils/productPricing';
+import { useThemeButtonVars } from './utils/themeButtonVars';
 import { getNavbarThemeStyles } from './utils/themeUtils';
 import {
   isWishlistProductInItems,
@@ -20,6 +22,7 @@ import {
   readTrustCatalogCacheForCandidates,
   writeTrustCatalogCache,
 } from './utils/trustCatalogCache';
+import { lockBodyScroll } from './utils/scrollLock';
 
 
 const THEME = {
@@ -34,13 +37,15 @@ const THEME = {
   buttonText: 'var(--app-button-text)',
   accentBg: 'var(--app-accent-bg)',
 };
+// Every colour below resolves from the active theme (see the --pd-* tokens on .ws-page),
+// so the page stays readable on light, dark and gradient themes alike.
 const T = {
-  bg: "#FFFFFF",
-  ink: 'var()',
-  inkSoft: "#726F68",
-  inkFaint: "#A9A399",
-  line: "#E7E2D8",
-  paper: "#F7F4EE",
+  bg: 'var(--pd-card)',
+  ink: 'var(--pd-ink)',
+  inkSoft: 'var(--pd-soft)',
+  inkFaint: 'var(--pd-faint)',
+  line: 'var(--pd-line)',
+  paper: 'var(--pd-tint-strong)',
   clay: "#c74212",
   clayDeep: "#8A3D22",
   sage: "#8B9578",
@@ -67,7 +72,7 @@ const FALLBACK_ICONS = [
 
 const DESCRIPTION_COLLAPSE_LINES = 10;
 
-const SKELETON_BG = 'color-mix(in srgb, var(--brand-navy) 8%, transparent)';
+const SKELETON_BG = 'color-mix(in srgb, var(--page-text-color, var(--body-text-color)) 10%, transparent)';
 const SKELETON_BORDER = 'color-mix(in srgb, var(--brand-navy) 12%, transparent)';
 const SHADOW = '0 18px 36px color-mix(in srgb, var(--brand-navy) 10%, transparent)';
 const VISIBLE_CATEGORY_STATUSES = new Set(['active']);
@@ -75,6 +80,9 @@ const IMAGE_ZOOM_MIN_SCALE = 1;
 const IMAGE_ZOOM_MAX_SCALE = 4;
 const HERO_DRAG_ACTIVATION_PX = 8;
 const HERO_CLICK_SUPPRESS_MS = 250;
+const trustGatewayCache = new Map();
+const HERO_AUTOPLAY_MS = 3500;
+const HERO_AUTOPLAY_PAUSE_MS = 7000;
 const HERO_SWIPE_THRESHOLD_PX = 48;
 const IMAGE_ZOOM_RESET_EPSILON = 0.02;
 const PRODUCT_SPEC_TABS = [
@@ -930,6 +938,79 @@ const buildProductDetailState = (categoryId, productId, categories) => {
   };
 };
 
+// Variants: a base product has root_product_id = null; its variants point to it via root_product_id.
+// Every row sharing the same base id (the base itself + all rows pointing to it) is one variant group.
+const getVariantGroupKey = (product) => pickText(product?.root_product_id, product?.id);
+
+const buildVariantGroup = (currentProduct, categories) => {
+  const groupKey = getVariantGroupKey(currentProduct);
+  if (!groupKey) return [];
+
+  const seen = new Set();
+  const members = [];
+
+  (Array.isArray(categories) ? categories : []).forEach((category) => {
+    (Array.isArray(category?.products) ? category.products : []).forEach((item) => {
+      const id = pickText(item?.id);
+      if (!id || seen.has(id) || !isVisibleProduct(item)) return;
+      if (getVariantGroupKey(item) !== groupKey) return;
+      seen.add(id);
+      members.push({ ...item, id, category_id: pickText(category?.id) });
+    });
+  });
+
+  if (members.length < 2) return [];
+
+  members.sort((a, b) => (
+    (pickText(a.root_product_id) ? 1 : 0) - (pickText(b.root_product_id) ? 1 : 0)
+    || normalizeOrder(a.sort_order) - normalizeOrder(b.sort_order)
+    || pickText(a.created_at).localeCompare(pickText(b.created_at))
+  ));
+
+  const activeAttrValues = (item) => (Array.isArray(item?.attribute_values) ? item.attribute_values : [])
+    .filter((row) => {
+      const status = normalizeAttributeType(row?.status);
+      return (!status || status === 'active') && pickText(row?.value, row?.attribute_value);
+    })
+    .map((row) => ({
+      name: pickText(row?.attribute_name),
+      key: normalizeAttributeName(row?.attribute_name) || pickText(row?.attribute_id),
+      value: pickText(row?.value, row?.attribute_value),
+    }))
+    .filter((row) => row.key);
+
+  // Only attributes whose value differs between siblings describe a variant.
+  const valuesByKey = new Map();
+  members.forEach((item) => {
+    activeAttrValues(item).forEach((row) => {
+      const set = valuesByKey.get(row.key) || new Set();
+      set.add(row.value.toLowerCase());
+      valuesByKey.set(row.key, set);
+    });
+  });
+  const differingKeys = new Set(
+    [...valuesByKey.entries()].filter(([, set]) => set.size > 1).map(([key]) => key)
+  );
+
+  return members.map((item, index) => {
+    const parts = activeAttrValues(item)
+      .filter((row) => differingKeys.has(row.key))
+      .map((row) => formatAttributeValueText(row.name, row.value))
+      .filter(Boolean);
+    const label = parts.join(' · ')
+      || pickText(item.product_code, item.alias_name)
+      || `Option ${index + 1}`;
+
+    return {
+      id: item.id,
+      categoryId: item.category_id,
+      label,
+      image: resolveProductImages(item)[0] || null,
+      price: resolveProductPrice(item),
+    };
+  });
+};
+
 const buildGradient = (colors) =>
   `linear-gradient(145deg, ${colors[0]} 0%, ${colors[1]} 100%)`;
 
@@ -1058,7 +1139,6 @@ const EmptyState = ({ title, description, onRetry }) => (
 
 const ZoomableImageModal = ({ imageUrl, imageAlt, onClose }) => {
   const viewportRef = useRef(null);
-  const scrollSnapshotRef = useRef(null);
   const scaleRef = useRef(1);
   const translateRef = useRef({ x: 0, y: 0 });
   const gestureRef = useRef({
@@ -1101,23 +1181,7 @@ const ZoomableImageModal = ({ imageUrl, imageAlt, onClose }) => {
   useEffect(() => {
     if (!imageUrl) return undefined;
 
-    const scrollY = window.scrollY;
-    scrollSnapshotRef.current = {
-      htmlOverflow: document.documentElement.style.overflow,
-      bodyOverflow: document.body.style.overflow,
-      bodyPosition: document.body.style.position,
-      bodyWidth: document.body.style.width,
-      bodyTop: document.body.style.top,
-      bodyTouchAction: document.body.style.touchAction,
-      scrollY,
-    };
-
-    document.documentElement.style.overflow = 'hidden';
-    document.body.style.overflow = 'hidden';
-    document.body.style.position = 'fixed';
-    document.body.style.width = '100%';
-    document.body.style.top = `-${scrollY}px`;
-    document.body.style.touchAction = 'none';
+    const releaseScroll = lockBodyScroll();
 
     const handleKeyDown = (event) => {
       if (event.key === 'Escape') {
@@ -1128,18 +1192,7 @@ const ZoomableImageModal = ({ imageUrl, imageAlt, onClose }) => {
     window.addEventListener('keydown', handleKeyDown);
 
     return () => {
-      const snapshot = scrollSnapshotRef.current;
-      scrollSnapshotRef.current = null;
-
-      if (snapshot) {
-        document.documentElement.style.overflow = snapshot.htmlOverflow;
-        document.body.style.overflow = snapshot.bodyOverflow;
-        document.body.style.position = snapshot.bodyPosition;
-        document.body.style.width = snapshot.bodyWidth;
-        document.body.style.top = snapshot.bodyTop;
-        document.body.style.touchAction = snapshot.bodyTouchAction;
-        window.scrollTo(0, snapshot.scrollY);
-      }
+      releaseScroll();
 
       window.removeEventListener('keydown', handleKeyDown);
     };
@@ -1368,12 +1421,14 @@ const ProductDetail = ({ categoryId, productId, onBack }) => {
   const primaryColor = theme?.primary || 'var(--brand-red)';
   const navbarTheme = getNavbarThemeStyles(theme);
   const navbarTextColor = navbarTheme?.textColor || 'var(--navbar-text)';
+  const themeButtonVars = useThemeButtonVars(theme);
   const heroDragStartXRef = useRef(null);
   const heroDragStartYRef = useRef(null);
   const heroDragDeltaXRef = useRef(0);
   const heroIsDraggingRef = useRef(false);
   const heroClickSuppressedUntilRef = useRef(0);
   const actionMessageTimerRef = useRef(null);
+  const heroAutoplayPausedUntilRef = useRef(0);
   const selectionGroupRefs = useRef({});
   const [categoryPayload, setCategoryPayload] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -1392,6 +1447,9 @@ const ProductDetail = ({ categoryId, productId, onBack }) => {
   const [wishlistItems, setWishlistItems] = useState(() => readWishlistItems());
   const [cartItems, setCartItems] = useState(() => readCartItems());
   const [wishlistPending, setWishlistPending] = useState(false);
+  // null = not known yet, true = checkout (cart / buy now), false = enquiry only
+  const [paymentGatewayEnabled, setPaymentGatewayEnabled] = useState(null);
+  const [isEnquiryPopupOpen, setIsEnquiryPopupOpen] = useState(false);
   const descriptionRef = useRef(null);
   const metaViewContentLoggedIdRef = useRef(null);
 
@@ -1447,6 +1505,39 @@ const ProductDetail = ({ categoryId, productId, onBack }) => {
     };
   }, [reloadToken]);
 
+  useEffect(() => {
+    const trustId = pickText(categoryPayload?.trustId);
+    if (!trustId) return undefined;
+
+    if (trustGatewayCache.has(trustId)) {
+      setPaymentGatewayEnabled(trustGatewayCache.get(trustId));
+    }
+
+    let active = true;
+    (async () => {
+      try {
+        const { data, error: trustError } = await supabase
+          .from('Trust')
+          .select('id, payment_gateway')
+          .eq('id', trustId)
+          .maybeSingle();
+        if (trustError) throw trustError;
+        if (!active) return;
+        const enabled = Boolean(data?.payment_gateway);
+        trustGatewayCache.set(trustId, enabled);
+        setPaymentGatewayEnabled(enabled);
+      } catch (gatewayError) {
+        console.warn('[ProductDetail] Failed to load payment gateway flag:', gatewayError?.message || gatewayError);
+        // Keep the existing checkout flow if the flag cannot be read.
+        if (active && !trustGatewayCache.has(trustId)) setPaymentGatewayEnabled(true);
+      }
+    })();
+
+    return () => {
+      active = false;
+    };
+  }, [categoryPayload?.trustId]);
+
   useEffect(() => subscribeWishlist(setWishlistItems, categoryPayload?.trustId), [categoryPayload?.trustId]);
   useEffect(() => subscribeCart(setCartItems), []);
 
@@ -1474,6 +1565,11 @@ const ProductDetail = ({ categoryId, productId, onBack }) => {
     selectionAttributes = [],
   } = attributeState;
 
+  const variants = useMemo(
+    () => (product ? buildVariantGroup(product, categoryPayload?.categories || []) : []),
+    [product, categoryPayload]
+  );
+
   // Log Meta ViewContent once per product view (StrictMode re-runs and cache -> network refreshes are ignored).
   useEffect(() => {
     const viewedProductId = pickText(product?.id);
@@ -1489,7 +1585,6 @@ const ProductDetail = ({ categoryId, productId, onBack }) => {
     });
   }, [product?.id, product?.product_name]);
 
-  const visibleBreadcrumbPath = path.slice(-2);
   const activeImage = images[activeImg] || images[0] || null;
   const activeImageUrl = pickText(activeImage?.image_url);
   const heroCanPreview = Boolean(activeImageUrl);
@@ -1521,6 +1616,7 @@ const ProductDetail = ({ categoryId, productId, onBack }) => {
   );
   const bagQuantity = Number(cartItem?.quantity || 0);
   const hasPrice = Boolean(price);
+  const pricing = useMemo(() => getDisplayPricing(price), [price]);
   const productDescriptionText = pickText(product?.description, product?.short_description);
   const descriptionLines = [];
 
@@ -1657,6 +1753,24 @@ const ProductDetail = ({ categoryId, productId, onBack }) => {
     setChosen({});
   }, [cartItem?.updated_at, cartItem?.selected_attributes, productId, selectionAttributes]);
 
+  // Auto-slide the hero gallery; pauses while the user interacts / previews, and honours reduced motion.
+  const heroSlideCount = images.length;
+  useEffect(() => {
+    if (heroSlideCount <= 1 || isImagePreviewOpen) return undefined;
+    if (typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) {
+      return undefined;
+    }
+
+    const timer = setInterval(() => {
+      if (typeof document !== 'undefined' && document.hidden) return;
+      if (heroIsDraggingRef.current) return;
+      if (Date.now() < heroAutoplayPausedUntilRef.current) return;
+      setActiveImg((current) => (current + 1) % heroSlideCount);
+    }, HERO_AUTOPLAY_MS);
+
+    return () => clearInterval(timer);
+  }, [heroSlideCount, isImagePreviewOpen, productId]);
+
   useEffect(() => {
     const imageUrls = (Array.isArray(images) ? images : [])
       .map((image) => pickText(image?.image_url))
@@ -1691,6 +1805,7 @@ const ProductDetail = ({ categoryId, productId, onBack }) => {
 
   const startHeroGesture = (clientX, clientY) => {
     if (heroSlides.length <= 1) return;
+    heroAutoplayPausedUntilRef.current = Date.now() + HERO_AUTOPLAY_PAUSE_MS;
     heroDragStartXRef.current = clientX;
     heroDragStartYRef.current = clientY;
     heroDragDeltaXRef.current = 0;
@@ -1725,8 +1840,8 @@ const ProductDetail = ({ categoryId, productId, onBack }) => {
 
     if (wasDragging && Math.abs(deltaX) > HERO_SWIPE_THRESHOLD_PX) {
       setActiveImg((current) => {
-        if (deltaX < 0) return Math.min(current + 1, heroSlides.length - 1);
-        return Math.max(current - 1, 0);
+        if (deltaX < 0) return (current + 1) % heroSlides.length;
+        return (current - 1 + heroSlides.length) % heroSlides.length;
       });
     }
 
@@ -1950,7 +2065,7 @@ const ProductDetail = ({ categoryId, productId, onBack }) => {
   };
 
   return (
-    <div className="ws-page">
+    <div className="ws-page" style={themeButtonVars}>
         <div
                 className="theme-navbar sticky top-0 z-20"
                 style={{
@@ -2010,25 +2125,6 @@ const ProductDetail = ({ categoryId, productId, onBack }) => {
                 </div>
               </div>
       <div className="ws-scroll">
-        <div className="ws-breadcrumb">
-          {visibleBreadcrumbPath.length > 0 ? (
-            visibleBreadcrumbPath.map((category, index) => (
-              <React.Fragment key={category.id}>
-                {index > 0 ? <span className="ws-breadcrumb-separator">/</span> : null}
-                <button
-                  type="button"
-                  className="ws-breadcrumb-link"
-                  onClick={() => navigate(`/categories-products/list/${encodeURIComponent(pickText(category.id))}`)}
-                >
-                  {capitalizeFirst(category.name)}
-                </button>
-              </React.Fragment>
-            ))
-          ) : (
-            'Products'
-          )}
-        </div>
-
         {loading ? (
           <ProductDetailSkeleton />
         ) : null}
@@ -2054,17 +2150,31 @@ const ProductDetail = ({ categoryId, productId, onBack }) => {
 
         {!loading && !error && product ? (
           <>
+        {path.length > 0 ? (
+          <nav className="ws-pdp-crumbs" aria-label="Breadcrumb">
+            {path.slice(-2).map((category, index, list) => (
+              <React.Fragment key={category.id}>
+                {index > 0 ? <span className="ws-pdp-crumb-sep" aria-hidden="true">›</span> : null}
+                <button
+                  type="button"
+                  className={`ws-pdp-crumb ${index === list.length - 1 ? 'ws-pdp-crumb--current' : ''}`}
+                  onClick={() => navigate(`/categories-products/list/${encodeURIComponent(pickText(category.id))}`)}
+                >
+                  {capitalizeFirst(category.name)}
+                </button>
+              </React.Fragment>
+            ))}
+          </nav>
+        ) : null}
         <div className="ws-pdp-hero">
           <button
             type="button"
             className="ws-pdp-wishlist-btn"
             disabled={!wishlistIdentityId || wishlistPending}
             style={{
-              color: isWished ? T.clay : THEME.navy,
-              background: 'color-mix(in srgb, var(--surface-color) 90%, transparent)',
-              borderColor: isWished
-                ? 'color-mix(in srgb, var(--brand-red) 20%, transparent)'
-                : 'color-mix(in srgb, var(--brand-navy) 10%, transparent)',
+              color: isWished ? T.clay : '#1f2937',
+              background: 'rgba(255, 255, 255, 0.92)',
+              borderColor: 'rgba(0, 0, 0, 0.06)',
             }}
             aria-label={isWished ? 'Remove from wishlist' : 'Add to wishlist'}
             aria-pressed={isWished}
@@ -2119,6 +2229,8 @@ const ProductDetail = ({ categoryId, productId, onBack }) => {
             {heroSlides.map((img, i) => (
               <div key={pickText(img?.id, img?.image_url, i)} className="ws-pdp-slide">
                 {pickText(img?.image_url) ? (
+                  <>
+                  <img src={img.image_url} alt="" aria-hidden="true" className="ws-pdp-hero-backdrop" draggable={false} />
                   <img
                     src={img.image_url}
                     alt={`${capitalizeFirst(product?.product_name) || 'Product'} ${i + 1}`}
@@ -2128,68 +2240,68 @@ const ProductDetail = ({ categoryId, productId, onBack }) => {
                     decoding="async"
                     draggable={false}
                   />
+                  </>
                 ) : (
                   <Swatch paletteIdx={fallbackSeed} iconName={fallbackIcon} />
                 )}
               </div>
             ))}
         </div>
-        {heroSlides.length > 1 ? (
-            <div className="ws-pdp-hero-pill">
-              {activeImg + 1} / {heroSlides.length}
+          {heroSlides.length > 1 ? (
+            <div className="ws-pdp-dots" role="tablist" aria-label="Product images">
+              {heroSlides.map((img, i) => (
+                <button
+                  key={`dot-${pickText(img?.id, img?.image_url, i)}`}
+                  type="button"
+                  role="tab"
+                  aria-selected={i === activeImg}
+                  aria-label={`Show image ${i + 1} of ${heroSlides.length}`}
+                  className={`ws-pdp-dot ${i === activeImg ? 'ws-pdp-dot--on' : ''}`}
+                  onClick={() => {
+                    heroAutoplayPausedUntilRef.current = Date.now() + HERO_AUTOPLAY_PAUSE_MS;
+                    setActiveImg(i);
+                  }}
+                />
+              ))}
             </div>
           ) : null}
         </div>
        
 
         <div className="ws-pdp-body">
-          <div className="ws-pdp-name">{capitalizeFirst(product?.product_name)}</div>
+          <div className="ws-pdp-title-row">
+            <div className="ws-pdp-name" role="heading" aria-level={2}>{capitalizeFirst(product?.product_name)}</div>
+            {hasPrice && paymentGatewayEnabled === true ? (
+              <button
+                type="button"
+                className={`ws-pdp-title-cart ${bagQuantity > 0 ? 'ws-pdp-title-cart--on' : ''}`}
+                onClick={bagQuantity > 0 ? () => navigate('/cart') : handleAddToCart}
+                aria-label={bagQuantity > 0 ? 'View cart' : 'Add to cart'}
+              >
+                <ShoppingCart size={20} strokeWidth={1.9} />
+                {bagQuantity > 0 ? <span className="ws-pdp-title-cart-count">{bagQuantity}</span> : null}
+              </button>
+            ) : null}
+          </div>
 
           {hasPrice ? (
             <div className="ws-pdp-price-block">
-              <Price price={price} size="lg" />
-            </div>
-          ) : null}
-          {hasPrice ? (
-            <div className="ws-pdp-actions">
-              <button
-                type="button"
-                className="ws-pdp-action-btn ws-pdp-action-btn-primary"
-                onClick={handleBuyNow}
-              >
-                <Sparkles className="h-4 w-4" />
-                Buy Now
-              </button>
-              {bagQuantity > 0 ? (
-                <div className="ws-pdp-qty-control" aria-label="Selected quantity">
-                  <button
-                    type="button"
-                    className="ws-pdp-qty-btn"
-                    onClick={handleDecreaseQuantity}
-                    aria-label="Decrease quantity"
-                  >
-                    -
-                  </button>
-                  <div className="ws-pdp-qty-value">{bagQuantity}</div>
-                  <button
-                    type="button"
-                    className="ws-pdp-qty-btn"
-                    onClick={handleIncreaseQuantity}
-                    aria-label="Increase quantity"
-                  >
-                    +
-                  </button>
-                </div>
-              ) : (
-                <button
-                  type="button"
-                  className="ws-pdp-action-btn ws-pdp-action-btn-secondary"
-                  onClick={handleAddToCart}
-                >
-                  <ShoppingCart className="h-4 w-4" />
-                  Add to Cart
-                </button>
-              )}
+              <div className="ws-pdp-price-top">
+                <span className="ws-pdp-price-now">{formatInr(pricing?.total)}</span>
+                {pricing?.hasDiscount ? (
+                  <>
+                    <span className="ws-pdp-price-mrp">{formatInr(pricing.mrpTotal)}</span>
+                    <span className="ws-pdp-price-off">{Math.round(pricing.discountPct)}% OFF</span>
+                  </>
+                ) : null}
+              </div>
+              {(() => {
+                const notes = [];
+                if (pricing?.hasDiscount) notes.push(`You save ${formatInr(pricing.saving)}`);
+                if (pricing?.addOn > 0) notes.push('Inclusive of all taxes');
+                if (pickText(product?.product_code)) notes.push(`Code ${product.product_code}`);
+                return notes.length > 0 ? <div className="ws-pdp-meta">{notes.join('  •  ')}</div> : null;
+              })()}
             </div>
           ) : null}
 
@@ -2201,6 +2313,48 @@ const ProductDetail = ({ categoryId, productId, onBack }) => {
                 <ShoppingCart className="h-4 w-4" />
               )}
               <span>{actionNote}</span>
+            </div>
+          ) : null}
+
+          {variants.length > 1 ? (
+            <div className="ws-variant-section">
+              <div className="ws-variant-title">
+                Choose variant <span>{variants.find((v) => v.id === pickText(product?.id))?.label || ''}</span>
+              </div>
+              <div className="ws-variant-row" role="listbox" aria-label="Product variants">
+                {variants.map((variant) => {
+                  const isCurrent = variant.id === pickText(product?.id);
+                  return (
+                    <button
+                      key={variant.id}
+                      type="button"
+                      role="option"
+                      aria-selected={isCurrent}
+                      className={`ws-variant-card ${isCurrent ? 'ws-variant-card--on' : ''}`}
+                      onClick={() => {
+                        if (isCurrent) return;
+                        navigate(
+                          `/categories-products/list/${encodeURIComponent(variant.categoryId || pickText(categoryId))}/detail/${encodeURIComponent(variant.id)}`,
+                          { replace: true }
+                        );
+                      }}
+                    >
+                      <span className="ws-variant-thumb">
+                        {isCurrent ? <span className="ws-variant-check" aria-hidden="true">✓</span> : null}
+                        {variant.image?.image_url ? (
+                          <img src={variant.image.image_url} alt="" loading="lazy" draggable={false} />
+                        ) : (
+                          <Swatch paletteIdx={hashString(variant.id)} iconName={pickFallbackIcon(variant.id)} />
+                        )}
+                      </span>
+                      <span className="ws-variant-label">{variant.label}</span>
+                      {variant.price ? (
+                        <span className="ws-variant-price">{formatInr(getDisplayPricing(variant.price)?.total)}</span>
+                      ) : null}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
           ) : null}
 
@@ -2222,8 +2376,11 @@ const ProductDetail = ({ categoryId, productId, onBack }) => {
                 className="ws-attr-group ws-attr-group--panel ws-attr-group--selection"
               >
                 <div className="ws-attr-title ws-attr-title--selection">
-                  {toTitleCase(group.name)}
-                  {selectedLabel ? `: ${selectedLabel}` : ''}
+                  <span>
+                    Select {toTitleCase(group.name)}
+                    {!selectedLabel ? <em className="ws-attr-required"> *</em> : null}
+                  </span>
+                  {selectedLabel ? <span className="ws-attr-picked">{selectedLabel}</span> : null}
                 </div>
                 <div className="ws-chip-wrap">
                   {group.values.map((value) => {
@@ -2319,6 +2476,81 @@ const ProductDetail = ({ categoryId, productId, onBack }) => {
         ) : null}
       </div>
 
+      {!loading && !error && product && hasPrice && paymentGatewayEnabled !== null ? (
+        <div className="ws-pdp-footer">
+          <div className="ws-pdp-footer-price">
+            <span className="ws-pdp-footer-label">Price</span>
+            <span className="ws-pdp-footer-amount">{formatInr(pricing?.total)}</span>
+          </div>
+          {paymentGatewayEnabled ? (
+            <div className="ws-pdp-footer-actions">
+              {bagQuantity > 0 ? (
+                <div className="ws-pdp-qty-control" aria-label="Selected quantity">
+                  <button type="button" className="ws-pdp-qty-btn" onClick={handleDecreaseQuantity} aria-label="Decrease quantity">-</button>
+                  <div className="ws-pdp-qty-value">{bagQuantity}</div>
+                  <button type="button" className="ws-pdp-qty-btn" onClick={handleIncreaseQuantity} aria-label="Increase quantity">+</button>
+                </div>
+              ) : (
+                <button type="button" className="ws-pdp-action-btn ws-pdp-action-btn-secondary" onClick={handleAddToCart}>
+                  <ShoppingCart className="h-4 w-4" />
+                  Add to Cart
+                </button>
+              )}
+              <button type="button" className="ws-pdp-action-btn ws-pdp-action-btn-primary" onClick={handleBuyNow}>
+                <Sparkles className="h-4 w-4" />
+                Buy Now
+              </button>
+            </div>
+          ) : (
+            <div className="ws-pdp-footer-actions ws-pdp-footer-actions--single">
+              <button
+                type="button"
+                className="ws-pdp-action-btn ws-pdp-action-btn-primary"
+                onClick={() => setIsEnquiryPopupOpen(true)}
+              >
+                <Sparkles className="h-4 w-4" />
+                Enquire Now
+              </button>
+            </div>
+          )}
+        </div>
+      ) : null}
+
+      {isEnquiryPopupOpen ? (
+        <div
+          className="ws-enquiry-overlay"
+          role="presentation"
+          onClick={() => setIsEnquiryPopupOpen(false)}
+        >
+          <div
+            className="ws-enquiry-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="ws-enquiry-title"
+            aria-describedby="ws-enquiry-desc"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="ws-enquiry-halo">
+              <div className="ws-enquiry-icon">
+                <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path className="ws-enquiry-check" d="M5 12.5l4.5 4.5L19 7.5" />
+                </svg>
+              </div>
+            </div>
+            <div id="ws-enquiry-title" className="ws-enquiry-title">Request submitted successfully</div>
+            <div id="ws-enquiry-desc" className="ws-enquiry-desc">We will contact you shortly.</div>
+            <button
+              type="button"
+              className="ws-pdp-action-btn ws-pdp-action-btn-primary ws-enquiry-ok"
+              onClick={() => setIsEnquiryPopupOpen(false)}
+              autoFocus
+            >
+              Done
+            </button>
+          </div>
+        </div>
+      ) : null}
+
       {isImagePreviewOpen && imagePreviewIndex !== null && pickText(images[imagePreviewIndex]?.image_url) ? (
         <ZoomableImageModal
           imageUrl={pickText(images[imagePreviewIndex]?.image_url)}
@@ -2336,6 +2568,16 @@ const ProductDetail = ({ categoryId, productId, onBack }) => {
         * { box-sizing: border-box; }
 
         .ws-page {
+          --pd-ink: var(--page-text-color, var(--body-text-color));
+          --pd-strong: var(--page-strong-color, var(--page-text-color, var(--body-text-color)));
+          --pd-line-strong: color-mix(in srgb, var(--pd-strong) 38%, transparent);
+          --pd-accent: var(--page-price-color, var(--page-text-color, var(--body-text-color)));
+          --pd-soft: color-mix(in srgb, var(--pd-ink) 66%, transparent);
+          --pd-faint: color-mix(in srgb, var(--pd-ink) 46%, transparent);
+          --pd-line: color-mix(in srgb, var(--pd-ink) 16%, transparent);
+          --pd-tint: color-mix(in srgb, var(--pd-ink) 6%, transparent);
+          --pd-tint-strong: color-mix(in srgb, var(--pd-ink) 11%, transparent);
+          --pd-card: color-mix(in srgb, var(--pd-ink) 6%, transparent);
           display: flex;
           flex-direction: column;
           height: 100vh;
@@ -2388,9 +2630,20 @@ const ProductDetail = ({ categoryId, productId, onBack }) => {
           align-items: center;
           gap: 6px;
           flex-wrap: wrap;
-          padding: 14px 18px 0;
-          font-size: 11.5px;
-          color: ${T.inkSoft};
+          padding: 0;
+          margin-bottom: 10px;
+          font-size: 11px;
+          font-weight: 700;
+          letter-spacing: 0.06em;
+          text-transform: uppercase;
+          color: var(--pd-accent);
+        }
+
+        .ws-breadcrumb-link {
+          padding: 4px 10px !important;
+          border-radius: 999px;
+          background: color-mix(in srgb, var(--pd-accent) 11%, transparent) !important;
+          border: 1px solid color-mix(in srgb, var(--pd-accent) 22%, transparent) !important;
         }
 
         .ws-breadcrumb-link {
@@ -2427,10 +2680,60 @@ const ProductDetail = ({ categoryId, productId, onBack }) => {
 
         .ws-pdp-hero {
           width: 100%;
-          aspect-ratio: 4 / 5;
+          aspect-ratio: 1 / 1;
+          max-height: 62vh;
           position: relative;
           overflow: hidden;
           background: ${T.paper};
+          border-radius: 0 0 26px 26px;
+          box-shadow: 0 14px 30px color-mix(in srgb, ${THEME.navy} 14%, transparent);
+        }
+
+        .ws-pdp-discount-badge {
+          position: absolute;
+          left: 12px;
+          top: 12px;
+          z-index: 3;
+          padding: 6px 11px;
+          border-radius: 999px;
+          font-size: 11.5px;
+          font-weight: 800;
+          letter-spacing: 0.04em;
+          color: var(--pd-btn-text, ${THEME.buttonText});
+          background: var(--pd-btn-bg, ${THEME.buttonBg});
+          box-shadow: 0 8px 18px color-mix(in srgb, ${THEME.navy} 24%, transparent);
+        }
+
+        .ws-pdp-dots {
+          position: absolute;
+          left: 50%;
+          bottom: 14px;
+          transform: translateX(-50%);
+          z-index: 3;
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          padding: 6px 10px;
+          border-radius: 999px;
+          background: color-mix(in srgb, #000 28%, transparent);
+          backdrop-filter: blur(8px);
+          -webkit-backdrop-filter: blur(8px);
+        }
+
+        .ws-pdp-dot {
+          width: 6px;
+          height: 6px;
+          padding: 0;
+          border: 0;
+          border-radius: 999px;
+          background: rgba(255, 255, 255, 0.55);
+          cursor: pointer;
+          transition: width 0.25s ease, background-color 0.25s ease;
+        }
+
+        .ws-pdp-dot--on {
+          width: 20px;
+          background: #fff;
         }
 
         .ws-pdp-wishlist-btn {
@@ -2474,17 +2777,32 @@ const ProductDetail = ({ categoryId, productId, onBack }) => {
 }
 
         .ws-pdp-slide {
+          position: relative;
           flex: 0 0 100%;
           height: 100%;
+          overflow: hidden;
+        }
+
+        .ws-pdp-hero-backdrop {
+          position: absolute;
+          inset: -24px;
+          width: calc(100% + 48px);
+          height: calc(100% + 48px);
+          object-fit: cover;
+          filter: blur(22px) saturate(1.1);
+          opacity: 0.55;
+          pointer-events: none;
+          user-select: none;
         }
 
         .ws-pdp-hero-media {
           display: block;
           width: 100%;
           height: 100%;
-          object-fit: cover;
+          position: relative;
+          object-fit: contain;
           object-position: center center;
-          background: ${T.paper};
+          background: transparent;
           pointer-events: none;
           user-select: none;
           -webkit-user-drag: none;
@@ -2533,15 +2851,73 @@ const ProductDetail = ({ categoryId, productId, onBack }) => {
         }
 
         .ws-pdp-body {
-          padding: 12px 18px 120px;
+          padding: 18px 18px 28px;
+        }
+
+        .ws-pdp-title-row {
+          display: flex;
+          align-items: flex-start;
+          justify-content: space-between;
+          gap: 12px;
+        }
+
+        .ws-pdp-title-row .ws-pdp-name {
+          flex: 1;
+          min-width: 0;
+        }
+
+        .ws-pdp-title-cart {
+          position: relative;
+          flex: 0 0 auto;
+          width: 44px;
+          height: 44px;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          border-radius: 14px;
+          border: 1.5px solid var(--pd-line-strong);
+          background: transparent;
+          color: var(--pd-strong);
+          cursor: pointer;
+          transition: transform 0.15s ease, background-color 0.15s ease;
+          -webkit-tap-highlight-color: transparent;
+        }
+
+        .ws-pdp-title-cart:active {
+          transform: scale(0.94);
+        }
+
+        .ws-pdp-title-cart--on {
+          background: var(--pd-btn-bg, ${THEME.buttonBg});
+          border-color: transparent;
+          color: var(--pd-btn-text, ${THEME.buttonText});
+        }
+
+        .ws-pdp-title-cart-count {
+          position: absolute;
+          top: -6px;
+          right: -6px;
+          min-width: 18px;
+          height: 18px;
+          padding: 0 4px;
+          border-radius: 999px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-size: 10.5px;
+          font-weight: 800;
+          color: #fff;
+          background: #c74212;
         }
 
         .ws-pdp-name {
-          font-family: 'Playfair Display', serif;
-          font-size: 21px;
-          font-weight: 600;
-          color: var(--page-text-color, ${navbarTextColor});
-          line-height: 1.25;
+          margin: 0;
+          font-family: 'Inter', system-ui, sans-serif;
+          font-size: 23px;
+          font-weight: 800;
+          letter-spacing: -0.02em;
+          color: var(--pd-strong);
+          line-height: 1.3;
         }
 
         .ws-pdp-code {
@@ -2551,10 +2927,88 @@ const ProductDetail = ({ categoryId, productId, onBack }) => {
         }
 
         .ws-pdp-price-block {
-          margin-top: 16px;
+          margin-top: 8px;
           padding-bottom: 16px;
           color: ${primaryColor};
           border-bottom: 1px solid ${T.line};
+        }
+
+        .ws-pdp-price-top {
+          display: flex;
+          align-items: center;
+          flex-wrap: wrap;
+          gap: 4px 10px;
+        }
+
+        .ws-pdp-price-now {
+          font-size: 28px;
+          font-weight: 800;
+          line-height: 1.15;
+          letter-spacing: -0.02em;
+          color: var(--pd-accent);
+        }
+
+        .ws-pdp-price-mrp {
+          font-size: 15px;
+          font-weight: 500;
+          color: ${T.inkSoft};
+          text-decoration: line-through;
+        }
+
+        .ws-pdp-price-off {
+          padding: 3px 9px;
+          border-radius: 6px;
+          font-size: 11.5px;
+          font-weight: 800;
+          letter-spacing: 0.04em;
+          color: var(--pd-btn-text, ${THEME.buttonText});
+          background: var(--pd-btn-bg, ${THEME.buttonBg});
+        }
+
+        .ws-pdp-meta {
+          margin-top: 6px;
+          font-size: 12.5px;
+          font-weight: 500;
+          color: ${T.inkSoft};
+          white-space: pre-wrap;
+        }
+
+        .ws-pdp-crumbs {
+          display: flex;
+          flex-wrap: wrap;
+          align-items: center;
+          gap: 2px 0;
+          padding: 10px 14px;
+        }
+
+        .ws-pdp-crumb {
+          flex: 0 1 auto;
+          min-width: 0;
+          padding: 3px 4px;
+          border: 0;
+          background: none;
+          color: var(--pd-ink);
+          font-size: 12.5px;
+          font-weight: 600;
+          text-align: left;
+          cursor: pointer;
+          -webkit-tap-highlight-color: transparent;
+        }
+
+        .ws-pdp-crumb--current {
+          color: var(--pd-strong);
+          font-weight: 800;
+        }
+
+        .ws-pdp-crumb:active {
+          opacity: 0.7;
+        }
+
+        .ws-pdp-crumb-sep {
+          flex: 0 0 auto;
+          color: color-mix(in srgb, var(--pd-ink) 75%, transparent);
+          font-size: 15px;
+          line-height: 1;
         }
 
         .ws-attr-group {
@@ -2566,15 +3020,12 @@ const ProductDetail = ({ categoryId, productId, onBack }) => {
         }
 
         .ws-attr-group--selection {
-          padding: 14px;
-          border-radius: 20px;
-          background: linear-gradient(
-            180deg,
-            color-mix(in srgb, var(--brand-navy) 92%, #000 8%) 0%,
-            color-mix(in srgb, var(--brand-navy) 80%, #000 20%) 100%
-          );
-          border: 1px solid color-mix(in srgb, var(--brand-navy) 18%, transparent);
-          box-shadow: 0 18px 36px color-mix(in srgb, var(--brand-navy) 18%, transparent);
+          margin-top: 18px;
+          padding: 0;
+          border-radius: 0;
+          background: none;
+          border: 0;
+          box-shadow: none;
         }
 
         .ws-attr-title {
@@ -2585,28 +3036,45 @@ const ProductDetail = ({ categoryId, productId, onBack }) => {
         }
 
         .ws-attr-title--selection {
-          color: #fff;
+          display: flex;
+          align-items: baseline;
+          justify-content: space-between;
+          gap: 8px;
+          color: var(--pd-strong);
           font-size: 14px;
           font-weight: 700;
-          margin-bottom: 12px;
+          margin-bottom: 10px;
+        }
+
+        .ws-attr-required {
+          font-style: normal;
+          color: ${T.clay};
+        }
+
+        .ws-attr-picked {
+          font-size: 12.5px;
+          font-weight: 700;
+          color: var(--pd-accent);
         }
 
         .ws-description-group {
-          border-radius: 16px;
-          margin-top: 16px;
-          
+          border-radius: 18px;
+          margin-top: 20px;
+          padding: 16px;
+          background: var(--pd-tint);
+          border: 1px solid ${T.line};
         }
 
         .ws-description-title {
           font-size: 15px;
           font-weight: 700;
           margin-bottom: 18px;
-          color: ${THEME.buttonBg};
+          color: var(--pd-strong);
         }
 
         .ws-description-subtitle {
           margin: 14px 0 7px;
-          color: ${THEME.buttonBg};
+          color: var(--pd-accent);
           font-size: 13px;
           font-weight: 800;
         }
@@ -2631,9 +3099,9 @@ const ProductDetail = ({ categoryId, productId, onBack }) => {
           max-width: 170px;
           padding: 0 14px;
           border-radius: 8px;
-          border: 1px solid ${T.line};
-          background: ${T.bg};
-          color: ${THEME.text};
+          border: 1px solid var(--pd-line);
+          background: transparent;
+          color: var(--pd-soft);
           font-size: 13px;
           font-weight: 700;
           white-space: nowrap;
@@ -2641,9 +3109,9 @@ const ProductDetail = ({ categoryId, productId, onBack }) => {
         }
 
         .ws-spec-tab--active {
-          border: 1px solid var(--page-price-color, ${THEME.buttonBg});
-          color: var(--page-price-color, ${THEME.buttonBg});
-          box-shadow: 0 6px 14px color-mix(in srgb, var(--page-price-color, ${THEME.buttonBg}) 14%, transparent);
+          border: 1px solid var(--pd-accent);
+          background: color-mix(in srgb, var(--pd-accent) 16%, transparent);
+          color: var(--pd-strong);
         }
 
         .ws-spec-table {
@@ -2659,7 +3127,7 @@ const ProductDetail = ({ categoryId, productId, onBack }) => {
         }
 
         .ws-spec-key {
-          color: var(--page-text-color, ${THEME.text});
+          color: var(--pd-strong);
           font-size: 13px;
           font-weight: 800;
           line-height: 1.35;
@@ -2667,9 +3135,9 @@ const ProductDetail = ({ categoryId, productId, onBack }) => {
         }
 
         .ws-spec-value {
-          color: color-mix(in srgb, var(--page-text-color, ${THEME.text}) 82%, transparent);
+          color: var(--pd-soft);
           font-size: 13px;
-          font-weight: 600;
+          font-weight: 500;
           line-height: 1.45;
           overflow-wrap: anywhere;
           white-space: pre-line;
@@ -2677,7 +3145,7 @@ const ProductDetail = ({ categoryId, productId, onBack }) => {
 
         .ws-description-text {
           margin: 0;
-          color: color-mix(in srgb, var(--page-text-color, ${THEME.text}) 78%, transparent);
+          color: color-mix(in srgb, var(--pd-ink) 78%, transparent);
           font-size: 13px;
           line-height: 1.6;
           font-weight: 500;
@@ -2700,10 +3168,127 @@ const ProductDetail = ({ categoryId, productId, onBack }) => {
           padding: 0;
           border: 0;
           background: none;
-          color: ${THEME.buttonBg};
+          color: var(--pd-accent);
           font-size: 13px;
           font-weight: 700;
           cursor: pointer;
+        }
+
+        .ws-variant-section {
+          margin-top: 18px;
+        }
+
+        .ws-variant-title {
+          display: flex;
+          align-items: baseline;
+          justify-content: space-between;
+          gap: 8px;
+          font-size: 14px;
+          font-weight: 700;
+          color: var(--pd-strong);
+          margin-bottom: 10px;
+        }
+
+        .ws-variant-title span {
+          font-size: 12.5px;
+          font-weight: 700;
+          color: var(--pd-accent);
+        }
+
+        .ws-variant-check {
+          position: absolute;
+          top: 5px;
+          right: 5px;
+          z-index: 1;
+          width: 18px;
+          height: 18px;
+          border-radius: 999px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-size: 11px;
+          font-weight: 800;
+          color: var(--pd-btn-text, ${THEME.buttonText});
+          background: var(--pd-btn-bg, ${THEME.buttonBg});
+        }
+
+        .ws-variant-row {
+          display: flex;
+          gap: 10px;
+          overflow-x: auto;
+          padding: 4px 2px 10px;
+          margin: 0 -2px;
+          scroll-snap-type: x proximity;
+          -webkit-overflow-scrolling: touch;
+          scrollbar-width: none;
+        }
+
+        .ws-variant-row::-webkit-scrollbar {
+          display: none;
+        }
+
+        .ws-variant-card {
+          flex: 0 0 96px;
+          display: flex;
+          flex-direction: column;
+          align-items: stretch;
+          gap: 6px;
+          padding: 6px;
+          border-radius: 14px;
+          border: 1.5px solid ${T.line};
+          background: ${T.bg};
+          color: var(--pd-strong);
+          text-align: left;
+          cursor: pointer;
+          scroll-snap-align: start;
+          transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.1s ease;
+          -webkit-tap-highlight-color: transparent;
+        }
+
+        .ws-variant-card:active {
+          transform: scale(0.97);
+        }
+
+        .ws-variant-card--on {
+          border-color: var(--pd-accent);
+          box-shadow: 0 0 0 1px color-mix(in srgb, var(--pd-accent) 25%, transparent),
+            0 8px 18px color-mix(in srgb, ${THEME.navy} 14%, transparent);
+        }
+
+        .ws-variant-thumb {
+          position: relative;
+          display: block;
+          width: 100%;
+          aspect-ratio: 1 / 1;
+          border-radius: 9px;
+          overflow: hidden;
+          background: var(--pd-tint-strong);
+        }
+
+        .ws-variant-thumb img {
+          width: 100%;
+          height: 100%;
+          object-fit: cover;
+          display: block;
+        }
+
+        .ws-variant-label {
+          font-size: 12px;
+          font-weight: 700;
+          line-height: 1.25;
+          padding: 0 2px;
+          display: -webkit-box;
+          -webkit-line-clamp: 2;
+          -webkit-box-orient: vertical;
+          overflow: hidden;
+          word-break: break-word;
+        }
+
+        .ws-variant-price {
+          font-size: 11.5px;
+          font-weight: 600;
+          opacity: 0.75;
+          padding: 0 2px 2px;
         }
 
         .ws-chip-wrap {
@@ -2727,13 +3312,18 @@ const ProductDetail = ({ categoryId, productId, onBack }) => {
 
         .ws-chip--selection {
           min-width: 56px;
-          min-height: 44px;
-          padding: 0 15px;
-          border-radius: 16px;
+          min-height: 42px;
+          padding: 0 16px;
+          border-radius: 12px;
           font-weight: 700;
           letter-spacing: 0.01em;
-          background: linear-gradient(180deg, color-mix(in srgb, ${T.bg} 96%, ${THEME.navy} 4%) 0%, ${T.bg} 100%);
-          box-shadow: 0 8px 18px color-mix(in srgb, ${THEME.navy} 12%, transparent);
+          border: 1.5px solid ${T.line};
+          background: ${T.bg};
+          transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease, transform 0.1s ease;
+        }
+
+        .ws-chip--selection:active {
+          transform: scale(0.96);
         }
 
         .ws-chip--colour {
@@ -2751,10 +3341,151 @@ const ProductDetail = ({ categoryId, productId, onBack }) => {
         }
 
         .ws-chip-on {
-          background: ${T.bg};
-          border-color: ${THEME.buttonBg};
-          color: ${THEME.buttonBg};
-          box-shadow: 0 0 0 1px color-mix(in srgb, ${THEME.buttonBg} 16%, transparent);
+          background: var(--pd-btn-bg, ${THEME.buttonBg});
+          border-color: transparent;
+          color: var(--pd-btn-text, ${THEME.buttonText});
+          box-shadow: 0 6px 14px color-mix(in srgb, var(--pd-accent) 28%, transparent);
+        }
+
+        .ws-pdp-footer {
+          flex: 0 0 auto;
+          z-index: 25;
+          display: flex;
+          align-items: center;
+          gap: 12px;
+          padding: 10px 16px calc(10px + env(safe-area-inset-bottom));
+          background: var(--page-bg, var(--app-page-bg));
+          border-top: 1px solid ${T.line};
+          box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.12);
+        }
+
+        .ws-pdp-footer-price {
+          display: flex;
+          flex-direction: column;
+          min-width: 0;
+          line-height: 1.15;
+        }
+
+        .ws-pdp-footer-label {
+          font-size: 11px;
+          font-weight: 600;
+          color: ${T.inkSoft};
+        }
+
+        .ws-pdp-footer-amount {
+          font-size: 18px;
+          font-weight: 800;
+          color: var(--pd-strong);
+        }
+
+        .ws-enquiry-overlay {
+          position: fixed;
+          inset: 0;
+          z-index: 60;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          padding: 24px;
+          background: rgba(0, 0, 0, 0.5);
+          backdrop-filter: blur(3px);
+          -webkit-backdrop-filter: blur(3px);
+          animation: wsEnquiryFade 0.18s ease-out;
+        }
+
+        .ws-enquiry-dialog {
+          width: 100%;
+          max-width: 340px;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          padding: 30px 22px 22px;
+          border-radius: 26px;
+          background: var(--page-bg, var(--app-page-bg));
+          border: 1px solid var(--pd-line);
+          box-shadow: 0 28px 70px rgba(0, 0, 0, 0.38);
+          text-align: center;
+          animation: wsEnquiryPop 0.26s cubic-bezier(0.2, 0.9, 0.3, 1.1);
+        }
+
+        .ws-enquiry-halo {
+          width: 104px;
+          height: 104px;
+          border-radius: 999px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          background: color-mix(in srgb, var(--pd-accent) 12%, transparent);
+          box-shadow: 0 0 0 12px color-mix(in srgb, var(--pd-accent) 7%, transparent);
+          margin-bottom: 18px;
+        }
+
+        .ws-enquiry-icon {
+          width: 70px;
+          height: 70px;
+          border-radius: 999px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          background: var(--pd-btn-bg, ${THEME.buttonBg});
+          color: var(--pd-btn-text, ${THEME.buttonText});
+          animation: wsEnquiryIcon 0.45s cubic-bezier(0.2, 0.9, 0.3, 1.2) 0.08s both;
+        }
+
+        .ws-enquiry-check {
+          stroke-dasharray: 26;
+          stroke-dashoffset: 26;
+          animation: wsEnquiryCheck 0.4s ease-out 0.38s forwards;
+        }
+
+        .ws-enquiry-title {
+          font-size: 19px;
+          font-weight: 800;
+          line-height: 1.3;
+          letter-spacing: -0.01em;
+          color: var(--pd-strong);
+        }
+
+        .ws-enquiry-desc {
+          margin-top: 6px;
+          font-size: 13.5px;
+          font-weight: 500;
+          color: var(--pd-soft);
+        }
+
+        .ws-enquiry-ok {
+          width: 100%;
+          margin-top: 22px;
+        }
+
+        @keyframes wsEnquiryFade {
+          from { opacity: 0; }
+          to { opacity: 1; }
+        }
+
+        @keyframes wsEnquiryIcon {
+          from { transform: scale(0.4); opacity: 0; }
+          to { transform: scale(1); opacity: 1; }
+        }
+
+        @keyframes wsEnquiryCheck {
+          to { stroke-dashoffset: 0; }
+        }
+
+        @keyframes wsEnquiryPop {
+          from { opacity: 0; transform: translateY(10px) scale(0.96); }
+          to { opacity: 1; transform: translateY(0) scale(1); }
+        }
+
+        .ws-pdp-footer-actions.ws-pdp-footer-actions--single {
+          grid-template-columns: minmax(0, 1fr);
+        }
+
+        .ws-pdp-footer-actions {
+          flex: 1;
+          display: grid;
+          grid-template-columns: 1fr 1.15fr;
+          gap: 10px;
+          min-width: 0;
         }
 
         .ws-pdp-actions {
@@ -2767,15 +3498,16 @@ const ProductDetail = ({ categoryId, productId, onBack }) => {
         }
 
         .ws-pdp-action-btn {
-          min-height: 46px;
+          min-height: 48px;
           display: inline-flex;
           align-items: center;
           justify-content: center;
           gap: 8px;
           border-radius: 14px;
-          padding: 0 16px;
+          padding: 0 12px;
           font-size: 14px;
           font-weight: 700;
+          white-space: nowrap;
           cursor: pointer;
           transition: transform 0.18s ease, opacity 0.18s ease, background-color 0.18s ease;
         }
@@ -2785,31 +3517,31 @@ const ProductDetail = ({ categoryId, productId, onBack }) => {
         }
 
         .ws-pdp-action-btn-primary {
-          background: ${THEME.buttonBg};
-          color: ${THEME.buttonText};
+          background: var(--pd-btn-bg, ${THEME.buttonBg});
+          color: var(--pd-btn-text, ${THEME.buttonText});
           border: 1px solid transparent;
         }
 
         .ws-pdp-action-btn-secondary {
-          background: ${T.bg};
-          color: ${THEME.navy};
-          border: 1px solid color-mix(in srgb, ${THEME.navy} 18%, transparent);
+          background: transparent;
+          border: 1.5px solid var(--pd-line-strong);
+          color: var(--pd-strong);
         }
 
         .ws-pdp-qty-control {
-          min-height: 46px;
+          min-height: 48px;
           display: grid;
           grid-template-columns: 46px minmax(0, 1fr) 46px;
           border-radius: 14px;
           overflow: hidden;
           background: ${T.bg};
-          border: 1px solid color-mix(in srgb, ${THEME.navy} 18%, transparent);
+          border: 1px solid var(--pd-line);
         }
 
         .ws-pdp-qty-btn {
           border: 0;
-          background: color-mix(in srgb, ${THEME.navy} 4%, ${T.bg});
-          color: ${THEME.navy};
+          background: var(--pd-tint);
+          color: var(--pd-ink);
           font-size: 20px;
           font-weight: 700;
           cursor: pointer;
@@ -2829,7 +3561,7 @@ const ProductDetail = ({ categoryId, productId, onBack }) => {
           align-items: center;
           justify-content: center;
           min-width: 0;
-          color: ${THEME.navy};
+          color: var(--pd-strong);
           font-size: 14px;
           font-weight: 700;
           letter-spacing: 0.02em;
@@ -2839,22 +3571,22 @@ const ProductDetail = ({ categoryId, productId, onBack }) => {
         .ws-pdp-toast {
           position: fixed;
           left: 50%;
-          bottom: max(18px, env(safe-area-inset-bottom));
+          bottom: calc(84px + env(safe-area-inset-bottom));
           transform: translateX(-50%);
           z-index: 40;
           min-width: 190px;
           max-width: calc(100vw - 32px);
           padding: 12px 16px;
           border-radius: 999px;
-          background: color-mix(in srgb, var(--surface-color) 88%, rgba(255, 255, 255, 0.18));
-          color: var(--app-button-bg);
+          background: rgba(17, 17, 17, 0.9);
+          color: #ffffff;
           display: inline-flex;
           align-items: center;
           justify-content: center;
           gap: 8px;
           font-size: 14px;
           font-weight: 700;
-          border: 1px solid color-mix(in srgb, var(--brand-navy) 14%, transparent);
+          border: 1px solid rgba(255, 255, 255, 0.18);
           box-shadow: 0 16px 34px color-mix(in srgb, var(--brand-navy) 18%, transparent);
           backdrop-filter: blur(6px);
           -webkit-backdrop-filter: blur(6px);

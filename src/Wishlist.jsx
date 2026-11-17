@@ -5,6 +5,7 @@ import { Check, ChevronLeft, Heart, Home as HomeIcon, ShoppingCart, Sparkles, Tr
 import { useAppTheme } from './context/ThemeContext';
 import { getNavbarThemeStyles } from './utils/themeUtils';
 import { getAppHomePath } from './utils/tenantNavigation';
+import { getDisplayPricing } from './utils/productPricing';
 import {
   readWishlistItems,
   removeWishlistProduct,
@@ -17,6 +18,7 @@ import {
   setCartProductQuantity,
   subscribeCart,
 } from './utils/productCart';
+import { lockBodyScroll } from './utils/scrollLock';
 
 const T = {
   text: 'var(--body-text-color)',
@@ -157,6 +159,16 @@ const resolveImageUrl = (item) => {
 
 const resolvePrice = (item) => {
   const price = item?.price && typeof item.price === 'object' ? item.price : null;
+
+  // Prefer the all-inclusive amount (price after discount + GST + other charges).
+  const display = getDisplayPricing(price);
+  if (display) {
+    return {
+      value: display.total,
+      mrp: display.hasDiscount ? display.mrpTotal : display.total,
+      discountPct: display.hasDiscount ? display.discountPct : 0,
+    };
+  }
 
   const value = Number(
     item?.unit_price
@@ -407,9 +419,26 @@ function RemoveWishlistConfirmModal({
   );
 }
 
+// A dark page is detected from the theme's own page-text colour (it is always
+// computed to contrast with the page background): light text => dark page.
+const isPageDark = () => {
+  if (typeof document === 'undefined') return false;
+  const probe = document.createElement('div');
+  probe.style.color = 'var(--page-text-color, var(--body-text-color))';
+  probe.style.display = 'none';
+  document.body.appendChild(probe);
+  const match = getComputedStyle(probe).color.match(/rgba?\(([^)]+)\)/);
+  document.body.removeChild(probe);
+  if (!match) return false;
+  const [r, g, b] = match[1].split(',').map((n) => parseFloat(n) / 255);
+  const lin = (c) => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
+  return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b) > 0.5;
+};
+
 function Wishlist() {
   const navigate = useNavigate();
   const theme = useAppTheme();
+  const pageDark = useMemo(() => isPageDark(), [theme]); // eslint-disable-line react-hooks/exhaustive-deps
   const primaryColor = theme?.primary || 'var(--brand-red)';
   const navbarTheme = getNavbarThemeStyles(theme);
   const navbarTextColor = navbarTheme?.textColor || 'var(--navbar-text)';
@@ -456,12 +485,7 @@ function Wishlist() {
   useEffect(() => {
     if (!isOverlayOpen || typeof document === 'undefined') return undefined;
 
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-
-    return () => {
-      document.body.style.overflow = previousOverflow;
-    };
+    return lockBodyScroll();
   }, [isOverlayOpen]);
 
   const activeWishlistItems = useMemo(
@@ -822,7 +846,7 @@ function Wishlist() {
   };
 
   return (
-    <main className="wishlist-page">
+    <main className={`wishlist-page${pageDark ? ' wishlist-page--dark' : ''}`}>
       <div
         className="theme-navbar sticky top-0 z-20"
         style={{
@@ -1433,8 +1457,8 @@ function Wishlist() {
           transform: scale(0.98);
         }
         .wishlist-sheet-btn--ghost {
-          border: 1px solid color-mix(in srgb, var(--brand-navy) 14%, transparent);
-          background: ${T.surface};
+          border: 1.5px solid color-mix(in srgb, var(--brand-navy) 38%, transparent);
+          background: color-mix(in srgb, var(--brand-navy) 7%, ${T.surface});
           color: ${T.text};
         }
         .wishlist-sheet-btn--primary {
@@ -1535,17 +1559,17 @@ function Wishlist() {
           transform: scale(0.98);
         }
         .wishlist-remove-btn--ghost {
-          border: 1px solid color-mix(in srgb, var(--brand-navy) 14%, transparent);
-          background: ${T.surface};
-          color: ${T.text};
-        }
-        .wishlist-remove-btn--primary {
           border: 0;
           background: var(--brand-red);
           color: white;
         }
+        .wishlist-remove-btn--primary {
+          border: 0;
+          background: color-mix(in srgb, var(--brand-red) 30%, #dc2626);
+          color: white;
+        }
         .wishlist-remove-btn--primary:hover {
-          background: ${T.clay};
+          background: color-mix(in srgb, var(--brand-red) 20%, #dc2626);
         }
         @keyframes wishlistRemoveIn {
           from {
@@ -1707,6 +1731,87 @@ function Wishlist() {
           align-items: center;
           justify-content: center;
           cursor: pointer;
+        }
+        .wishlist-page--dark {
+          --wl-ink: var(--page-text-color, var(--body-text-color));
+          --wl-strong: var(--page-strong-color, var(--wl-ink));
+        }
+        .wishlist-page--dark .wishlist-card {
+          background: color-mix(in srgb, var(--wl-ink) 8%, transparent);
+          border-color: color-mix(in srgb, var(--wl-ink) 16%, transparent);
+          box-shadow: 0 14px 28px color-mix(in srgb, black 30%, transparent);
+        }
+        .wishlist-page--dark .wishlist-image {
+          background: color-mix(in srgb, var(--wl-ink) 8%, transparent);
+          box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--wl-ink) 14%, transparent);
+        }
+        .wishlist-page--dark .wishlist-name { color: var(--wl-strong); }
+        .wishlist-page--dark .wishlist-price { color: var(--page-price-color, var(--wl-ink)); }
+        .wishlist-page--dark .wishlist-mrp { color: color-mix(in srgb, var(--wl-ink) 55%, transparent); }
+        .wishlist-page--dark .wishlist-attribute-pill {
+          color: var(--wl-ink);
+          background: color-mix(in srgb, var(--wl-ink) 10%, transparent);
+          border-color: color-mix(in srgb, var(--wl-ink) 26%, transparent);
+        }
+        .wishlist-page--dark .wishlist-buy {
+          background: linear-gradient(135deg,
+            color-mix(in srgb, var(--brand-red) 38%, var(--wl-ink) 6%),
+            color-mix(in srgb, var(--brand-navy) 34%, var(--wl-ink) 6%));
+          border-color: color-mix(in srgb, var(--brand-red) 70%, var(--wl-ink));
+          color: var(--wl-strong);
+        }
+        .wishlist-page--dark .wishlist-qty-control {
+          background: color-mix(in srgb, var(--wl-ink) 8%, transparent);
+          border-color: color-mix(in srgb, var(--wl-ink) 22%, transparent);
+        }
+        .wishlist-page--dark .wishlist-qty-btn {
+          background: color-mix(in srgb, var(--wl-ink) 10%, transparent);
+          color: var(--wl-strong);
+        }
+        .wishlist-page--dark .wishlist-qty-value { color: var(--wl-strong); }
+        .wishlist-page--dark .wishlist-remove {
+          background: color-mix(in srgb, var(--wl-ink) 12%, transparent);
+          border-color: color-mix(in srgb, var(--wl-ink) 22%, transparent);
+          color: var(--wl-strong);
+        }
+        .wishlist-page--dark .wishlist-remove-overlay {
+          background: color-mix(in srgb, black 62%, transparent);
+        }
+        .wishlist-page--dark .wishlist-remove-modal,
+        .wishlist-page--dark .wishlist-sheet {
+          background: linear-gradient(180deg, color-mix(in srgb, var(--wl-ink) 28%, black) 0%, color-mix(in srgb, var(--wl-ink) 22%, black) 100%);
+          border-color: color-mix(in srgb, var(--wl-ink) 16%, transparent);
+          box-shadow: 0 28px 64px color-mix(in srgb, black 60%, transparent), 0 0 0 1px color-mix(in srgb, var(--wl-ink) 6%, transparent);
+        }
+        .wishlist-page--dark .wishlist-remove-strip {
+          background: linear-gradient(90deg, color-mix(in srgb, var(--brand-red) 60%, white), color-mix(in srgb, var(--brand-red) 90%, transparent));
+        }
+        .wishlist-page--dark .wishlist-remove-icon {
+          color: color-mix(in srgb, var(--brand-red) 40%, white);
+          background: color-mix(in srgb, var(--brand-red) 24%, transparent);
+          box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--brand-red) 50%, transparent);
+        }
+        .wishlist-page--dark .wishlist-remove-title { color: var(--wl-strong); }
+        .wishlist-page--dark .wishlist-remove-copy { color: color-mix(in srgb, var(--wl-ink) 72%, transparent); }
+        .wishlist-page--dark .wishlist-remove-item {
+          background: color-mix(in srgb, black 28%, transparent);
+          border-color: color-mix(in srgb, var(--wl-ink) 14%, transparent);
+          color: var(--wl-strong);
+        }
+        .wishlist-page--dark .wishlist-sheet-btn--ghost {
+          background: transparent;
+          border-color: color-mix(in srgb, var(--wl-ink) 38%, transparent);
+          color: var(--wl-strong);
+        }
+        .wishlist-page--dark .wishlist-remove-btn--ghost {
+          background: linear-gradient(135deg, var(--brand-red), var(--brand-red-dark));
+          color: #fff;
+          box-shadow: 0 8px 20px color-mix(in srgb, var(--brand-red) 40%, transparent);
+        }
+        .wishlist-page--dark .wishlist-remove-btn--primary {
+          background: linear-gradient(135deg, color-mix(in srgb, var(--brand-red) 30%, #dc2626), color-mix(in srgb, var(--brand-red-dark) 30%, #b91c1c));
+          color: #fff;
+          box-shadow: 0 8px 20px color-mix(in srgb, #dc2626 35%, transparent);
         }
         .wishlist-toast {
           position: fixed;

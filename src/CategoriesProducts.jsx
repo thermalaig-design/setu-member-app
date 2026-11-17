@@ -939,8 +939,9 @@ export function CategoriesProductsContent({
           border-radius: 999px;
           font-size: 12px;
           font-weight: 700;
-          color: var(--ws-accent);
-          background: color-mix(in srgb, var(--ws-accent) 12%, transparent);
+          color: color-mix(in srgb, var(--page-text-color, var(--ws-accent)) 80%, var(--ws-accent));
+          background: color-mix(in srgb, var(--page-text-color, var(--ws-accent)) 12%, transparent);
+          box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ws-accent) 35%, transparent);
           cursor: pointer;
           flex-shrink: 0;
           transition: transform 0.15s ease;
@@ -967,9 +968,9 @@ export function CategoriesProductsContent({
         }
 
         .ws-tile {
-          background: var(--surface-color);
+          background: var(--advertisement-card-bg, var(--surface-color));
           border: 1px solid color-mix(in srgb, var(--ws-accent) 14%, transparent);
-          border-radius: 16px;
+          border-radius: 8px;
           overflow: hidden;
           padding: 0;
           cursor: pointer;
@@ -997,7 +998,7 @@ export function CategoriesProductsContent({
         .ws-tile-label {
           font-size: 13px;
           font-weight: 600;
-          color: var(--page-text-color, ${navbarTextColor});
+          color: var(--advertisement-title, var(--heading-color));
           line-height: 1.25;
           min-width: 0;
         }

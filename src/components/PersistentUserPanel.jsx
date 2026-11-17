@@ -1,5 +1,5 @@
 import { track } from '../services/analytics';
-import React, { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { CornerUpLeft, ExternalLink } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { Capacitor } from '@capacitor/core';
@@ -10,8 +10,11 @@ import { getNavbarThemeStyles } from '../utils/themeUtils';
 import { getUserPanelToken } from '../services/authService';
 import BottomNav from './BottomNav';
 
-const USER_PANEL_LOGIN_URL = 'https://user-test.teiltd.in/auth/login';
-const USER_PANEL_SSO_URL = 'https://user-test.teiltd.in/auth/app-sso';
+// Set VITE_USER_PANEL_URL per environment (develop: https://user-test.teiltd.in,
+// live: https://user.teiltd.in). Falls back to live if unset.
+const USER_PANEL_BASE_URL = (import.meta.env.VITE_USER_PANEL_URL || 'https://user.teiltd.in').replace(/\/+$/, '');
+const USER_PANEL_LOGIN_URL = `${USER_PANEL_BASE_URL}/auth/login`;
+const USER_PANEL_SSO_URL = `${USER_PANEL_BASE_URL}/auth/app-sso`;
 const USER_PANEL_ORIGIN = new URL(USER_PANEL_LOGIN_URL).origin;
 
 // The bypass token lives only 60s, so this must be called right before the
@@ -48,22 +51,20 @@ const readCurrentMemberId = () => {
 // `resetKey` changes, and clears it when disabled. Otherwise stays fixed so a
 // same-user panel is never reloaded.
 const useUserPanelSrc = (enabled, resetKey = 0) => {
-  const [src, setSrc] = useState(null);
+  // Store the resolved url together with the resetKey it was created for, so
+  // a stale url is never returned after a reset or when disabled.
+  const [resolved, setResolved] = useState({ key: null, url: null });
 
   useEffect(() => {
-    if (!enabled) {
-      setSrc(null);
-      return undefined;
-    }
+    if (!enabled) return undefined;
     let cancelled = false;
-    setSrc(null);
     createUserPanelUrl().then((url) => {
-      if (!cancelled) setSrc(url);
+      if (!cancelled) setResolved({ key: resetKey, url });
     });
     return () => { cancelled = true; };
   }, [enabled, resetKey]);
 
-  return src;
+  return enabled && resolved.key === resetKey ? resolved.url : null;
 };
 
 // Calls `onReset` when the SETU member logs out or changes (A -> B). Identity
@@ -74,7 +75,10 @@ const useSetuIdentityReset = (onReset) => {
   const currentMemberId = readCurrentMemberId();
   const previousMemberIdRef = useRef(currentMemberId);
   const onResetRef = useRef(onReset);
-  onResetRef.current = onReset;
+
+  useEffect(() => {
+    onResetRef.current = onReset;
+  });
 
   useEffect(() => {
     const onStorage = () => forceRender((v) => v + 1);
@@ -255,9 +259,8 @@ const PersistentUserPanel = ({ isActive, onNavigate }) => {
   };
   useSetuIdentityReset(resetUserPanel);
 
-  useEffect(() => {
-    if (allowed && !mounted) setMounted(true);
-  }, [allowed, mounted]);
+  // Adjust state during render (React-recommended) instead of in an effect.
+  if (allowed && !mounted) setMounted(true);
 
   useEffect(() => {
     if (!skipIframe) return undefined;
