@@ -16,3 +16,6 @@ android/keystore.properties
 
 # local archive, too large for GitHub
 android.7z
+ios 2nov/
+ios/ 
+android/
