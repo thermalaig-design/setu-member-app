@@ -1,17 +1,6 @@
 name: Release Android (Google Play)
 
 on:
-  push:
-    branches: [develop]
-    paths:
-      - "src/**"
-      - "public/**"
-      - "android/**"
-      - "package.json"
-      - "package-lock.json"
-      - "capacitor.config.json"
-      - "vite.config.js"
-      - "index.html"
   workflow_dispatch:
     inputs:
       dry_run:
@@ -47,14 +36,11 @@ jobs:
         env:
           EVENT_NAME: ${{ github.event_name }}
           DRY_RUN: ${{ inputs.dry_run }}
-          AUTO_RELEASE_ENABLED: ${{ vars.AUTO_RELEASE_ENABLED }}
           USER_FRACTION: ${{ inputs.user_fraction }}
           UPDATE_PRIORITY: ${{ inputs.in_app_update_priority }}
         run: |
           upload=false
-          if [ "$EVENT_NAME" = "push" ]; then
-            [ "$AUTO_RELEASE_ENABLED" = "true" ] && upload=true
-          elif [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
             [ "$DRY_RUN" = "false" ] && upload=true
           fi
 
