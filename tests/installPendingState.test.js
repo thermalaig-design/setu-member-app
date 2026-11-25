@@ -32,7 +32,7 @@ const {
   writeVerifiedRecord,
   clearVerifiedRecord,
   resolveInstallUiState,
-} = await import('../src/utils/installPendingState.js');
+} = await import('../src/shared/utils/installPendingState.js');
 
 // --- Fresh-install success UI must be gated by the real `appinstalled`
 // event, never by a timeout/heartbeat/early getInstalledRelatedApps match. ---

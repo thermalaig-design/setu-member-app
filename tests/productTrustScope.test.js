@@ -85,8 +85,8 @@ let cartUtils;
 let wishlistUtils;
 
 before(async () => {
-  cartUtils = await import('../src/utils/productCart.js');
-  wishlistUtils = await import('../src/utils/productWishlist.js');
+  cartUtils = await import('../src/features/products/productCart.js');
+  wishlistUtils = await import('../src/features/products/productWishlist.js');
 });
 
 afterEach(() => {

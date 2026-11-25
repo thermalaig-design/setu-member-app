@@ -28,7 +28,7 @@ import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const tenantLandingSource = fs.readFileSync(
-  path.join(__dirname, '../src/TenantLanding.jsx'),
+  path.join(__dirname, '../src/features/home-navigation/TenantLanding.jsx'),
   'utf8'
 );
 
@@ -80,7 +80,7 @@ const SAMSUNG_UA = 'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 SamsungBr
 for (const [label, ua] of [['Chrome', CHROME_UA], ['Samsung Internet', SAMSUNG_UA]]) {
   test(`${label} UA: a captured beforeinstallprompt is retained by getInstallPrompt(), never auto-cleared`, async () => {
     installWindowStub(ua);
-    const { getInstallPrompt, clearInstallPrompt } = await import(`../src/utils/installPrompt.js?ua=${encodeURIComponent(ua)}`);
+    const { getInstallPrompt, clearInstallPrompt } = await import(`../src/shared/utils/installPrompt.js?ua=${encodeURIComponent(ua)}`);
 
     const fakeEvent = { prompt: () => {}, userChoice: Promise.resolve({ outcome: 'accepted' }) };
     // Mirrors index.html's inline bootstrap script capturing the real
@@ -100,7 +100,7 @@ for (const [label, ua] of [['Chrome', CHROME_UA], ['Samsung Internet', SAMSUNG_U
 
   test(`${label} UA: a subscriber registered before the event fires still receives it (normal Install App flow)`, async () => {
     installWindowStub(ua);
-    const { subscribeInstallPrompt } = await import(`../src/utils/installPrompt.js?ua2=${encodeURIComponent(ua)}`);
+    const { subscribeInstallPrompt } = await import(`../src/shared/utils/installPrompt.js?ua2=${encodeURIComponent(ua)}`);
 
     let received = null;
     const unsubscribe = subscribeInstallPrompt((event) => { received = event; });

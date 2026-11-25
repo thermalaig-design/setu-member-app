@@ -5,7 +5,7 @@ import {
   buildExecutiveBodyCommitteeSearchResults,
   getExecutiveBodySearchFields,
   getExecutiveBodySearchRank,
-} from '../src/utils/executiveBodySearch.js';
+} from '../src/features/directory-executivebody/executiveBodySearch.js';
 
 test('elected search matches member values instead of field getter source', () => {
   const member = {

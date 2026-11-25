@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { getShareAppTargetLink } from '../src/utils/shareApp.js';
+import { getShareAppTargetLink } from '../src/shared/utils/shareApp.js';
 
 test('prefers the trust web app link when available', () => {
   const targetLink = getShareAppTargetLink(

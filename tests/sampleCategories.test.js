@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { buildSampleCategoryView } from '../src/utils/sampleCategories.js';
-import { CATALOG_GUIDES } from '../src/utils/catalogGuides.js';
+import { buildSampleCategoryView } from '../src/shared/utils/sampleCategories.js';
+import { CATALOG_GUIDES } from '../src/shared/utils/catalogGuides.js';
 
 test('sample view has a 4-item slider and one 6-item card section, all flagged as samples', () => {
   const { sliderEntries, cardSections } = buildSampleCategoryView();

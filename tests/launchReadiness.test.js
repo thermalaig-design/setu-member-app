@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { matchesTenantRelatedApp, computeLaunchReadyCandidate, canAttemptOpenAppLaunch } from '../src/utils/launchReadiness.js';
+import { matchesTenantRelatedApp, computeLaunchReadyCandidate, canAttemptOpenAppLaunch } from '../src/shared/utils/launchReadiness.js';
 
 // Fix for the post-install "Open App" race: the success/Open App UI used to
 // become available purely because a fixed 20s timer elapsed after
@@ -39,7 +39,7 @@ const {
   writeVerifiedRecord,
   promoteVerifiedReadyAt,
   resolveInstallUiState,
-} = await import('../src/utils/installPendingState.js');
+} = await import('../src/shared/utils/installPendingState.js');
 
 const LAUNCH_READY_FALLBACK_MS = 32000;
 const LAUNCH_READY_GRACE_MS = 2500;
@@ -192,7 +192,7 @@ test('matchesTenantRelatedApp / computeLaunchReadyCandidate take no browser/UA i
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const tenantLandingSource = fs.readFileSync(
-  path.join(__dirname, '../src/TenantLanding.jsx'),
+  path.join(__dirname, '../src/features/home-navigation/TenantLanding.jsx'),
   'utf8'
 );
 

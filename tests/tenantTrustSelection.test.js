@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { shouldSkipTrustReassignment } from '../src/utils/tenantTrustSelection.js';
+import { shouldSkipTrustReassignment } from '../src/shared/utils/tenantTrustSelection.js';
 
 // This predicate is Home.jsx's guard against the tenant-identity leak: an
 // installed tenant PWA (e.g. /app/dds) is pinned to one Trust, and Home's

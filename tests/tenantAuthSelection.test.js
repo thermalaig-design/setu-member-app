@@ -4,7 +4,7 @@ import {
   resolveTenantAuthSlug,
   resolveLoginSelectedTrustId,
   mergeTenantMembershipEntry
-} from '../src/utils/tenantAuthSelection.js';
+} from '../src/shared/utils/tenantAuthSelection.js';
 
 // These two pure functions are the fix for the first-login tenant-selection
 // race: OTPVerification.jsx's completeLogin() used to require the target

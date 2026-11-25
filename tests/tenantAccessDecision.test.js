@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { resolveAccessAllowed, resolveMembershipIsActive } from '../src/utils/tenantAccessDecision.js';
+import { resolveAccessAllowed, resolveMembershipIsActive } from '../src/shared/utils/tenantAccessDecision.js';
 
 // These mirror the generate-webApp-link Edge Function's resolve_app_access
 // response shape: access_allowed is the actual open/pending decision (it

@@ -1,0 +1,3875 @@
+import React, { useState, useEffect, useRef, useMemo, memo } from 'react';
+import { User, Users, Clock, FileText, UserPlus, Bell, ChevronRight, Heart, Shield, Plus, ArrowRight, Pill, ShoppingCart, Calendar, Stethoscope, Building2, QrCode, Monitor, Brain, Package, FileCheck, Search, Filter, Star, HelpCircle, BookOpen, Video, Headphones, Menu, X, Home as HomeIcon, Settings, UserCircle, Image, Trash2, Code, FolderOpen, Crown } from 'lucide-react';
+import Sidebar from './Sidebar';
+import BottomNav from '../../shared/components/BottomNav';
+import TermsModal from '../../shared/components/TermsModal';
+import ImageSlider from '../../shared/components/ImageSlider';
+import { getProfile, getMarqueeUpdates, getUserNotifications, markNotificationAsRead, markAllNotificationsAsRead, deleteNotification } from '../../shared/services/api';
+import { useGalleryContext } from '../gallery-sponsors/GalleryContext';
+import { GalleryContent } from '../gallery-sponsors/Gallery';
+import { SponsorsContent } from '../gallery-sponsors/SponsorsList';
+import { NoticesContent } from '../quick-actions/Notices';
+import { FacilitiesContent } from '../quick-actions/Facilities';
+import { EventsContent } from '../quick-actions/Events';
+import { AchievementsContent } from '../quick-actions/Achievements';
+import { DonationContent } from '../products/Donation';
+import { ReportsContent } from '../appointments-reports-referral/Reports';
+import { DirectoryContent } from '../directory-executivebody/Directory';
+import { ExecutiveBodyContent } from '../directory-executivebody/ExecutiveBody';
+import { AppointmentsContent } from '../appointments-reports-referral/Appointments';
+import { CategoriesProductsContent } from '../products/CategoriesProducts';
+import { OrderHistoryContent } from '../products/OrderHistory';
+import { ReferralContent } from '../appointments-reports-referral/Referral';
+import { AddCommunityContent } from '../member/AddCommunity';
+import { UserPanelContent } from '../../shared/components/PersistentUserPanel';
+import { OtherMembershipsContent } from '../member/OtherMemberships';
+import { resolveAssetUrl } from '../../shared/utils/assetUrl';
+import { useAppTheme } from '../../shared/context/ThemeContext';
+import { useTenant } from '../../shared/context/TenantContext';
+import { shouldSkipTrustReassignment } from '../../shared/utils/tenantTrustSelection';
+import { registerSidebarState, useTrustDataVersion } from '../../shared/hooks';
+import { supabase } from '../../shared/services/supabaseClient';
+import { clearLoginTermsPromptPending, isLoginTermsPromptPending, resolveLegalTrustId } from '../../shared/utils/legalContent';
+import { readNotificationCache, writeNotificationCache } from '../notifications/notificationCache';
+import { getCurrentNotificationContext, matchesNotificationForContext } from '../notifications/notificationAudience';
+import { fetchFeatureFlags, subscribeFeatureFlags, isFeatureVisible } from '../../shared/services/featureFlags';
+import { fetchActiveTrustsByMobile, fetchMemberTrusts, fetchTrustById, fetchDefaultTrust } from '../../shared/services/trustService';
+import {
+  ensureAllSponsorsLoaded,
+  getCachedCarouselBatch,
+  getSponsorDebugInfo,
+  preloadCarouselBatchImages,
+  prefetchCarouselBatch,
+  preloadSponsorListFirstPage,
+  readCarouselProgress,
+  readSponsorOrder,
+  readSponsorsById,
+  setPinnedSponsor,
+  setSelectedSponsorId,
+  sponsorConfig
+} from '../gallery-sponsors/sponsorStore';
+import {
+  getFooterThemeStyles,
+  getNavbarThemeStyles,
+  getThemeToken,
+  normalizeHomeLayout,
+  HOME_LAYOUT_MODE_KEY_ALIASES
+} from '../../shared/utils/themeUtils';
+import { applyOpacity } from '../../shared/utils/colorUtils';
+import { resolveNotificationRedirectRoute } from '../notifications/notificationRedirectService';
+
+const toTitleCase = (value = '') =>
+  String(value || '')
+    .trim()
+    .replace(/\s+/g, ' ')
+    .replace(/\w\S*/g, (word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase());
+
+// Quick-action modules with a registered chrome-free *Content component.
+// route slug (matches enabledQuickActions[].route / theme.homeLayoutModes key) -> component.
+// Any route not listed here always renders as its normal tile, regardless of home_layout_modes,
+// so DB values for not-yet-supported features degrade safely instead of breaking anything.
+const HOME_CONTENT_RENDERERS = {
+  gallery: GalleryContent,
+  sponsors: SponsorsContent,
+  notices: NoticesContent,
+  facilities: FacilitiesContent,
+  events: EventsContent,
+  achievements: AchievementsContent,
+  donation: DonationContent,
+  reports: ReportsContent,
+  directory: DirectoryContent,
+  'executive-body': ExecutiveBodyContent,
+  appointment: AppointmentsContent,
+  products: CategoriesProductsContent,
+  'order-history': OrderHistoryContent,
+  reference: ReferralContent,
+  'add-community': AddCommunityContent,
+  'user-panel': UserPanelContent,
+  'other-memberships': OtherMembershipsContent,
+};
+
+// Resolves the box/content mode for a section, checking each candidate key (canonical
+// route slug and/or raw feature_flags name) both as an exact theme.homeLayoutModes key
+// and via HOME_LAYOUT_MODE_KEY_ALIASES. Falls back to "box" when nothing matches.
+const resolveHomeSectionMode = (theme, ...candidateKeys) => {
+  const modes = theme?.homeLayoutModes || {};
+  const isValidMode = (value) => value === 'box' || value === 'content';
+
+  for (const rawKey of candidateKeys) {
+    const key = String(rawKey || '').trim();
+    if (key && isValidMode(modes[key])) return modes[key];
+  }
+  for (const rawKey of candidateKeys) {
+    const normalizedKey = HOME_LAYOUT_MODE_KEY_ALIASES[String(rawKey || '').trim().toLowerCase()];
+    if (normalizedKey && isValidMode(modes[normalizedKey])) return modes[normalizedKey];
+  }
+  return 'box';
+};
+
+const DEFAULT_TRUST_NAME = import.meta.env.VITE_DEFAULT_TRUST_NAME || 'Trust';
+const SPONSOR_CHUNK_SIZE = sponsorConfig.CAROUSEL_BATCH_SIZE;
+const LAST_SELECTED_TRUST_ID_KEY = 'last_selected_trust_id';
+const PENDING_CREATED_APP_URL_KEY = 'pending_created_app_install_url';
+const PENDING_CREATED_APP_TS_KEY = 'pending_created_app_install_url_ts';
+const PENDING_CREATED_APP_REDIRECT_MAX_AGE_MS = 2 * 60 * 1000;
+const POWERED_BY_URL = 'https://teiltd.in';
+
+// Reads and validates a pending "just created this app, still finishing the
+// redirect to /app/<slug>" URL left by AddCommunity.jsx, clearing it if
+// stale/invalid. Called synchronously from a lazy useState initializer (see
+// below) so Home can skip painting its own branded content — instead of
+// only noticing this in a useEffect, which would always flash the current
+// trust's full Home UI (marquee, cards, navbar) first.
+const getValidPendingCreatedAppUrl = () => {
+  let pendingUrl = '';
+  let pendingTs = 0;
+  try {
+    pendingUrl = sessionStorage.getItem(PENDING_CREATED_APP_URL_KEY)
+      || localStorage.getItem(PENDING_CREATED_APP_URL_KEY)
+      || '';
+    pendingTs = Number(
+      sessionStorage.getItem(PENDING_CREATED_APP_TS_KEY)
+      || localStorage.getItem(PENDING_CREATED_APP_TS_KEY)
+      || 0
+    );
+  } catch {
+    return '';
+  }
+
+  if (!pendingUrl) return '';
+
+  const clearPending = () => {
+    try {
+      sessionStorage.removeItem(PENDING_CREATED_APP_URL_KEY);
+      sessionStorage.removeItem(PENDING_CREATED_APP_TS_KEY);
+      localStorage.removeItem(PENDING_CREATED_APP_URL_KEY);
+      localStorage.removeItem(PENDING_CREATED_APP_TS_KEY);
+    } catch {
+      // ignore storage failures
+    }
+  };
+
+  if (pendingTs && Date.now() - pendingTs > PENDING_CREATED_APP_REDIRECT_MAX_AGE_MS) {
+    clearPending();
+    return '';
+  }
+
+  try {
+    const target = new URL(pendingUrl, window.location.origin);
+    if (target.origin !== window.location.origin || !target.pathname.startsWith('/app/')) {
+      clearPending();
+      return '';
+    }
+    return target.href;
+  } catch {
+    clearPending();
+    return '';
+  }
+};
+const getInitialSponsorTrustId = () =>
+  localStorage.getItem('selected_trust_id') || import.meta.env.VITE_DEFAULT_TRUST_ID || '';
+const BASE_TRUST_ID = String(import.meta.env.VITE_DEFAULT_TRUST_ID || '').trim();
+
+const buildNotificationContentKey = (notification) => {
+  const title = String(notification?.title || '').trim().toLowerCase();
+  const message = String(notification?.message || notification?.body || '').trim().toLowerCase();
+  const type = String(notification?.click_action || notification?.type || '').trim().toLowerCase();
+  const createdAt = String(notification?.created_at || '').trim();
+  const createdAtSecond = createdAt ? createdAt.slice(0, 19) : '';
+  return `${type}|${title}|${message}|${createdAtSecond}`;
+};
+
+const mergeUniqueTrusts = (...collections) => {
+  const merged = [];
+  const seen = new Set();
+
+  collections
+    .flat()
+    .filter(Boolean)
+    .forEach((trust) => {
+      const id = trust.id === null || trust.id === undefined ? '' : String(trust.id);
+      if (!id || seen.has(id)) return;
+      seen.add(id);
+      merged.push({
+        id,
+        name: trust.name || null,
+        icon_url: trust.icon_url || null,
+        remark: trust.remark || null,
+        is_active: Boolean(trust.is_active) !== false,
+        role: trust.role || null,
+        membership_number: trust.membership_number || trust['Membership number'] || null,
+        members_id: trust.members_id || trust.member_id || null,
+      });
+    });
+
+  return merged;
+};
+
+const readCachedTrustList = () => {
+  try {
+    const raw = localStorage.getItem('trust_list_cache');
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+};
+
+const FEATURE_FLAGS_CACHE_PREFIX = 'feature_flags_cache_v4:';
+const readInitialFeatureFlagsCache = (trustId) => {
+  try {
+    const normalizedTrustId = String(trustId || '').trim();
+    if (!normalizedTrustId) return { flags: {}, flagsData: {} };
+    const raw = sessionStorage.getItem(`${FEATURE_FLAGS_CACHE_PREFIX}${normalizedTrustId}:general`);
+    if (!raw) return { flags: {}, flagsData: {} };
+    const parsed = JSON.parse(raw);
+    const isFresh = Number(parsed?.ts) > 0 && (Date.now() - Number(parsed.ts)) <= (5 * 60 * 1000);
+    if (!isFresh) return { flags: {}, flagsData: {} };
+    return {
+      flags: parsed?.flags && typeof parsed.flags === 'object' ? parsed.flags : {},
+      flagsData: parsed?.flagsData && typeof parsed.flagsData === 'object' ? parsed.flagsData : {}
+    };
+  } catch {
+    return { flags: {}, flagsData: {} };
+  }
+};
+
+const mergeTrustsWithExistingVisuals = (incomingTrusts = [], existingTrusts = []) => {
+  const byId = new Map(
+    (existingTrusts || [])
+      .filter(Boolean)
+      .map((trust) => [String(trust?.id || '').trim(), trust])
+      .filter(([id]) => Boolean(id))
+  );
+
+  return (incomingTrusts || []).map((trust) => {
+    const id = String(trust?.id || '').trim();
+    if (!id) return trust;
+    const existing = byId.get(id);
+    if (!existing) return trust;
+    return {
+      ...trust,
+      // Prefer fresh incoming data; keep cache only as fallback.
+      name: trust?.name || existing?.name || null,
+      icon_url: trust?.icon_url || existing?.icon_url || null,
+      remark: trust?.remark || existing?.remark || null,
+    };
+  });
+};
+
+const pinBaseTrustFirst = (trusts = []) => {
+  const baseId = String(BASE_TRUST_ID || '').trim();
+  if (!baseId || !Array.isArray(trusts) || trusts.length === 0) return trusts;
+  const baseIndex = trusts.findIndex((trust) => String(trust?.id || '').trim() === baseId);
+  if (baseIndex <= 0) return trusts;
+  const baseTrust = trusts[baseIndex];
+  const remaining = trusts.filter((_, index) => index !== baseIndex);
+  return [baseTrust, ...remaining];
+};
+
+// Fallback when the selected Trust is missing: the logged-in app's own
+// (base) Trust if the member has it, else the first active one.
+const pickFallbackTrust = (trusts = []) =>
+  trusts.find((trust) => String(trust?.id || '').trim() === BASE_TRUST_ID && trust?.is_active !== false)
+  || trusts.find((trust) => trust?.is_active !== false)
+  || trusts[0]
+  || null;
+
+const TRUST_ICON_CACHE_KEY = 'trust_icon_url_cache_v1';
+const readTrustIconUrlCache = () => {
+  try {
+    const raw = localStorage.getItem(TRUST_ICON_CACHE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {};
+  }
+};
+
+const buildCacheBustedIconUrl = (iconUrl, versionToken) => {
+  const src = String(iconUrl || '').trim();
+  if (!src) return '';
+  if (!versionToken) return src;
+  const separator = src.includes('?') ? '&' : '?';
+  return `${src}${separator}v=${encodeURIComponent(String(versionToken))}`;
+};
+
+const resolveTrustIconToken = (trust, fallback = '1') =>
+  String(
+    trust?.version ||
+    trust?.updated_at ||
+    trust?.created_at ||
+    trust?.icon_url ||
+    fallback
+  );
+
+const hasAuthoritativeApiMemberships = () => {
+  try {
+    const parsedUser = JSON.parse(localStorage.getItem('user') || 'null');
+    return Boolean(parsedUser?.trusts_loaded_from_active_api)
+      || Array.isArray(parsedUser?.hospital_memberships)
+      && parsedUser.hospital_memberships.some((membership) => membership?.source === 'active_trusts_by_mobile');
+  } catch {
+    return false;
+  }
+};
+
+const getStoredUserForTrustApi = () => {
+  try {
+    const parsedUser = JSON.parse(localStorage.getItem('user') || 'null');
+    if (!parsedUser) return null;
+    const mobile = String(parsedUser?.mobile || parsedUser?.Mobile || parsedUser?.phone || '').replace(/\D/g, '').slice(-10);
+    if (!mobile) return null;
+    return {
+      ...parsedUser,
+      mobile,
+      name: normalizeMemberName(parsedUser?.name || parsedUser?.Name || '')
+    };
+  } catch {
+    return null;
+  }
+};
+
+const TrustChipIcon = memo(({ iconUrl, altText, versionToken, state }) => {
+  const [failedSrc, setFailedSrc] = useState('');
+
+  const src = buildCacheBustedIconUrl(iconUrl, versionToken);
+
+  const hasValidIcon = Boolean(src) && failedSrc !== src;
+
+  if (!hasValidIcon) {
+    return <Building2 className="h-7 w-7" style={{ color: 'var(--body-text-color)' }} />;
+  }
+
+  return (
+    <img
+      src={src}
+      alt={altText || 'Trust'}
+      className="w-10 h-10 object-contain rounded-full"
+      loading="eager"
+      decoding="async"
+      onError={() => setFailedSrc(src)}
+      style={state ? {} : { filter: 'grayscale(30%)', opacity: 0.7 }}
+    />
+  );
+}, (prevProps, nextProps) => (
+  prevProps.iconUrl === nextProps.iconUrl
+  && prevProps.altText === nextProps.altText
+  && prevProps.versionToken === nextProps.versionToken
+  && prevProps.state === nextProps.state
+));
+
+// Quick-access tile icon: resolves local asset paths against the app's base
+// (see resolveAssetUrl) and falls back to a generic glyph if the URL is
+// missing or the image fails to load, instead of a broken-image placeholder.
+const QuickActionIcon = memo(({ src, alt }) => {
+  const [failedSrc, setFailedSrc] = useState('');
+  const resolvedSrc = resolveAssetUrl(src);
+  const hasValidIcon = Boolean(resolvedSrc) && failedSrc !== resolvedSrc;
+
+  if (!hasValidIcon) {
+    return <HelpCircle className="h-[18px] w-[18px]" style={{ color: 'var(--body-text-color)' }} />;
+  }
+
+  // The image is used as a mask so the glyph takes the theme colour; the <img>
+  // stays (invisible) only to detect load failures and give the mask its alt text.
+  const maskValue = `url("${resolvedSrc}") center / contain no-repeat`;
+  return (
+    <span
+      role="img"
+      aria-label={alt}
+      className="relative inline-block h-[18px] w-[18px]"
+      style={{ backgroundColor: 'var(--quick-actions-icon-color)', WebkitMask: maskValue, mask: maskValue }}
+    >
+      <img
+        src={resolvedSrc}
+        alt=""
+        aria-hidden="true"
+        className="absolute inset-0 h-full w-full opacity-0"
+        onError={() => setFailedSrc(resolvedSrc)}
+      />
+    </span>
+  );
+}, (prevProps, nextProps) => prevProps.src === nextProps.src && prevProps.alt === nextProps.alt);
+
+const normalizeMemberName = (value) => {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  const lowered = raw.toLowerCase();
+  const blockedNames = new Set([
+    'aaaaa',
+    'gau grass',
+    'guest user',
+    'test',
+    'test user',
+    'null',
+    'undefined',
+    'n/a',
+    'na'
+  ]);
+  const compact = raw.replace(/\s+/g, '');
+  const repeatedSingleChar = /^([a-zA-Z])\1{2,}$/.test(compact);
+  if (blockedNames.has(lowered) || repeatedSingleChar) return '';
+  return raw;
+};
+
+const getCachedUserProfileSnapshot = () => {
+  try {
+    const user = localStorage.getItem('user');
+    if (!user) return null;
+    const parsed = JSON.parse(user);
+    const fallbackName = normalizeMemberName(parsed.name || parsed.Name || parsed['Name'] || '');
+    const userKey = `userProfile_${parsed.Mobile || parsed.mobile || parsed.id || 'default'}`;
+    const savedProfile = localStorage.getItem(userKey);
+    const cachedProfile = savedProfile ? JSON.parse(savedProfile) : null;
+    const cachedName = normalizeMemberName(cachedProfile?.name || '');
+    const resolvedName = cachedName || fallbackName;
+    const profilePhotoUrl = cachedProfile?.profile_photo_url || cachedProfile?.profilePhotoUrl || '';
+    if (!resolvedName && !profilePhotoUrl) return null;
+    return { name: resolvedName, profilePhotoUrl };
+  } catch {
+    return null;
+  }
+};
+
+const Home = ({ onNavigate, onLogout }) => {
+  const { displayTrustVersion } = useTrustDataVersion();
+  const normalizeTrustId = (id) => {
+    if (id === null || id === undefined) return '';
+    const normalized = String(id).trim();
+    if (!normalized) return '';
+    const lowered = normalized.toLowerCase();
+    if (lowered === 'null' || lowered === 'undefined' || lowered === 'nan') return '';
+    return normalized;
+  };
+  // Computed synchronously (lazy initializer, not an effect) so the very
+  // first render already knows to skip Home's own branded content when a
+  // just-created-app redirect is still pending.
+  const [pendingCreatedAppUrl] = useState(() => getValidPendingCreatedAppUrl());
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const mainContainerRef = useRef(null);
+  const channelRef = useRef(null);
+  const latestNotificationsFetchRef = useRef(0);
+  const trustListScrollRef = useRef(null);
+  const trustChipRefs = useRef({});
+  const trustSwitchAnimationTimerRef = useRef(null);
+  const previousSelectedTrustIdRef = useRef('');
+
+  useEffect(() => {
+    if (!pendingCreatedAppUrl) return;
+    if (window.location.href !== pendingCreatedAppUrl) {
+      window.location.replace(pendingCreatedAppUrl);
+    }
+  }, [pendingCreatedAppUrl]);
+
+  // Welcome strip: initialize from localStorage instantly to avoid delay
+  const [userProfile, setUserProfile] = useState(() => getCachedUserProfileSnapshot());
+
+  // A tenant route (/app/<slug>) pins this window to ONE Trust — see
+  // TenantLanding.jsx's grantTenantHome, the sole place that is supposed to
+  // set selected_trust_id for that session. This general member-app Home
+  // also runs the multi-trust "restore the member's last selected Trust
+  // from their full membership list" effects below, which are unaware of
+  // that pinning and — finding the just-pinned Trust absent from an
+  // unrelated API response (e.g. right after a tenant's visibility/approval
+  // just changed and that separate endpoint hasn't caught up yet) — would
+  // otherwise silently reassign selected_trust_id to some other Trust from
+  // the member's list (e.g. a previously opened "Backup" tenant on the same
+  // device), hijacking this tenant's identity.
+  //
+  // Deliberately NOT gated on isStandaloneDisplay(): TenantContext already
+  // treats an explicit /app/<slug> URL as authoritative and sets
+  // installedTrustId for it regardless of standalone/browser display mode
+  // (see TenantContext.jsx's getUrlSlug()-driven resolution) — a normal
+  // browser tab on /app/dds must be pinned to DDS exactly the same as the
+  // installed PWA is. installedTrustId is '' on the ordinary (non-tenant)
+  // '/' route, so this never affects the normal multi-trust switching
+  // experience there.
+  const { installedTrustId: pinnedTenantTrustId } = useTenant();
+  const isPinnedTenantSession = Boolean(pinnedTenantTrustId);
+
+  // Trust: prefer user's last selection; fall back to env trust id.
+  const [selectedTrustId, setSelectedTrustId] = useState(() => {
+    const cachedSelected = normalizeTrustId(localStorage.getItem('selected_trust_id') || '');
+    const persistedSelected = normalizeTrustId(localStorage.getItem(LAST_SELECTED_TRUST_ID_KEY) || '');
+    let cachedDefaultId = '';
+    try {
+      const cachedDefault = localStorage.getItem('default_trust_cache');
+      if (cachedDefault) {
+        const parsed = JSON.parse(cachedDefault);
+        cachedDefaultId = normalizeTrustId(parsed?.id || '');
+      }
+    } catch {
+      // ignore malformed cache
+    }
+    const envId = normalizeTrustId(import.meta.env.VITE_DEFAULT_TRUST_ID || '');
+    return cachedSelected || persistedSelected || cachedDefaultId || envId || '';
+  });
+
+  useEffect(() => {
+    const normalizedSelected = normalizeTrustId(selectedTrustId);
+    if (!normalizedSelected) return;
+    try {
+      localStorage.setItem(LAST_SELECTED_TRUST_ID_KEY, normalizedSelected);
+    } catch {
+      // ignore storage write failures
+    }
+  }, [selectedTrustId]);
+
+  // Synchronously pre-populate trustInfo from cached default-trust data
+  const [trustInfo, setTrustInfo] = useState(() => {
+    try {
+      const cached = localStorage.getItem('default_trust_cache');
+      if (cached) return JSON.parse(cached);
+    } catch { /* ignore */ }
+    return null;
+  });
+
+  const [strictTrustApiState, setStrictTrustApiState] = useState(() =>
+    getStoredUserForTrustApi() ? 'loading' : 'fallback'
+  );
+
+  // trustList: in strict API mode, start empty so stale cached chips do not flash.
+  const [trustList, setTrustList] = useState(() => {
+    if (getStoredUserForTrustApi()) return [];
+    try {
+      const listCached = localStorage.getItem('trust_list_cache');
+      if (listCached) {
+        const list = JSON.parse(listCached);
+        if (Array.isArray(list) && list.length > 0) return list;
+      }
+      const cached = localStorage.getItem('default_trust_cache');
+      if (cached) return [JSON.parse(cached)];
+    } catch { /* ignore */ }
+    return [];
+  });
+  const [defaultTrust, setDefaultTrust] = useState(() => {
+    try {
+      const cached = localStorage.getItem('default_trust_cache');
+      if (cached) return JSON.parse(cached);
+    } catch { /* ignore */ }
+    return null;
+  });
+  const [showTermsModal, setShowTermsModal] = useState(() => isLoginTermsPromptPending());
+  const [termsModalContent, setTermsModalContent] = useState('');
+  const [termsModalTrustName, setTermsModalTrustName] = useState('');
+  const [termsModalLoading, setTermsModalLoading] = useState(() => isLoginTermsPromptPending());
+  const [termsModalError, setTermsModalError] = useState('');
+  const [notifications, setNotifications] = useState([]);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [unreadCountByTrust, setUnreadCountByTrust] = useState({});
+  const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
+  const [isNotificationsLoading, setIsNotificationsLoading] = useState(false);
+  const [animatingTrustId, setAnimatingTrustId] = useState('');
+  const [marqueeUpdates, setMarqueeUpdates] = useState(() => {
+    try {
+      const trustId = localStorage.getItem('selected_trust_id') || import.meta.env.VITE_DEFAULT_TRUST_ID || '';
+      if (!trustId) return [];
+      const cached = localStorage.getItem(`marquee_cache_${trustId}`);
+      if (cached) return JSON.parse(cached);
+    } catch { /* ignore */ }
+    return [];
+  });
+
+  const initialSponsorTrustId = getInitialSponsorTrustId();
+  const initialSponsorOrder = initialSponsorTrustId ? readSponsorOrder(initialSponsorTrustId) : [];
+  const initialSponsorProgress = initialSponsorTrustId ? readCarouselProgress(initialSponsorTrustId) : {
+    sponsorBatchesLoaded: [],
+    hasMoreSponsors: false
+  };
+
+  // Sponsors: normalized cache-first state (order + byId, no index-based mapping to data)
+  const [sponsorsById, setSponsorsById] = useState(() => {
+    return initialSponsorTrustId ? readSponsorsById(initialSponsorTrustId) : {};
+  });
+  const [sponsorOrder, setSponsorOrder] = useState(initialSponsorOrder);
+  const [isSponsorsLoading, setIsSponsorsLoading] = useState(initialSponsorOrder.length === 0);
+  const [isCarouselBatchLoading, setIsCarouselBatchLoading] = useState(false);
+  const [sponsorFetchSettledTrustId, setSponsorFetchSettledTrustId] = useState(
+    initialSponsorOrder.length > 0 ? initialSponsorTrustId : ''
+  );
+  const [loadedBatchCount, setLoadedBatchCount] = useState(
+    Array.isArray(initialSponsorProgress.sponsorBatchesLoaded) ? initialSponsorProgress.sponsorBatchesLoaded.length : 0
+  );
+  const [hasMoreSponsorBatches, setHasMoreSponsorBatches] = useState(
+    Boolean(initialSponsorProgress.hasMoreSponsors)
+  );
+  const [isCarouselReady, setIsCarouselReady] = useState(initialSponsorOrder.length > 0);
+  const [sponsorIndex, setSponsorIndex] = useState(0);
+  const sponsorTouchStartRef = useRef(null);
+  const sponsorTouchEndRef = useRef(null);
+  const sponsorListPreloadRef = useRef({});
+  const sponsorBootstrapInFlightRef = useRef('');
+  const sponsors = useMemo(
+    () => sponsorOrder.map((id) => sponsorsById[id]).filter(Boolean),
+    [sponsorOrder, sponsorsById]
+  );
+  const [featureFlags, setFeatureFlags] = useState(() => readInitialFeatureFlagsCache(
+    selectedTrustId || localStorage.getItem('selected_trust_id') || trustInfo?.id || ''
+  ).flags || {});
+  const [flagsData, setFlagsData] = useState(() => readInitialFeatureFlagsCache(
+    selectedTrustId || localStorage.getItem('selected_trust_id') || trustInfo?.id || ''
+  ).flagsData || {}); // full metadata: { feature_key: { display_name, tagline, icon_url } }
+  const [trustIconVersionById, setTrustIconVersionById] = useState({});
+  const [trustIconUrlById, setTrustIconUrlById] = useState(() => readTrustIconUrlCache());
+  const hasLoadedMemberTrusts = useRef(false);
+  const {
+    carouselImages,
+    isLoading: isGalleryMetaLoading,
+    error: galleryError,
+  } = useGalleryContext();
+  const [showGalleryLoader, setShowGalleryLoader] = useState(false);
+
+  // Global app theme from central provider
+  const theme = useAppTheme();
+  const footerTheme = useMemo(() => getFooterThemeStyles(theme), [theme]);
+  const navbarTheme = useMemo(() => getNavbarThemeStyles(theme), [theme]);
+
+  useEffect(() => {
+    if (!import.meta.env.DEV) return;
+    const cacheKey = `theme_cache_${selectedTrustId || ''}`;
+    let cachedThemeEntry = null;
+    try {
+      cachedThemeEntry = JSON.parse(sessionStorage.getItem(cacheKey) || 'null');
+    } catch {
+      cachedThemeEntry = null;
+    }
+    const cachedTheme = cachedThemeEntry?.theme || cachedThemeEntry || null;
+    const usingDbTheme = Boolean(theme?.templateId || theme?.baseTemplateUpdatedAt || theme?.selectedTemplateUpdatedAt);
+    const resolvedFooterConfig = theme?.themeConfig?.footer || null;
+    const resolvedNavbarConfig = theme?.themeConfig?.navbar || null;
+    const resolvedNavbarBg = theme?.themeConfig?.navbar_bg || null;
+    const resolvedTypographyOverrides = theme?.themeConfig?.typography?.component_overrides || null;
+
+    console.log('[FooterTheme][Debug]', {
+      currentTemplateId: theme?.templateId || null,
+      currentTrustId: theme?.selectedTrustId || theme?.trustId || selectedTrustId || null,
+      currentTemplateUpdatedAt: theme?.templateUpdatedAt || null,
+      currentBaseTemplateUpdatedAt: theme?.baseTemplateUpdatedAt || null,
+      currentSelectedTemplateUpdatedAt: theme?.selectedTemplateUpdatedAt || null,
+      cachedTemplateUpdatedAt: cachedTheme?.templateUpdatedAt || null,
+      cachedBaseTemplateUpdatedAt: cachedTheme?.baseTemplateUpdatedAt || null,
+      cachedSelectedTemplateUpdatedAt: cachedTheme?.selectedTemplateUpdatedAt || null,
+      resolvedFooterConfig,
+      resolvedTypographyOverrides,
+      resolvedFooterBackground: footerTheme.backgroundStyle,
+      resolvedFooterTextColor: footerTheme.textColor,
+      resolvedFooterTextSource: footerTheme.textColorSource,
+      usingTypographyOverride: footerTheme.usingTypographyOverride,
+      hardcodedFooterTextOverrideDetected: false,
+      usingDbTheme,
+      usingFallbackTheme: !usingDbTheme
+    });
+
+    console.log('[NavbarTheme][Debug]', {
+      currentTemplateId: theme?.templateId || null,
+      currentTrustId: theme?.selectedTrustId || theme?.trustId || selectedTrustId || null,
+      resolvedNavbarConfig,
+      resolvedNavbarBg,
+      resolvedTypographyOverrides,
+      resolvedNavbarBackgroundStyle: navbarTheme.backgroundStyle,
+      resolvedNavbarBackgroundSource: navbarTheme.backgroundSource,
+      resolvedNavbarTextColor: navbarTheme.textColor,
+      resolvedNavbarTextSource: navbarTheme.textColorSource,
+      resolvedNavbarBlur: navbarTheme.blurPx,
+      resolvedNavbarBlurSource: navbarTheme.blurSource,
+      resolvedNavbarOpacity: navbarTheme.opacity,
+      resolvedNavbarOpacitySource: navbarTheme.opacitySource,
+      hardcodedNavbarOverrideDetected: false
+    });
+  }, [footerTheme, navbarTheme, selectedTrustId, theme]);
+
+  useEffect(() => {
+    setShowGalleryLoader(false);
+    return undefined;
+  }, [isGalleryMetaLoading, carouselImages.length]);
+
+  const syncSponsorStoreSnapshot = (trustId) => {
+    if (!trustId) {
+      setSponsorsById({});
+      setSponsorOrder([]);
+      setLoadedBatchCount(0);
+      setHasMoreSponsorBatches(false);
+      setIsCarouselReady(false);
+      return;
+    }
+
+    const byId = readSponsorsById(trustId);
+    const order = readSponsorOrder(trustId);
+    const progress = readCarouselProgress(trustId);
+
+    setSponsorsById(byId || {});
+    setSponsorOrder(Array.isArray(order) ? order : []);
+    setLoadedBatchCount(Array.isArray(progress.sponsorBatchesLoaded) ? progress.sponsorBatchesLoaded.length : 0);
+    setHasMoreSponsorBatches(Boolean(progress.hasMoreSponsors));
+    setIsCarouselReady(Array.isArray(order) && order.length > 0);
+  };
+
+  // Register sidebar state with Android back handler
+  useEffect(() => {
+    registerSidebarState(isMenuOpen, () => setIsMenuOpen(false));
+  }, [isMenuOpen]);
+
+  const setSessionSelectionFlag = () => {
+    if (typeof window === 'undefined') return;
+    try {
+      sessionStorage.setItem('trust_selected_in_session', 'true');
+    } catch {
+      // no-op
+    }
+  };
+
+  useEffect(() => {
+    const storedUser = getStoredUserForTrustApi();
+    if (!storedUser) {
+      setStrictTrustApiState('fallback');
+      return undefined;
+    }
+
+    let active = true;
+    setStrictTrustApiState('loading');
+    setTrustList([]);
+
+    const loadApiTrusts = async () => {
+      try {
+        const result = await fetchActiveTrustsByMobile({
+          mobile: storedUser.mobile,
+          name: storedUser.name || null
+        });
+        if (!active) return;
+
+        const apiMemberships = Array.isArray(result?.memberships) ? result.memberships : [];
+        if (!result?.success || result?.member_found === false) {
+          setStrictTrustApiState('fallback');
+          return;
+        }
+
+        const apiTrusts = mergeUniqueTrusts(apiMemberships.map((membership) => ({
+          id: membership?.trust_id || membership?.id || null,
+          name: membership?.trust_name || null,
+          icon_url: membership?.trust_icon_url || null,
+          remark: membership?.trust_remark || null,
+          is_active: membership?.is_active !== false,
+          role: membership?.role || null,
+          membership_number: membership?.membership_number || null,
+          members_id: membership?.members_id || membership?.member_id || null,
+        })));
+
+        setTrustList(apiTrusts);
+        try { localStorage.setItem('trust_list_cache', JSON.stringify(apiTrusts)); } catch { /* ignore */ }
+
+        const nextUser = {
+          ...storedUser,
+          id: result?.member_id || storedUser?.id || null,
+          members_id: result?.member_id || storedUser?.members_id || null,
+          member_id: result?.member_id || storedUser?.member_id || null,
+          member_ids: result?.member_id ? [String(result.member_id)] : (storedUser?.member_ids || []),
+          Name: result?.member_name || storedUser?.Name || storedUser?.name || '',
+          name: result?.member_name || storedUser?.name || storedUser?.Name || '',
+          Mobile: result?.mobile || storedUser?.Mobile || storedUser?.mobile || '',
+          mobile: result?.mobile || storedUser?.mobile || storedUser?.Mobile || '',
+          hospital_memberships: apiMemberships,
+          trusts_loaded_from_active_api: true
+        };
+        try { localStorage.setItem('user', JSON.stringify(nextUser)); } catch { /* ignore */ }
+
+        const currentSelected = normalizeTrustId(localStorage.getItem('selected_trust_id') || selectedTrustId);
+        const selectedExists = apiTrusts.some((trust) => normalizeTrustId(trust?.id) === currentSelected);
+        if (shouldSkipTrustReassignment({ isPinnedTenantSession, selectedExists })) {
+          hasLoadedMemberTrusts.current = true;
+          setStrictTrustApiState('success');
+          return;
+        }
+        const effectiveTrust = selectedExists
+          ? apiTrusts.find((trust) => normalizeTrustId(trust?.id) === currentSelected) || null
+          : pickFallbackTrust(apiTrusts);
+
+        if (effectiveTrust?.id) {
+          const effectiveTrustId = normalizeTrustId(effectiveTrust.id);
+          setSelectedTrustId(effectiveTrustId);
+          setTrustInfo(effectiveTrust);
+          localStorage.setItem('selected_trust_id', effectiveTrustId);
+          localStorage.setItem(LAST_SELECTED_TRUST_ID_KEY, effectiveTrustId);
+          if (effectiveTrust?.name) localStorage.setItem('selected_trust_name', effectiveTrust.name);
+          window.dispatchEvent(new CustomEvent('trust-changed', {
+            detail: { trustId: effectiveTrustId, trustName: effectiveTrust?.name || null }
+          }));
+        } else {
+          localStorage.removeItem('selected_trust_id');
+          localStorage.removeItem(LAST_SELECTED_TRUST_ID_KEY);
+          setSelectedTrustId('');
+          setTrustInfo(null);
+        }
+
+        hasLoadedMemberTrusts.current = true;
+        setStrictTrustApiState('success');
+      } catch (error) {
+        if (!active) return;
+        console.warn('[Home] Strict trust API failed, falling back:', error?.message || error);
+        setStrictTrustApiState('fallback');
+      }
+    };
+
+    loadApiTrusts();
+    return () => { active = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: strict refresh runs on mount from stored user
+  }, []);
+
+  useEffect(() => {
+    if (strictTrustApiState !== 'fallback') return undefined;
+    let isActive = true;
+    const loadDefaultTrust = async () => {
+      try {
+        let trust = null;
+        const envTrustId = import.meta.env.VITE_DEFAULT_TRUST_ID;
+        const normalizedEnvTrustId = normalizeTrustId(envTrustId);
+        let resolvedViaEnv = false;
+
+        if (envTrustId) {
+          trust = await fetchTrustById(envTrustId);
+          resolvedViaEnv = Boolean(trust);
+        }
+
+        if (!trust) trust = await fetchDefaultTrust();
+
+        if (isActive && trust) {
+          const normalizedDefaultId = normalizeTrustId(trust.id);
+          const currentSelected = normalizeTrustId(localStorage.getItem('selected_trust_id') || selectedTrustId);
+          const isApiAuthoritative = hasAuthoritativeApiMemberships();
+
+          setDefaultTrust(trust);
+          setTrustList((prev) => {
+            const existing = (prev || []).find((t) => normalizeTrustId(t.id) === normalizedDefaultId);
+            if (existing) {
+              return (prev || []).map((t) =>
+                normalizeTrustId(t.id) === normalizedDefaultId ? { ...t, ...trust } : t
+              );
+            }
+            if (isApiAuthoritative) return prev || [];
+            return [trust, ...(prev || [])];
+          });
+
+          // Apply as active trust only when nothing is selected yet.
+          // Also apply default when selected trust is just stale env id
+          // that failed to resolve (common after env/db trust id changes).
+          const shouldApplyDefaultSelection =
+            !isPinnedTenantSession && !isApiAuthoritative && (
+              !currentSelected ||
+              (!resolvedViaEnv && normalizedEnvTrustId && currentSelected === normalizedEnvTrustId)
+            );
+          if (shouldApplyDefaultSelection) {
+            setSelectedTrustId(normalizedDefaultId);
+            localStorage.setItem('selected_trust_id', normalizedDefaultId);
+            if (trust.name) localStorage.setItem('selected_trust_name', trust.name);
+            setTrustInfo(trust);
+          }
+
+          try { localStorage.setItem('default_trust_cache', JSON.stringify(trust)); } catch { /* ignore */ }
+        }
+      } catch (err) {
+        console.warn('Failed to load default trust:', err);
+      }
+    };
+    loadDefaultTrust();
+    return () => { isActive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: run once on mount, selectedTrustId only read as an initial fallback
+  }, [strictTrustApiState]);
+  // Close sidebar when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (isMenuOpen) {
+        const isSidebarClick = event.target.closest('[data-sidebar="true"]');
+        const isOverlayClick = event.target.closest('[data-sidebar-overlay="true"]');
+        if (isOverlayClick) setIsMenuOpen(false);
+        if (!isSidebarClick && !isOverlayClick) setIsMenuOpen(false);
+      }
+    };
+    if (isMenuOpen) {
+      document.addEventListener('click', handleClickOutside, true);
+      return () => document.removeEventListener('click', handleClickOutside, true);
+    }
+  }, [isMenuOpen]);
+
+  // Close notifications when clicking outside
+  useEffect(() => {
+    if (isNotificationsOpen) {
+      const handleOutsideInteraction = (event) => {
+        const notificationsPanel = event.target.closest('.notification-dropdown');
+        const notificationsButton = event.target.closest('.notification-button');
+        const isInsideNotificationUi = Boolean(notificationsPanel || notificationsButton);
+
+        if (!isInsideNotificationUi) {
+          event.preventDefault();
+          event.stopPropagation();
+          setIsNotificationsOpen(false);
+        }
+      };
+
+      document.addEventListener('pointerdown', handleOutsideInteraction, true);
+      document.addEventListener('click', handleOutsideInteraction, true);
+      return () => {
+        document.removeEventListener('pointerdown', handleOutsideInteraction, true);
+        document.removeEventListener('click', handleOutsideInteraction, true);
+      };
+    }
+    return undefined;
+  }, [isNotificationsOpen]);
+
+  // Lock scroll when notifications open
+  useEffect(() => {
+    if (isNotificationsOpen) {
+      const scrollY = window.scrollY;
+      document.documentElement.style.overflow = 'hidden';
+      document.body.style.overflow = 'hidden';
+      document.body.style.position = 'fixed';
+      document.body.style.width = '100%';
+      document.body.style.top = `-${scrollY}px`;
+      document.body.style.touchAction = 'none';
+
+      const preventScroll = (e) => {
+        if (e.type === 'wheel' || e.type === 'touchmove') {
+          e.preventDefault();
+        }
+      };
+      document.addEventListener('wheel', preventScroll, { passive: false });
+      document.addEventListener('touchmove', preventScroll, { passive: false });
+
+      return () => {
+        document.removeEventListener('wheel', preventScroll);
+        document.removeEventListener('touchmove', preventScroll);
+        const y = parseInt(document.body.style.top || '0') * -1;
+        document.documentElement.style.overflow = 'unset';
+        document.body.style.overflow = 'unset';
+        document.body.style.position = 'unset';
+        document.body.style.width = 'unset';
+        document.body.style.top = 'unset';
+        document.body.style.touchAction = 'auto';
+        window.scrollTo(0, y);
+      };
+    } else {
+      const scrollY = parseInt(document.body.style.top || '0') * -1;
+      document.documentElement.style.overflow = 'unset';
+      document.body.style.overflow = 'unset';
+      document.body.style.position = 'unset';
+      document.body.style.width = 'unset';
+      document.body.style.top = 'unset';
+      document.body.style.touchAction = 'auto';
+      window.scrollTo(0, scrollY);
+    }
+    return undefined;
+  }, [isNotificationsOpen]);
+
+  // Load user profile — state is already pre-filled synchronously above;
+  // this effect only upgrades it with the full profile from API/cache
+  useEffect(() => {
+    const loadProfile = async () => {
+      const startedAt = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+      const user = localStorage.getItem('user');
+      if (user) {
+        try {
+          const parsedUser = JSON.parse(user);
+          const userKey = `userProfile_${parsedUser.Mobile || parsedUser.mobile || parsedUser.id || 'default'}`;
+          const fallbackName = normalizeMemberName(
+            parsedUser?.Name || parsedUser?.name || parsedUser?.full_name || parsedUser?.['Full Name'] || ''
+          );
+          let cachedSnapshot = null;
+
+          // First, apply cached profile photo if available
+          const savedProfile = localStorage.getItem(userKey);
+          if (savedProfile) {
+            const parsed = JSON.parse(savedProfile);
+            const normalizedName = normalizeMemberName(parsed?.name || '');
+            cachedSnapshot = parsed;
+            setUserProfile((prev) => ({
+              ...prev,
+              ...parsed,
+              name: normalizedName || prev?.name || fallbackName || ''
+            }));
+          } else if (fallbackName) {
+            setUserProfile((prev) => ({
+              ...prev,
+              name: prev?.name || fallbackName
+            }));
+          }
+          const userId = parsedUser['Membership number'] || parsedUser.mobile || parsedUser.id;
+          if (userId) {
+            try {
+              const response = await getProfile();
+              if (response.success && response.profile) {
+                const normalizedName = normalizeMemberName(
+                  response.profile.name || response.profile.full_name || cachedSnapshot?.name || fallbackName || ''
+                );
+                const profilePhotoUrl =
+                  response.profile.profile_photo_url ||
+                  response.profile.profilePhotoUrl ||
+                  cachedSnapshot?.profile_photo_url ||
+                  cachedSnapshot?.profilePhotoUrl ||
+                  '';
+                const nextSnapshot = {
+                  ...(cachedSnapshot || {}),
+                  ...(response.profile || {}),
+                  name: normalizedName,
+                  profile_photo_url: profilePhotoUrl,
+                  profilePhotoUrl
+                };
+
+                setUserProfile((prev) => ({
+                  ...prev,
+                  name: normalizedName || prev?.name || fallbackName || '',
+                  profilePhotoUrl
+                }));
+                try {
+                  localStorage.setItem(userKey, JSON.stringify(nextSnapshot));
+                } catch {
+                  // ignore cache write failures
+                }
+                return;
+              }
+            } catch (error) {
+              console.error('Error loading from Supabase:', error);
+            }
+          }
+
+          const fallbackSnapshot = getCachedUserProfileSnapshot();
+          if (fallbackSnapshot) {
+            setUserProfile((prev) => ({
+              ...prev,
+              ...fallbackSnapshot,
+              name: fallbackSnapshot.name || prev?.name || fallbackName || ''
+            }));
+          } else if (fallbackName) {
+            setUserProfile((prev) => ({
+              ...prev,
+              name: prev?.name || fallbackName
+            }));
+          }
+        } catch (error) {
+          console.error('Error loading user profile:', error);
+        }
+      }
+      if (import.meta.env.DEV) {
+        const endedAt = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+        console.log(`[Perf][Home] profile bootstrap completed in ${Math.round(endedAt - startedAt)}ms`);
+      }
+    };
+    loadProfile();
+  }, []);
+
+  useEffect(() => {
+    const syncProfileFromCache = () => {
+      const snapshot = getCachedUserProfileSnapshot();
+      if (snapshot) setUserProfile(snapshot);
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') syncProfileFromCache();
+    };
+
+    window.addEventListener('user-profile-updated', syncProfileFromCache);
+    window.addEventListener('focus', syncProfileFromCache);
+    window.addEventListener('storage', syncProfileFromCache);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      window.removeEventListener('user-profile-updated', syncProfileFromCache);
+      window.removeEventListener('focus', syncProfileFromCache);
+      window.removeEventListener('storage', syncProfileFromCache);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, []);
+
+  // Load trusts from user localStorage
+  useEffect(() => {
+    if (strictTrustApiState === 'loading') return;
+    const user = localStorage.getItem('user');
+    if (!user) return;
+    try {
+      const parsedUser = JSON.parse(user);
+      const memberships = Array.isArray(parsedUser.hospital_memberships) ? parsedUser.hospital_memberships : [];
+      const derivedTrusts = memberships.map((m) => ({
+        id: m.trust_id || m.id || null,
+        name: m.trust_name || null,
+        icon_url: m.trust_icon_url || null,
+        remark: m.trust_remark || null,
+        is_active: m.is_active !== false,
+        role: m.role || null,
+        membership_number: m.membership_number || m['Membership number'] || null,
+        members_id: m.members_id || m.member_id || null,
+      }));
+      const uniqueTrusts = mergeUniqueTrusts(derivedTrusts);
+      const primaryTrust = parsedUser.primary_trust || parsedUser.trust || derivedTrusts.find((t) => t.is_active) || derivedTrusts[0] || (parsedUser.trust_name ? { name: parsedUser.trust_name } : null);
+      const normalizedTrusts = uniqueTrusts.length > 0 ? uniqueTrusts : primaryTrust ? [primaryTrust] : [];
+      // Keep only trusts linked to current member (no global/mixed trust carry-over).
+      let mergedTrusts = normalizedTrusts.length > 0
+        ? mergeUniqueTrusts(normalizedTrusts)
+        : mergeUniqueTrusts(defaultTrust ? [defaultTrust] : []);
+
+      // Preserve known icon_url/name from cache so trust chips don't flash placeholders.
+      mergedTrusts = mergeTrustsWithExistingVisuals(mergedTrusts, readCachedTrustList());
+      mergedTrusts = pinBaseTrustFirst(mergedTrusts);
+
+      setTrustList(mergedTrusts);
+      try { localStorage.setItem('trust_list_cache', JSON.stringify(mergedTrusts)); } catch { /* ignore */ }
+
+      const normalizedSelected = normalizeTrustId(
+        localStorage.getItem('selected_trust_id') || selectedTrustId
+      );
+      const selectedExistsInMerged = mergedTrusts.some((t) => normalizeTrustId(t.id) === normalizedSelected);
+      if (shouldSkipTrustReassignment({ isPinnedTenantSession, selectedExists: selectedExistsInMerged })) return;
+      const lastSelectedTrustId = normalizeTrustId(localStorage.getItem(LAST_SELECTED_TRUST_ID_KEY) || '');
+      const lastSelectedExistsInMerged = mergedTrusts.some((t) => normalizeTrustId(t.id) === lastSelectedTrustId);
+      const effectiveTrustId =
+        (selectedExistsInMerged ? normalizedSelected : '') ||
+        (lastSelectedExistsInMerged ? lastSelectedTrustId : '') ||
+        normalizeTrustId(primaryTrust?.id) ||
+        normalizeTrustId(defaultTrust?.id) ||
+        normalizeTrustId(mergedTrusts[0]?.id) ||
+        '';
+      const effectiveTrustForEvent =
+        mergedTrusts.find((t) => normalizeTrustId(t.id) === effectiveTrustId) ||
+        primaryTrust ||
+        defaultTrust ||
+        mergedTrusts[0] ||
+        null;
+      if (effectiveTrustId && effectiveTrustId !== selectedTrustId) {
+        setSelectedTrustId(effectiveTrustId);
+        localStorage.setItem('selected_trust_id', effectiveTrustId);
+        localStorage.setItem(LAST_SELECTED_TRUST_ID_KEY, effectiveTrustId);
+        window.dispatchEvent(new CustomEvent('trust-changed', {
+          detail: { trustId: effectiveTrustId, trustName: effectiveTrustForEvent?.name || null }
+        }));
+      }
+      const effectiveTrust =
+        mergedTrusts.find((t) => normalizeTrustId(t.id) === effectiveTrustId) ||
+        primaryTrust ||
+        defaultTrust ||
+        mergedTrusts[0] ||
+        null;
+      setTrustInfo(effectiveTrust);
+      if (effectiveTrust?.name) localStorage.setItem('selected_trust_name', effectiveTrust.name);
+    } catch (error) {
+      console.warn('Could not parse user trust info:', error);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: re-run only when defaultTrust id changes; selectedTrustId/defaultTrust read fresh from localStorage/closure each run
+  }, [defaultTrust?.id, strictTrustApiState]);
+
+  // Hydrate trust visuals from Trust table so stale membership/cache values are corrected.
+  useEffect(() => {
+    const trustsToHydrate = (trustList || []).filter((trust) => {
+      const id = normalizeTrustId(trust?.id);
+      return Boolean(id);
+    });
+    if (trustsToHydrate.length === 0) return;
+
+    let active = true;
+    const hydrateTrustIcons = async () => {
+      const resolved = await Promise.all(
+        trustsToHydrate.map(async (trust) => {
+          const trustId = normalizeTrustId(trust?.id);
+          if (!trustId) return null;
+          try {
+            const row = await fetchTrustById(trustId);
+            return row
+              ? {
+                id: trustId,
+                icon_url: row.icon_url || null,
+                name: row.name || null,
+                remark: row.remark || null,
+                version: row.version || null
+              }
+              : null;
+          } catch {
+            return null;
+          }
+        })
+      );
+
+      if (!active) return;
+
+      const byId = {};
+      resolved.forEach((item) => {
+        if (!item?.id) return;
+        byId[item.id] = item;
+      });
+      if (Object.keys(byId).length === 0) return;
+
+      setTrustList((prev) => {
+        let changed = false;
+        const next = (prev || []).map((trust) => {
+          const id = normalizeTrustId(trust?.id);
+          const hydrated = byId[id];
+          if (!hydrated) return trust;
+          const nextTrust = {
+            ...trust,
+            // Prefer latest DB visuals over cached values to avoid stale logos.
+            icon_url: hydrated.icon_url || trust.icon_url || null,
+            name: hydrated.name || trust.name || null,
+            remark: hydrated.remark || trust.remark || null,
+            version: hydrated.version || trust.version || null
+          };
+          if (
+            nextTrust.icon_url !== trust.icon_url ||
+            nextTrust.name !== trust.name ||
+            nextTrust.remark !== trust.remark ||
+            nextTrust.version !== trust.version
+          ) {
+            changed = true;
+          }
+          return nextTrust;
+        });
+        if (!changed) return prev;
+        try { localStorage.setItem('trust_list_cache', JSON.stringify(next)); } catch { /* ignore */ }
+        return next;
+      });
+
+      setTrustIconVersionById((prev) => {
+        // Token comes only from the Trust row, so the icon URL stays the same
+        // (browser-cached, no flicker) until the logo actually changes.
+        const next = { ...prev };
+        Object.values(byId).forEach((trust) => {
+          const id = normalizeTrustId(trust?.id);
+          if (!id) return;
+          next[id] = resolveTrustIconToken(trust, '1');
+        });
+        return next;
+      });
+    };
+
+    hydrateTrustIcons();
+    return () => { active = false; };
+  }, [trustList]);
+
+  // Always refresh selected trust visual fields from DB (icon/name/remark)
+  // so updated logos are reflected even when cache has a non-empty stale icon.
+  useEffect(() => {
+    const normalizedSelectedTrustId = normalizeTrustId(
+      selectedTrustId || localStorage.getItem('selected_trust_id') || ''
+    );
+    if (!normalizedSelectedTrustId) return undefined;
+
+    let active = true;
+
+    const syncSelectedTrustVisuals = async () => {
+      try {
+        const freshTrust = await fetchTrustById(normalizedSelectedTrustId);
+        if (!active || !freshTrust) return;
+
+        const normalizedFreshId = normalizeTrustId(freshTrust.id);
+        if (!normalizedFreshId) return;
+
+        setTrustInfo((prev) => {
+          if (normalizeTrustId(prev?.id) !== normalizedFreshId) return prev;
+          return {
+            ...prev,
+            ...freshTrust,
+            icon_url: freshTrust?.icon_url || prev?.icon_url || null,
+          };
+        });
+
+        setTrustList((prev) => {
+          const list = Array.isArray(prev) ? prev : [];
+          let found = false;
+          const next = list.map((trust) => {
+            if (normalizeTrustId(trust?.id) !== normalizedFreshId) return trust;
+            found = true;
+            return {
+              ...trust,
+              ...freshTrust,
+              icon_url: freshTrust?.icon_url || trust?.icon_url || null,
+            };
+          });
+          const hasStoredMembershipTrusts = (() => {
+            try {
+              const parsedUser = JSON.parse(localStorage.getItem('user') || 'null');
+              return Array.isArray(parsedUser?.hospital_memberships) && parsedUser.hospital_memberships.length > 0;
+            } catch {
+              return false;
+            }
+          })();
+          const finalList = found || hasStoredMembershipTrusts ? next : [...next, freshTrust];
+          try { localStorage.setItem('trust_list_cache', JSON.stringify(finalList)); } catch { /* ignore */ }
+          return finalList;
+        });
+        setTrustIconVersionById((prev) => ({
+          ...prev,
+          [normalizedFreshId]: resolveTrustIconToken(freshTrust, '1'),
+        }));
+        if (freshTrust?.icon_url) {
+          setTrustIconUrlById((prev) => {
+            const next = { ...prev, [normalizedFreshId]: freshTrust.icon_url };
+            try { localStorage.setItem(TRUST_ICON_CACHE_KEY, JSON.stringify(next)); } catch { /* ignore */ }
+            return next;
+          });
+        }
+
+        if (normalizeTrustId(defaultTrust?.id) === normalizedFreshId) {
+          setDefaultTrust((prev) => {
+            const nextDefault = {
+              ...(prev || {}),
+              ...freshTrust,
+              icon_url: freshTrust?.icon_url || prev?.icon_url || null,
+            };
+            try {
+              localStorage.setItem('default_trust_cache', JSON.stringify(nextDefault));
+            } catch {
+              // ignore cache write failure
+            }
+            return nextDefault;
+          });
+        }
+      } catch (err) {
+        console.warn('Failed to refresh selected trust visuals:', err?.message || err);
+      }
+    };
+
+    syncSelectedTrustVisuals();
+    window.addEventListener('focus', syncSelectedTrustVisuals);
+    return () => {
+      active = false;
+      window.removeEventListener('focus', syncSelectedTrustVisuals);
+    };
+  }, [selectedTrustId, defaultTrust?.id]);
+
+  // Load member trusts from API
+  useEffect(() => {
+    if (hasLoadedMemberTrusts.current) return;
+    const user = localStorage.getItem('user');
+    if (!user) return;
+    let parsedUser = null;
+    try { parsedUser = JSON.parse(user); } catch { return; }
+
+    const userDerivedTrusts = Array.isArray(parsedUser?.hospital_memberships)
+      ? parsedUser.hospital_memberships.map((m) => ({
+        id: m?.trust_id || m?.id || null,
+        name: m?.trust_name || null,
+        icon_url: m?.trust_icon_url || null,
+        remark: m?.trust_remark || null,
+        is_active: m?.is_active,
+        role: m?.role || null,
+        membership_number: m?.membership_number || m?.['Membership number'] || null,
+        members_id: m?.members_id || m?.member_id || null,
+      }))
+      : [];
+    const hasAuthoritativeApiTrusts = strictTrustApiState === 'success' || Array.isArray(parsedUser?.hospital_memberships)
+      && parsedUser.hospital_memberships.some((membership) => membership?.source === 'active_trusts_by_mobile');
+
+    console.log('📋 User derived trusts from hospital_memberships:', userDerivedTrusts.length, userDerivedTrusts.map(t => t.name).join(', '));
+
+    if (hasAuthoritativeApiTrusts) {
+      let apiTrusts = mergeUniqueTrusts(userDerivedTrusts);
+      apiTrusts = mergeTrustsWithExistingVisuals(apiTrusts, readCachedTrustList());
+      setTrustList(apiTrusts);
+      try { localStorage.setItem('trust_list_cache', JSON.stringify(apiTrusts)); } catch { /* ignore */ }
+
+      const normalizedSelected = normalizeTrustId(selectedTrustId);
+      const selectedExists = apiTrusts.some((trust) => normalizeTrustId(trust?.id) === normalizedSelected);
+      if (shouldSkipTrustReassignment({ isPinnedTenantSession, selectedExists })) {
+        hasLoadedMemberTrusts.current = true;
+        return;
+      }
+      const effectiveTrust = selectedExists
+        ? apiTrusts.find((trust) => normalizeTrustId(trust?.id) === normalizedSelected) || null
+        : pickFallbackTrust(apiTrusts);
+
+      if (effectiveTrust?.id) {
+        const effectiveTrustId = normalizeTrustId(effectiveTrust.id);
+        if (effectiveTrustId !== selectedTrustId) {
+          setSelectedTrustId(effectiveTrustId);
+          localStorage.setItem('selected_trust_id', effectiveTrustId);
+          localStorage.setItem(LAST_SELECTED_TRUST_ID_KEY, effectiveTrustId);
+          window.dispatchEvent(new CustomEvent('trust-changed', {
+            detail: { trustId: effectiveTrustId, trustName: effectiveTrust?.name || null }
+          }));
+        }
+        setTrustInfo(effectiveTrust);
+        if (effectiveTrust.name) localStorage.setItem('selected_trust_name', effectiveTrust.name);
+      }
+      hasLoadedMemberTrusts.current = true;
+      return;
+    }
+
+    const fallbackIdsFromMemberships = Array.isArray(parsedUser?.hospital_memberships)
+      ? parsedUser.hospital_memberships.map((m) => m?.members_id).filter(Boolean)
+      : [];
+    const explicitMemberIds = Array.isArray(parsedUser?.member_ids)
+      ? parsedUser.member_ids.filter(Boolean)
+      : [];
+    const membersIds = Array.from(
+      new Set(
+        [
+          parsedUser?.members_id,
+          parsedUser?.member_id,
+          parsedUser?.id,
+          ...explicitMemberIds,
+          ...fallbackIdsFromMemberships
+        ]
+          .filter(Boolean)
+          .map((id) => String(id))
+      )
+    );
+    if (membersIds.length === 0) {
+      // If member id is not present, still honor trusts carried in user payload
+      // (selected account's hospital_memberships from login flow).
+      if (userDerivedTrusts.length > 0) {
+        let memberOnlyTrusts = mergeUniqueTrusts(userDerivedTrusts);
+        memberOnlyTrusts = mergeTrustsWithExistingVisuals(memberOnlyTrusts, readCachedTrustList());
+        memberOnlyTrusts = pinBaseTrustFirst(memberOnlyTrusts);
+        setTrustList(memberOnlyTrusts);
+        try { localStorage.setItem('trust_list_cache', JSON.stringify(memberOnlyTrusts)); } catch { /* ignore */ }
+      }
+      return;
+    }
+    hasLoadedMemberTrusts.current = true;
+    const loadMemberTrusts = async () => {
+      try {
+        console.log('🔍 Fetching member trusts for IDs:', membersIds.join(', '));
+
+        const membershipResults = await Promise.all(
+          membersIds.map((memberId) => fetchMemberTrusts(memberId).catch(() => []))
+        );
+        const membershipTrusts = membershipResults
+          .flat()
+          .map((trust) => ({
+            id: trust.id || null,
+            name: trust.name || null,
+            icon_url: trust.icon_url || null,
+            remark: trust.remark || null,
+            is_active: trust.is_active,
+            role: trust.role || null,
+            membership_number: trust.membership_number || trust['Membership number'] || null,
+            members_id: trust.members_id || trust.member_id || null,
+          }));
+
+        console.log('📊 Membership trusts found:', membershipTrusts.length, membershipTrusts.map(t => t.name).join(', '));
+
+        const uniqueTrusts = mergeUniqueTrusts(userDerivedTrusts, membershipTrusts);
+        console.log('✨ Total unique trusts:', uniqueTrusts.length, uniqueTrusts.map(t => t.name).join(', '));
+
+        if (uniqueTrusts.length === 0) return;
+
+        const primaryTrust = parsedUser?.primary_trust || uniqueTrusts.find((t) => t.is_active) || uniqueTrusts[0];
+        const merged = mergeUniqueTrusts(uniqueTrusts);
+        let withDefault = mergeTrustsWithExistingVisuals(merged, readCachedTrustList());
+        withDefault = pinBaseTrustFirst(withDefault);
+        setTrustList(() => {
+          // Cache full trust list so it appears instantly on next refresh
+          try { localStorage.setItem('trust_list_cache', JSON.stringify(withDefault)); } catch { /* ignore */ }
+          console.log(`✅ Final trust list (${withDefault.length} trusts):`, withDefault.map(t => ({ name: t.name, id: t.id.substring(0, 8) })));
+          return withDefault;
+        });
+        const normalizedSelected = normalizeTrustId(selectedTrustId);
+        const selectedExistsInFinalList = withDefault.some((t) => normalizeTrustId(t.id) === normalizedSelected);
+        if (shouldSkipTrustReassignment({ isPinnedTenantSession, selectedExists: selectedExistsInFinalList })) {
+          return;
+        }
+        const lastSelectedTrustId = normalizeTrustId(localStorage.getItem(LAST_SELECTED_TRUST_ID_KEY) || '');
+        const lastSelectedExistsInFinalList = withDefault.some((t) => normalizeTrustId(t.id) === lastSelectedTrustId);
+        const effectiveTrustId =
+          (selectedExistsInFinalList ? normalizedSelected : '') ||
+          (lastSelectedExistsInFinalList ? lastSelectedTrustId : '') ||
+          normalizeTrustId(primaryTrust?.id) ||
+          normalizeTrustId(withDefault[0]?.id) ||
+          '';
+        const effectiveTrustForEvent =
+          withDefault.find((t) => normalizeTrustId(t.id) === effectiveTrustId) ||
+          primaryTrust ||
+          withDefault[0] ||
+          null;
+        if (effectiveTrustId && effectiveTrustId !== selectedTrustId) {
+          setSelectedTrustId(effectiveTrustId);
+          localStorage.setItem('selected_trust_id', effectiveTrustId);
+          localStorage.setItem(LAST_SELECTED_TRUST_ID_KEY, effectiveTrustId);
+          window.dispatchEvent(new CustomEvent('trust-changed', {
+            detail: { trustId: effectiveTrustId, trustName: effectiveTrustForEvent?.name || null }
+          }));
+        }
+        const effectiveTrust =
+          withDefault.find((t) => normalizeTrustId(t.id) === effectiveTrustId) ||
+          primaryTrust ||
+          withDefault[0] ||
+          null;
+        if (effectiveTrust) {
+          setTrustInfo(effectiveTrust);
+          if (effectiveTrust.name) localStorage.setItem('selected_trust_name', effectiveTrust.name);
+        }
+      } catch (error) {
+        console.warn('Failed to load member trusts:', error);
+      }
+    };
+    loadMemberTrusts();
+  }, [selectedTrustId, defaultTrust?.id, strictTrustApiState, isPinnedTenantSession]);
+
+
+  // Feature flags
+  useEffect(() => {
+    const loadFlags = async (force = false) => {
+      const trustId = selectedTrustId || trustInfo?.id || '';
+      const result = await fetchFeatureFlags(trustId || null, { force });
+      if (result.success) {
+        setFeatureFlags(result.flags || {});
+        setFlagsData(result.flagsData || {}); // store full metadata (display_name, tagline, icon_url)
+      }
+    };
+    loadFlags();
+    const handleFocus = () => loadFlags(true);
+    const handleVisibility = () => { if (document.visibilityState === 'visible') loadFlags(true); };
+    window.addEventListener('focus', handleFocus);
+    document.addEventListener('visibilitychange', handleVisibility);
+    const trustId = selectedTrustId || trustInfo?.id || '';
+    const unsubscribe = subscribeFeatureFlags(trustId || null, () => loadFlags(true));
+    return () => {
+      window.removeEventListener('focus', handleFocus);
+      document.removeEventListener('visibilitychange', handleVisibility);
+      unsubscribe?.();
+    };
+  }, [selectedTrustId, trustInfo?.id]);
+
+  // "Home trust" = where the user came from: the pinned tenant on a PWA /
+  // slug route, otherwise the default trust. Derived on every render rather
+  // than stored, so it can never go stale or leak between PWA windows. The
+  // Trust List chips follow THIS trust's feature_trustlist flag, so landing on
+  // another trust whose flag is off cannot strand the user without chips.
+  const [mountTrustId] = useState(selectedTrustId);
+  const homeTrustId = normalizeTrustId(pinnedTenantTrustId)
+    || normalizeTrustId(defaultTrust?.id)
+    || normalizeTrustId(import.meta.env.VITE_DEFAULT_TRUST_ID || '')
+    || normalizeTrustId(mountTrustId);
+  const isViewingHomeTrust = !homeTrustId || homeTrustId === normalizeTrustId(selectedTrustId);
+
+  // null = not known yet; the chips stay visible until the flag says otherwise.
+  const [homeTrustListOn, setHomeTrustListOn] = useState(null);
+  useEffect(() => {
+    // On the home trust itself ff() already covers it.
+    if (!homeTrustId || isViewingHomeTrust) return undefined;
+    let cancelled = false;
+    const loadHomeFlag = async (force = false) => {
+      const result = await fetchFeatureFlags(homeTrustId, { force });
+      if (!cancelled && result.success) {
+        setHomeTrustListOn(isFeatureVisible(result.flags, 'feature_trustlist'));
+      }
+    };
+    loadHomeFlag(true);
+    const handleFocus = () => loadHomeFlag(true);
+    const handleVisibility = () => { if (document.visibilityState === 'visible') loadHomeFlag(true); };
+    window.addEventListener('focus', handleFocus);
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => {
+      cancelled = true;
+      window.removeEventListener('focus', handleFocus);
+      document.removeEventListener('visibilitychange', handleVisibility);
+    };
+  }, [homeTrustId, isViewingHomeTrust]);
+
+  const handleTrustSelect = async (trustId) => {
+    const normalizedId = normalizeTrustId(trustId);
+    const isApiAuthoritative = hasAuthoritativeApiMemberships();
+    const selectedFromList = (trustList || []).find((t) => normalizeTrustId(t.id) === normalizedId) || null;
+    if (isApiAuthoritative && !selectedFromList) {
+      const fallbackTrust = (trustList || []).find((trust) => trust?.is_active !== false) || trustList?.[0] || null;
+      const fallbackTrustId = normalizeTrustId(fallbackTrust?.id);
+      if (fallbackTrustId) {
+        setSelectedTrustId(fallbackTrustId);
+        setTrustInfo(fallbackTrust);
+        localStorage.setItem('selected_trust_id', fallbackTrustId);
+        localStorage.setItem(LAST_SELECTED_TRUST_ID_KEY, fallbackTrustId);
+        if (fallbackTrust?.name) localStorage.setItem('selected_trust_name', fallbackTrust.name);
+      }
+      return;
+    }
+    if (normalizedId === normalizeTrustId(selectedTrustId)) return;
+    console.log(`🔄 Switching trust from "${selectedTrustId}" to "${normalizedId}"`);
+
+    // Force reload by resetting heavy modules; keep marquee visible from cache
+    // so trust switch does not blank the updates strip.
+    try {
+      const cachedMarquee = localStorage.getItem(`marquee_cache_${normalizedId}`);
+      if (cachedMarquee) {
+        const parsed = JSON.parse(cachedMarquee);
+        if (Array.isArray(parsed)) setMarqueeUpdates(parsed);
+      }
+    } catch {
+      // ignore malformed marquee cache
+    }
+    setSponsorsById({});
+    setSponsorOrder([]);
+    setSponsorIndex(0);
+    setIsNotificationsLoading(true);
+    setSponsorFetchSettledTrustId(''); // Force sponsor refetch
+
+    // Clear localStorage caches for this operation to force refresh
+    try {
+      localStorage.removeItem(`sponsor_carousel_index_${normalizedId}`);
+    } catch { /* ignore */ }
+
+    // Update selected trust
+    setSelectedTrustId(normalizedId);
+    localStorage.setItem('selected_trust_id', normalizedId);
+    localStorage.setItem(LAST_SELECTED_TRUST_ID_KEY, normalizedId);
+    setSessionSelectionFlag();
+
+    const selected = selectedFromList;
+    setTrustInfo(selected);
+    if (selected?.name) {
+      localStorage.setItem('selected_trust_name', selected.name);
+      console.log(`✓ Trust switched to: ${selected.name}`);
+    }
+
+    window.dispatchEvent(new CustomEvent('trust-changed', {
+      detail: { trustId: normalizedId, trustName: selected?.name || null }
+    }));
+
+    // Fetch and update fresh trust details
+    try {
+      const freshTrust = await fetchTrustById(normalizedId);
+      if (freshTrust) {
+        console.log(`✓ Fetched fresh trust details: ${freshTrust.name}`);
+        setTrustInfo(freshTrust);
+        setTrustList((prev) => (prev || []).map((t) => {
+          if (normalizeTrustId(t.id) !== normalizedId) return t;
+          return {
+            ...t,
+            ...freshTrust,
+            icon_url: freshTrust?.icon_url || t?.icon_url || null,
+          };
+        }));
+        setTrustIconVersionById((prev) => ({
+          ...prev,
+          [normalizedId]: resolveTrustIconToken(freshTrust, '1'),
+        }));
+        if (freshTrust?.icon_url) {
+          setTrustIconUrlById((prev) => {
+            const next = { ...prev, [normalizedId]: freshTrust.icon_url };
+            try { localStorage.setItem(TRUST_ICON_CACHE_KEY, JSON.stringify(next)); } catch { /* ignore */ }
+            return next;
+          });
+        }
+        if (freshTrust.name) localStorage.setItem('selected_trust_name', freshTrust.name);
+      }
+    } catch (err) {
+      console.warn('Failed to refresh trust details:', err?.message);
+    }
+  };
+
+  const handleTrustChipClick = async (trust) => {
+    const trustId = normalizeTrustId(trust?.id);
+    if (!trustId) return;
+
+    // Switch trust first so the UI and cache state are correct before any redirect.
+    await handleTrustSelect(trust?.id);
+
+    const trustUnreadCount = Number(unreadCountByTrust[trustId] || 0);
+    if (trustUnreadCount <= 0) return;
+
+    try {
+      const response = await getUserNotifications(trustId);
+      const trustNotifications = Array.isArray(response?.data) ? response.data : [];
+      const unreadNotifications = trustNotifications
+        .filter((notification) => !notification?.is_read)
+        .sort((a, b) => {
+          const aTime = Date.parse(a?.created_at || '') || 0;
+          const bTime = Date.parse(b?.created_at || '') || 0;
+          return bTime - aTime;
+        });
+
+      if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
+        await new Promise((resolve) => window.requestAnimationFrame(() => resolve()));
+      }
+
+      for (const notification of unreadNotifications) {
+        const redirectRoute = await resolveNotificationRedirectRoute(notification);
+        if (!redirectRoute) continue;
+
+        try {
+          await markNotificationAsRead(notification.id);
+          setNotifications((prev) => prev.map((item) => (
+            item.id === notification.id ? { ...item, is_read: true } : item
+          )));
+          setUnreadCount((prev) => Math.max(0, prev - 1));
+          setUnreadCountByTrust((prev) => ({
+            ...prev,
+            [trustId]: Math.max(0, Number(prev[trustId] || 0) - 1),
+          }));
+        } catch {
+          // Redirect should still work even if read-state sync fails.
+        }
+
+        if (typeof onNavigate === 'function') {
+          onNavigate(redirectRoute);
+        } else {
+          window.location.href = redirectRoute;
+        }
+        return;
+      }
+    } catch (error) {
+      console.warn('Failed to resolve trust notification redirect:', error?.message || error);
+    }
+  };
+
+  // Marquee updates
+  useEffect(() => {
+    let active = true;
+    const loadMarqueeUpdates = async () => {
+      try {
+        const trustId =
+          normalizeTrustId(selectedTrustId) ||
+          normalizeTrustId(trustInfo?.id) ||
+          normalizeTrustId(localStorage.getItem('selected_trust_id')) ||
+          null;
+        const trustName = localStorage.getItem('selected_trust_name') || trustInfo?.name || null;
+
+        // Keep existing/cached marquee visible while fresh data loads (SWR-style).
+
+        const response = await getMarqueeUpdates(trustId, trustName);
+        if (!active) return;
+        if (response.success && response.data && response.data.length > 0) {
+          const updates = response.data.map(item => item.message).filter(msg => msg && msg.trim() !== '');
+          if (updates.length > 0) {
+            setMarqueeUpdates(updates);
+            // Cache for instant display next time
+            if (trustId) {
+              try { localStorage.setItem(`marquee_cache_${trustId}`, JSON.stringify(updates)); } catch { /* ignore */ }
+            }
+          }
+        } else {
+          setMarqueeUpdates([]);
+          if (trustId) {
+            try { localStorage.removeItem(`marquee_cache_${trustId}`); } catch { /* ignore */ }
+          }
+        }
+      } catch (error) {
+        console.error('Error loading marquee updates:', error);
+        // Keep last known marquee on fetch error to avoid refresh flicker.
+      }
+    };
+    // No artificial delay — cached data shows in <1ms
+    loadMarqueeUpdates();
+    return () => { active = false; };
+  }, [selectedTrustId, trustInfo]);
+
+  // Sponsor: initial 3 cards, then progressive background batches.
+  useEffect(() => {
+    let isActive = true;
+
+    const trustId =
+      normalizeTrustId(selectedTrustId) ||
+      normalizeTrustId(trustInfo?.id) ||
+      normalizeTrustId(localStorage.getItem('selected_trust_id')) ||
+      normalizeTrustId(import.meta.env.VITE_DEFAULT_TRUST_ID) ||
+      '';
+    if (!trustId) {
+      setIsSponsorsLoading(false);
+      setSponsorFetchSettledTrustId('');
+      syncSponsorStoreSnapshot('');
+      return;
+    }
+
+    if (sponsorBootstrapInFlightRef.current === trustId) {
+      return;
+    }
+    sponsorBootstrapInFlightRef.current = trustId;
+
+    const cachedFirstBatch = getCachedCarouselBatch(trustId, 0);
+    const cachedOrder = readSponsorOrder(trustId);
+    const hasAnyCachedSponsors =
+      cachedFirstBatch.sponsors.length > 0 ||
+      (Array.isArray(cachedOrder) && cachedOrder.length > 0);
+    if (hasAnyCachedSponsors) {
+      syncSponsorStoreSnapshot(trustId);
+      setIsSponsorsLoading(false);
+      setSponsorFetchSettledTrustId(trustId);
+      ensureAllSponsorsLoaded(trustId, { force: true })
+        .then(() => {
+          if (!isActive) return;
+          syncSponsorStoreSnapshot(trustId);
+          setSponsorFetchSettledTrustId(trustId);
+        })
+        .catch(() => { });
+    } else {
+      setIsSponsorsLoading(true);
+      setIsCarouselReady(false);
+    }
+
+    const loadInitialSponsorBatch = (attempt = 0) => {
+      preloadCarouselBatchImages({ trustId, batchIndex: 0 })
+        .then((firstBatch) => {
+          if (!isActive) return;
+          syncSponsorStoreSnapshot(trustId);
+          const incomingSponsors = Array.isArray(firstBatch?.sponsors) ? firstBatch.sponsors : [];
+          const currentOrder = readSponsorOrder(trustId);
+          if (incomingSponsors.length > 0 && (!Array.isArray(currentOrder) || currentOrder.length === 0)) {
+            const byId = {};
+            const order = [];
+            for (const sponsor of incomingSponsors) {
+              const id = sponsor?.id ? String(sponsor.id).trim() : '';
+              if (!id) continue;
+              byId[id] = sponsor;
+              order.push(id);
+            }
+            if (order.length > 0) {
+              console.error('[SponsorFlash][HomeMismatch] API returned sponsors but store snapshot was empty. Hydrating UI from incoming batch.', {
+                trustId,
+                incomingCount: incomingSponsors.length,
+                incomingIds: order
+              });
+              setSponsorsById(byId);
+              setSponsorOrder(order);
+              setIsCarouselReady(true);
+            }
+          }
+          const currentById = readSponsorsById(trustId);
+          const currentByIdCount = currentById && typeof currentById === 'object' ? Object.keys(currentById).length : 0;
+          if (incomingSponsors.length > 0 && currentByIdCount === 0) {
+            const byId = {};
+            const order = Array.isArray(currentOrder) ? [...currentOrder] : [];
+            for (const sponsor of incomingSponsors) {
+              const id = sponsor?.id ? String(sponsor.id).trim() : '';
+              if (!id) continue;
+              byId[id] = sponsor;
+              if (!order.includes(id)) order.push(id);
+            }
+            if (Object.keys(byId).length > 0) {
+              setSponsorsById(byId);
+              setSponsorOrder(order);
+              setIsCarouselReady(true);
+            }
+          }
+          setSponsorIndex(0);
+          setIsSponsorsLoading(false);
+          setSponsorFetchSettledTrustId(trustId);
+          sponsorBootstrapInFlightRef.current = '';
+
+          // Next batches are fetched by the progressive loader effect.
+        })
+        .catch((err) => {
+          console.error('Error loading sponsors:', err);
+          if (!isActive) return;
+
+          if (!hasAnyCachedSponsors && attempt < 2) {
+            const retryDelayMs = 700 * (attempt + 1);
+            setTimeout(() => {
+              if (!isActive) return;
+              loadInitialSponsorBatch(attempt + 1);
+            }, retryDelayMs);
+            return;
+          }
+
+          if (!hasAnyCachedSponsors) {
+            syncSponsorStoreSnapshot(trustId);
+            // Keep skeleton instead of showing a false "no sponsor" empty state on transient failures.
+            setIsSponsorsLoading(true);
+            setSponsorFetchSettledTrustId('');
+            sponsorBootstrapInFlightRef.current = '';
+            return;
+          }
+
+          setIsSponsorsLoading(false);
+          setSponsorFetchSettledTrustId(trustId);
+          sponsorBootstrapInFlightRef.current = '';
+        });
+    };
+
+    loadInitialSponsorBatch(0);
+
+    return () => {
+      isActive = false;
+      if (sponsorBootstrapInFlightRef.current === trustId) {
+        sponsorBootstrapInFlightRef.current = '';
+      }
+    };
+  }, [selectedTrustId, trustInfo?.id]);
+
+  useEffect(() => {
+    if (!sponsors.length) return;
+    const trustId =
+      normalizeTrustId(selectedTrustId) ||
+      normalizeTrustId(trustInfo?.id) ||
+      normalizeTrustId(localStorage.getItem('selected_trust_id')) ||
+      null;
+    if (!trustId) return;
+    const current = sponsors[sponsorIndex];
+    if (current?.is_user_match) return;
+    const trustKey = `sponsor_carousel_index_${trustId}`;
+    try {
+      localStorage.setItem(trustKey, String(sponsorIndex));
+    } catch {
+      // ignore
+    }
+  }, [sponsorIndex, sponsors, selectedTrustId, trustInfo?.id]);
+
+  useEffect(() => {
+    if (!isCarouselReady) return;
+    if (!sponsors.length) return;
+    if (sponsorIndex >= sponsors.length) {
+      setSponsorIndex(0);
+      return;
+    }
+    const current = sponsors[sponsorIndex];
+    const durationSeconds = Math.max(1, Number(current?.duration_seconds) || 5);
+    const timer = setTimeout(() => {
+      setSponsorIndex((prev) => (prev + 1) % sponsors.length);
+    }, durationSeconds * 1000);
+    return () => clearTimeout(timer);
+  }, [isCarouselReady, sponsors, sponsorIndex]);
+
+  useEffect(() => {
+    let active = true;
+    if (!isCarouselReady) return;
+    if (!hasMoreSponsorBatches) return;
+    if (isCarouselBatchLoading) return;
+
+    const trustId =
+      normalizeTrustId(selectedTrustId) ||
+      normalizeTrustId(trustInfo?.id) ||
+      normalizeTrustId(localStorage.getItem('selected_trust_id')) ||
+      normalizeTrustId(import.meta.env.VITE_DEFAULT_TRUST_ID) ||
+      '';
+    if (!trustId) return;
+
+    const nextBatchIndex = loadedBatchCount;
+    setIsCarouselBatchLoading(true);
+    prefetchCarouselBatch({ trustId, batchIndex: nextBatchIndex })
+      .then((nextBatch) => {
+        if (!active) return;
+        const incoming = Array.isArray(nextBatch?.sponsors) ? nextBatch.sponsors : [];
+        if (!incoming.length) {
+          setHasMoreSponsorBatches(false);
+          return;
+        }
+        syncSponsorStoreSnapshot(trustId);
+        setLoadedBatchCount((count) => Math.max(count, nextBatchIndex + 1));
+        setHasMoreSponsorBatches(Boolean(nextBatch?.hasMore));
+      })
+      .finally(() => {
+        if (!active) return;
+        setIsCarouselBatchLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [isCarouselReady, loadedBatchCount, hasMoreSponsorBatches, isCarouselBatchLoading, selectedTrustId, trustInfo?.id]);
+
+  const currentSponsorTrustId =
+    normalizeTrustId(selectedTrustId) ||
+    normalizeTrustId(trustInfo?.id) ||
+    normalizeTrustId(localStorage.getItem('selected_trust_id')) ||
+    normalizeTrustId(import.meta.env.VITE_DEFAULT_TRUST_ID) ||
+    '';
+  const hasSettledSponsorsForCurrentTrust =
+    Boolean(currentSponsorTrustId) &&
+    sponsorFetchSettledTrustId === currentSponsorTrustId;
+  const hasRenderableSponsors = sponsors.length > 0;
+  const isSponsorSectionLoading = !hasRenderableSponsors && (!hasSettledSponsorsForCurrentTrust || isSponsorsLoading);
+  const sponsorDebugInfo = currentSponsorTrustId ? getSponsorDebugInfo(currentSponsorTrustId) : null;
+  const sponsorChunkStart = sponsors.length > 0
+    ? Math.floor(sponsorIndex / SPONSOR_CHUNK_SIZE) * SPONSOR_CHUNK_SIZE
+    : 0;
+  const visibleSponsors = sponsors.slice(sponsorChunkStart, sponsorChunkStart + SPONSOR_CHUNK_SIZE);
+  const activeVisibleSponsorIndex = sponsorIndex - sponsorChunkStart;
+  const sponsorSkeletonRows = [0, 1, 2];
+
+  useEffect(() => {
+    if (isSponsorSectionLoading) return;
+    if (sponsors.length > 0) return;
+    console.error('[SponsorFlash][HomeEmptyRender]', {
+      trustId: currentSponsorTrustId,
+      sponsorFetchSettledTrustId,
+      sponsorOrderLength: sponsorOrder.length,
+      sponsorsByIdCount: Object.keys(sponsorsById || {}).length,
+      debugReason: sponsorDebugInfo?.reason || null,
+      debugCounts: sponsorDebugInfo?.counts || null,
+      debugSponsorIds: sponsorDebugInfo?.joinedSponsorIds || []
+    });
+  }, [
+    isSponsorSectionLoading,
+    sponsors.length,
+    currentSponsorTrustId,
+    sponsorFetchSettledTrustId,
+    sponsorOrder.length,
+    sponsorsById,
+    sponsorDebugInfo
+  ]);
+
+  useEffect(() => {
+    const trustId = currentSponsorTrustId;
+    if (!trustId) return;
+    if (sponsorListPreloadRef.current[trustId]) return;
+
+    const timer = setTimeout(() => {
+      preloadSponsorListFirstPage(trustId).catch(() => { });
+      sponsorListPreloadRef.current[trustId] = true;
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [currentSponsorTrustId]);
+
+  // Gallery trust-sync and reload are handled centrally in GalleryContext.
+
+  // Notifications
+  useEffect(() => {
+    if (import.meta.env.VITE_DISABLE_NOTIFICATIONS === 'true') return;
+    const selectedTrustKey = normalizeTrustId(
+      localStorage.getItem('selected_trust_id') ||
+      selectedTrustId ||
+      trustInfo?.id ||
+      ''
+    );
+    const cachedNotifications = readNotificationCache(selectedTrustKey);
+
+    if (cachedNotifications) {
+      setNotifications(cachedNotifications.notifications || []);
+      setUnreadCount((cachedNotifications.notifications || []).filter((n) => !n.is_read).length);
+      setIsNotificationsLoading(false);
+    }
+
+    const fetchNotifications = async ({ showLoader = true } = {}) => {
+      const fetchId = latestNotificationsFetchRef.current + 1;
+      latestNotificationsFetchRef.current = fetchId;
+
+      const requestedTrustId = selectedTrustKey;
+
+      if (showLoader) {
+        setIsNotificationsLoading(true);
+      }
+
+      const isStaleFetch = () => {
+        const currentTrustId = normalizeTrustId(
+          localStorage.getItem('selected_trust_id') ||
+          selectedTrustId ||
+          trustInfo?.id ||
+          ''
+        );
+        return latestNotificationsFetchRef.current !== fetchId || currentTrustId !== requestedTrustId;
+      };
+
+      try {
+        const response = await getUserNotifications();
+        if (isStaleFetch()) return;
+
+        if (response.success) {
+          const nextNotifications = response.data || [];
+          setNotifications(nextNotifications);
+          setUnreadCount(nextNotifications.filter(n => !n.is_read).length);
+          writeNotificationCache(requestedTrustId, nextNotifications);
+        }
+
+        const trustIds = [...new Set((trustList || [])
+          .map((trust) => normalizeTrustId(trust?.id))
+          .filter(Boolean))];
+
+        if (trustIds.length === 0) {
+          setUnreadCountByTrust({});
+          return;
+        }
+
+        const unreadResults = await Promise.all(
+          trustIds.map(async (trustId) => {
+            try {
+              const trustResponse = await getUserNotifications(trustId);
+              const trustUnreadCount = trustResponse.success
+                ? (trustResponse.data || []).filter((notification) => !notification.is_read).length
+                : 0;
+              return [trustId, trustUnreadCount];
+            } catch {
+              return [trustId, 0];
+            }
+          })
+        );
+
+        if (isStaleFetch()) return;
+        setUnreadCountByTrust(Object.fromEntries(unreadResults));
+      } catch (error) {
+        if (isStaleFetch()) return;
+        console.error('Error fetching notifications:', error);
+      } finally {
+        if (!isStaleFetch() && showLoader) {
+          setIsNotificationsLoading(false);
+        }
+      }
+    };
+    const handleBirthdayInserted = () => fetchNotifications({ showLoader: false });
+    window.addEventListener('birthdayNotifInserted', handleBirthdayInserted);
+    const handlePushNotificationArrived = () => fetchNotifications({ showLoader: false });
+    window.addEventListener('pushNotificationArrived', handlePushNotificationArrived);
+    const handlePushNotificationClicked = () => fetchNotifications({ showLoader: false });
+    window.addEventListener('pushNotificationClicked', handlePushNotificationClicked);
+    const handleAppResumed = () => fetchNotifications({ showLoader: false });
+    window.addEventListener('appResumed', handleAppResumed);
+
+    // Trust switch should reflect notifications immediately.
+    if (!cachedNotifications) {
+      setIsNotificationsLoading(true);
+    }
+    fetchNotifications({ showLoader: !cachedNotifications });
+    const warmRetry = setTimeout(() => fetchNotifications({ showLoader: false }), 700);
+    const interval = setInterval(() => fetchNotifications({ showLoader: false }), 30000);
+    return () => {
+      clearInterval(interval);
+      clearTimeout(warmRetry);
+      window.removeEventListener('birthdayNotifInserted', handleBirthdayInserted);
+      window.removeEventListener('pushNotificationArrived', handlePushNotificationArrived);
+      window.removeEventListener('pushNotificationClicked', handlePushNotificationClicked);
+      window.removeEventListener('appResumed', handleAppResumed);
+    };
+  }, [selectedTrustId, trustList]);
+
+  // Real-time notifications
+  useEffect(() => {
+    if (import.meta.env.VITE_DISABLE_NOTIFICATIONS === 'true') return;
+    const subscribeToNotifications = () => {
+      const notificationContext = getCurrentNotificationContext();
+      if (!notificationContext.userId) return;
+      const channel = supabase
+        .channel('notifications-realtime-home')
+        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'notification' }, (payload) => {
+          const newNotif = payload.new;
+          const isForMe = matchesNotificationForContext(newNotif, notificationContext);
+          if (isForMe) {
+            const currentTrustKey = normalizeTrustId(
+              localStorage.getItem('selected_trust_id') ||
+              selectedTrustId ||
+              trustInfo?.id ||
+              ''
+            );
+            setNotifications((prev) => {
+              const existingKeys = new Set(prev.map(buildNotificationContentKey));
+              const newKey = buildNotificationContentKey(newNotif);
+              if (existingKeys.has(newKey)) return prev;
+              const next = [newNotif, ...prev];
+              if (!newNotif.is_read) setUnreadCount((count) => count + 1);
+              writeNotificationCache(currentTrustKey, next);
+              return next;
+            });
+          }
+        })
+        .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'notification' }, (payload) => {
+          const updatedNotif = payload.new;
+          const isForMe = matchesNotificationForContext(updatedNotif, notificationContext);
+          if (isForMe) {
+            let shouldDecrementUnread = false;
+            const currentTrustKey = normalizeTrustId(
+              localStorage.getItem('selected_trust_id') ||
+              selectedTrustId ||
+              trustInfo?.id ||
+              ''
+            );
+            setNotifications((prev) => {
+              const next = prev.map((n) => {
+                if (n.id !== updatedNotif.id) return n;
+                if (!n.is_read && updatedNotif.is_read) shouldDecrementUnread = true;
+                return updatedNotif;
+              });
+              writeNotificationCache(currentTrustKey, next);
+              return next;
+            });
+            if (shouldDecrementUnread) {
+              setUnreadCount((prev) => Math.max(0, prev - 1));
+            }
+          }
+        })
+        .subscribe();
+      channelRef.current = channel;
+    };
+    subscribeToNotifications();
+    return () => {
+      if (channelRef.current) {
+        supabase.removeChannel(channelRef.current);
+        channelRef.current = null;
+      }
+    };
+  }, [selectedTrustId]);
+
+  const handleMarkAsRead = async (id) => {
+    try {
+      await markNotificationAsRead(id);
+      let shouldDecrementUnread = false;
+      const currentTrustKey = normalizeTrustId(
+        localStorage.getItem('selected_trust_id') ||
+        selectedTrustId ||
+        trustInfo?.id ||
+        ''
+      );
+      setNotifications((prev) => {
+        const next = prev.map((n) => {
+          if (n.id !== id) return n;
+          if (!n.is_read) shouldDecrementUnread = true;
+          return n.is_read ? n : { ...n, is_read: true };
+        });
+        writeNotificationCache(currentTrustKey, next);
+        return next;
+      });
+      if (shouldDecrementUnread) {
+        setUnreadCount((prev) => Math.max(0, prev - 1));
+      }
+    } catch (error) { console.error('Error marking notification as read:', error); }
+  };
+
+  const handleMarkAllAsRead = async () => {
+    try {
+      await markAllNotificationsAsRead();
+      const currentTrustKey = normalizeTrustId(
+        localStorage.getItem('selected_trust_id') ||
+        selectedTrustId ||
+        trustInfo?.id ||
+        ''
+      );
+      setNotifications((prev) => {
+        const next = prev.map(n => ({ ...n, is_read: true }));
+        writeNotificationCache(currentTrustKey, next);
+        return next;
+      });
+      setUnreadCount(0);
+    } catch (error) { console.error('Error marking all notifications as read:', error); }
+  };
+
+  const handleDismissNotification = async (id) => {
+    try {
+      let removedUnread = false;
+      const currentTrustKey = normalizeTrustId(
+        localStorage.getItem('selected_trust_id') ||
+        selectedTrustId ||
+        trustInfo?.id ||
+        ''
+      );
+      setNotifications((prev) => {
+        const dismissed = prev.find((n) => n.id === id);
+        removedUnread = Boolean(dismissed && !dismissed.is_read);
+        const next = prev.filter((n) => n.id !== id);
+        writeNotificationCache(currentTrustKey, next);
+        return next;
+      });
+      if (removedUnread) {
+        setUnreadCount((prev) => Math.max(0, prev - 1));
+      }
+      try { await deleteNotification(id); } catch (apiError) { console.error('Error deleting notification from backend:', apiError); }
+    } catch (error) { console.error('Error dismissing notification:', error); }
+  };
+
+  const handleClearAll = async () => {
+    const toDelete = [...notifications];
+    const currentTrustKey = normalizeTrustId(
+      localStorage.getItem('selected_trust_id') ||
+      selectedTrustId ||
+      trustInfo?.id ||
+      ''
+    );
+    setNotifications([]);
+    writeNotificationCache(currentTrustKey, []);
+    setUnreadCount(0);
+    setIsNotificationsOpen(false);
+    try { await Promise.all(toDelete.map(n => deleteNotification(n.id))); } catch (error) { console.error('Error clearing notifications:', error); }
+  };
+
+  useEffect(() => {
+    if (!showTermsModal) return undefined;
+
+    let active = true;
+    const loadTermsContent = async () => {
+      const trustId = resolveLegalTrustId(selectedTrustId || trustInfo?.id || defaultTrust?.id || '');
+      if (!trustId) {
+        setTermsModalContent('');
+        setTermsModalTrustName(trustInfo?.name || defaultTrust?.name || localStorage.getItem('selected_trust_name') || '');
+        setTermsModalLoading(false);
+        return;
+      }
+
+      try {
+        setTermsModalLoading(true);
+        setTermsModalError('');
+        const trust = await fetchTrustById(trustId);
+        if (!active || !trust) return;
+        setTermsModalContent(trust.terms_content || '');
+        setTermsModalTrustName(trust.name || localStorage.getItem('selected_trust_name') || '');
+      } catch (err) {
+        if (!active) return;
+        console.warn('[Home] Failed to load terms content:', err?.message || err);
+        setTermsModalError('Failed to load Terms & Conditions. Please try again.');
+        setTermsModalContent('');
+        setTermsModalTrustName(localStorage.getItem('selected_trust_name') || '');
+      } finally {
+        if (active) setTermsModalLoading(false);
+      }
+    };
+
+    loadTermsContent();
+    return () => {
+      active = false;
+    };
+  }, [showTermsModal, selectedTrustId, trustInfo?.id, trustInfo?.name, defaultTrust?.id, defaultTrust?.name]);
+
+  const handleAcceptTerms = () => {
+    clearLoginTermsPromptPending();
+    setShowTermsModal(false);
+    setTermsModalContent('');
+    setTermsModalTrustName('');
+    setTermsModalError('');
+    setTermsModalLoading(false);
+  };
+
+  const formatNotificationTitle = (title, message) => {
+    if (title.includes('Appointment') && message.includes('appointment')) {
+      if (message.includes('date has been changed')) return '📅 Appointment Rescheduled';
+      else if (message.includes('remark')) return '💬 New Message';
+      else return '📋 Appointment Updated';
+    }
+    return title;
+  };
+
+  const formatNotificationMessage = (message) => {
+    if (message.includes('appointment') && message.includes('date has been changed')) {
+      const dateMatch = message.match(/date has been changed from ([\d-]+) to ([\d-]+)/i);
+      if (dateMatch) return `Hi there! Your appointment has been rescheduled from ${formatDate(dateMatch[1])} to ${formatDate(dateMatch[2])}.`;
+    } else if (message.includes('appointment') && message.includes('remark')) {
+      const remarkMatch = message.match(/has a new remark: (.+)/i);
+      if (remarkMatch) return `Hi there! New message regarding your appointment: "${remarkMatch[1]}".`;
+      else return `Hi there! New message regarding your appointment.`;
+    }
+    return message;
+  };
+
+  const formatDate = (dateStr) => {
+    try {
+      const date = new Date(dateStr);
+      return date.toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
+    } catch { return dateStr; }
+  };
+
+  const handleSponsorTouchStart = (event) => {
+    const touch = event.touches?.[0];
+    if (!touch) return;
+    sponsorTouchStartRef.current = { x: touch.clientX, y: touch.clientY };
+    sponsorTouchEndRef.current = null;
+  };
+
+  const handleSponsorTouchMove = (event) => {
+    const touch = event.touches?.[0];
+    if (!touch) return;
+    sponsorTouchEndRef.current = { x: touch.clientX, y: touch.clientY };
+  };
+
+  const handleSponsorTouchEnd = () => {
+    if (sponsors.length <= 1) return;
+    const start = sponsorTouchStartRef.current;
+    const end = sponsorTouchEndRef.current;
+    if (!start || !end) return;
+
+    const dx = end.x - start.x;
+    const dy = end.y - start.y;
+    const absX = Math.abs(dx);
+    const absY = Math.abs(dy);
+    if (absX < 42 || absX <= absY) return;
+
+    if (dx < 0) {
+      setSponsorIndex((prev) => (prev + 1) % sponsors.length);
+    } else {
+      setSponsorIndex((prev) => (prev - 1 + sponsors.length) % sponsors.length);
+    }
+  };
+
+  const ff = (key) => isFeatureVisible(featureFlags, key);
+  const normalizeDisplayInApp = (value) => String(value || 'home').trim().toLowerCase();
+  const isFeaturePlacedInHome = (key) => normalizeDisplayInApp(flagsData?.[key]?.display_in_app) === 'home';
+  const showMemberBannerFeature = ff('feature_member_banner');
+  const normalizeQuickRoute = (route) => {
+    const raw = String(route || '').trim().toLowerCase();
+    const value = raw
+      .replace(/^https?:\/\/[^/]+/i, '')
+      .replace(/[?#].*$/, '')
+      .replace(/^\/+/, '')
+      .replace(/\/+$/, '');
+    if (value === 'noticeboard' || value === 'notices') return 'notices';
+    if (value === 'facility' || value === 'facilities') return 'facilities';
+    if (value === 'event' || value === 'events') return 'events';
+    if (value === 'achievement' || value === 'achievements') return 'achievements';
+    if (value === 'donation' || value === 'donations') return 'donation';
+    if (value === 'executive-body' || value === 'executive_body' || value === 'executive body' || value === 'executivebody') return 'executive-body';
+    if (value === 'opd' || value === 'appointment' || value === 'appointments') return 'appointment';
+    if (value === 'referral' || value === 'reference' || value === 'references') return 'reference';
+    if (value === 'report' || value === 'reports') return 'reports';
+    if (value === 'directory' || value === 'healthcare-trustee-directory') return 'directory';
+    if (value === 'product' || value === 'products' || value === 'categories-products' || value === 'categoriesproducts') return 'products';
+    if (value === 'order-history' || value === 'order_history' || value === 'order history' || value === 'orderhistory') return 'order-history';
+    if (value === 'add-community' || value === 'add_community' || value === 'addcommunity' || value === 'launch-app' || value === 'launch app' || value === 'launch your app') return 'add-community';
+    if (value === 'app-gallery' || value === 'app_gallery' || value === 'app gallery' || value === 'other-memberships' || value === 'other_memberships' || value === 'othermemberships') return 'other-memberships';
+    if (value === 'user-panel' || value === 'user_panel' || value === 'userpanel' || value === 'bottom-nav' || value === 'bottom_nav' || value === 'bottomnav') return 'user-panel';
+    return value || '';
+  };
+
+  const fallbackQuickRouteByFeatureKey = {
+    feature_executive_body: 'executive-body',
+    feature_product: 'products',
+    feature_products: 'products',
+    feature_order_history: 'order-history',
+    feature_othermembership: 'other-memberships',
+    feature_add_community: 'add-community',
+    feature_bottom_nav: 'user-panel',
+  };
+
+  const resolveQuickRoute = (route, featureKey = '') => {
+    const normalizedRoute = normalizeQuickRoute(route);
+    if (normalizedRoute) return normalizedRoute;
+    return fallbackQuickRouteByFeatureKey[String(featureKey || '').trim().toLowerCase()] || '';
+  };
+
+  const resolveQuickIcon = (route, explicitIcon) => {
+    const icon = String(explicitIcon || '').trim();
+    if (icon) return icon;
+    const normalized = normalizeQuickRoute(route);
+    const iconByRoute = {
+      notices: '/icons/quick-access/noticeboard.svg',
+      facilities: '/icons/quick-access/facilities.svg',
+      events: '/icons/quick-access/events.svg',
+      achievements: '/icons/quick-access/directory.svg',
+      donation: '/icons/quick-access/donation.svg',
+      'executive-body': '/icons/quick-access/directory.svg',
+      directory: '/icons/quick-access/directory.svg',
+      appointment: '/icons/quick-access/opd.svg',
+      reference: '/icons/quick-access/referral.svg',
+      reports: '/icons/quick-access/reports.svg',
+      products: '/icons/quick-access/products.svg',
+      'order-history': '/icons/quick-access/order-history.svg',
+      'add-community': '/icons/quick-access/directory.svg',
+      'user-panel': '/icons/quick-access/directory.svg',
+    };
+    return iconByRoute[normalized] || '/icons/quick-access/directory.svg';
+  };
+
+  // Build Quick Access tiles from Supabase flag metadata.
+  const dbQuickActions = Object.entries(flagsData)
+    .filter(([key, data]) => (
+      Boolean(key)
+      && data?.is_enabled
+      && normalizeDisplayInApp(data?.display_in_app) === 'home'
+      && key !== 'feature_nomination_details'
+      && key !== 'feature_nomination'
+      && normalizeQuickRoute(data?.route) !== 'nomination-details'
+      && normalizeQuickRoute(data?.route) !== 'nomination'
+      && Boolean(resolveQuickRoute(data?.route, key))
+    ))
+    .map(([key, data]) => {
+      const route = resolveQuickRoute(data.route, key);
+      return {
+        id: key,
+        route,
+        displayName: toTitleCase(data.display_name),
+        tagline: data.tagline,
+        icon_url: resolveQuickIcon(route, data.icon_url),
+        quick_order: data.quick_order ?? null,
+      };
+    });
+
+  // Fallback tiles only mirror existing enabled rows. Deleted rows are not resurrected here.
+  const fallbackQuickActions = [
+    ff('feature_directory') && isFeaturePlacedInHome('feature_directory') ? {
+      id: 'feature_directory_fallback',
+      route: 'directory',
+      displayName: 'Directory',
+      tagline: 'Member directory',
+      icon_url: '/icons/quick-access/directory.svg',
+      quick_order: 50,
+    } : null,
+    ff('feature_opd') && isFeaturePlacedInHome('feature_opd') ? {
+      id: 'feature_opd_fallback',
+      route: 'appointment',
+      displayName: 'OPD',
+      tagline: 'Book appointments',
+      icon_url: '/icons/quick-access/opd.svg',
+      quick_order: 60,
+    } : null,
+    ff('feature_referral') && isFeaturePlacedInHome('feature_referral') ? {
+      id: 'feature_referral_fallback',
+      route: 'reference',
+      displayName: 'Referral',
+      tagline: 'Share references',
+      icon_url: '/icons/quick-access/referral.svg',
+      quick_order: 70,
+    } : null,
+    ff('feature_reports') && isFeaturePlacedInHome('feature_reports') ? {
+      id: 'feature_reports_fallback',
+      route: 'reports',
+      displayName: 'Reports',
+      tagline: 'View reports',
+      icon_url: '/icons/quick-access/reports.svg',
+      quick_order: 75,
+    } : null,
+    ff('feature_noticeboard') && isFeaturePlacedInHome('feature_noticeboard') ? {
+      id: 'feature_noticeboard_fallback',
+      route: 'notices',
+      displayName: 'Noticeboard',
+      tagline: 'Latest updates',
+      icon_url: '/icons/quick-access/noticeboard.svg',
+      quick_order: 80,
+    } : null,
+    ff('feature_facilities') && isFeaturePlacedInHome('feature_facilities') ? {
+      id: 'feature_facilities_fallback',
+      route: 'facilities',
+      displayName: 'Facilities',
+      tagline: 'Trust facilities',
+      icon_url: '/icons/quick-access/facilities.svg',
+      quick_order: 85,
+    } : null,
+    ff('feature_events') && isFeaturePlacedInHome('feature_events') ? {
+      id: 'feature_events_fallback',
+      route: 'events',
+      displayName: 'Events',
+      tagline: 'Upcoming activities',
+      icon_url: '/icons/quick-access/events.svg',
+      quick_order: 90,
+    } : null,
+    ff('feature_achievements') && isFeaturePlacedInHome('feature_achievements') ? {
+      id: 'feature_achievements_fallback',
+      route: 'achievements',
+      displayName: 'Achievements',
+      tagline: 'Your milestones & recognition',
+      icon_url: '/icons/quick-access/directory.svg',
+      quick_order: 92,
+    } : null,
+    ff('feature_donation') && isFeaturePlacedInHome('feature_donation') ? {
+      id: 'feature_donation_fallback',
+      route: 'donation',
+      displayName: 'Donation',
+      tagline: 'Support trust causes',
+      icon_url: '/icons/quick-access/donation.svg',
+      quick_order: 95,
+    } : null,
+  ].filter(Boolean);
+
+  const enabledQuickActions = [...dbQuickActions, ...fallbackQuickActions]
+    .filter((item) => {
+      const normalizedRoute = normalizeQuickRoute(item?.route);
+      const excludedQuickRoutes = new Set([
+        'gallery',
+        'notifications',
+        'notification',
+        'nomination',
+        'nomination-details',
+        'developers',
+        'developer-info',
+        'developerinfo',
+        'trustlist',
+        'trust-list',
+        'user-panel'
+      ]);
+      return !excludedQuickRoutes.has(normalizedRoute);
+    })
+    .filter((item, index, all) =>
+      all.findIndex((entry) => normalizeQuickRoute(entry.route) === normalizeQuickRoute(item.route)) === index
+    )
+    .sort((a, b) => {
+      const ao = a.quick_order ?? 9999;
+      const bo = b.quick_order ?? 9999;
+      if (ao !== bo) return ao - bo;
+      return String(a.displayName).localeCompare(String(b.displayName));
+    });
+
+  const activeTrust = useMemo(() => (
+    trustList.find((trust) => normalizeTrustId(trust?.id) === normalizeTrustId(selectedTrustId)) ||
+    (trustList.length === 0 ? trustInfo : null) ||
+    (trustList.length === 0 ? defaultTrust : null) ||
+    null
+  ), [selectedTrustId, trustList, trustInfo, defaultTrust]);
+
+  const selectedTrust = useMemo(() => {
+    if (!Array.isArray(trustList) || trustList.length === 0) return activeTrust;
+    return trustList.find((trust) => normalizeTrustId(trust?.id) === normalizeTrustId(activeTrust?.id)) || null;
+  }, [activeTrust, trustList]);
+  const otherTrusts = useMemo(() => {
+    if (!Array.isArray(trustList) || trustList.length === 0) return [];
+    const normalizedSelectedTrustId = normalizeTrustId(selectedTrustId);
+    if (!normalizedSelectedTrustId) return trustList;
+    return trustList.filter((trust) => normalizeTrustId(trust?.id) !== normalizedSelectedTrustId);
+  }, [selectedTrustId, trustList]);
+
+  useEffect(() => {
+    const normalizedSelectedTrustId = normalizeTrustId(selectedTrustId);
+    const previousSelectedTrustId = normalizeTrustId(previousSelectedTrustIdRef.current);
+    previousSelectedTrustIdRef.current = normalizedSelectedTrustId;
+
+    if (!normalizedSelectedTrustId) return;
+    if (!previousSelectedTrustId || previousSelectedTrustId === normalizedSelectedTrustId) return;
+
+    setAnimatingTrustId(normalizedSelectedTrustId);
+    if (trustSwitchAnimationTimerRef.current) {
+      clearTimeout(trustSwitchAnimationTimerRef.current);
+    }
+    trustSwitchAnimationTimerRef.current = setTimeout(() => {
+      setAnimatingTrustId('');
+      trustSwitchAnimationTimerRef.current = null;
+    }, 520);
+  }, [selectedTrustId]);
+
+  useEffect(() => () => {
+    if (trustSwitchAnimationTimerRef.current) {
+      clearTimeout(trustSwitchAnimationTimerRef.current);
+    }
+  }, []);
+  const currentUser = useMemo(() => {
+    try {
+      const raw = localStorage.getItem('user');
+      return raw ? JSON.parse(raw) : null;
+    } catch {
+      return null;
+    }
+  }, []);
+
+  const selectedTrustMembership = useMemo(() => {
+    const memberships = Array.isArray(currentUser?.hospital_memberships)
+      ? currentUser.hospital_memberships
+      : [];
+    const normalizedSelectedTrustId =
+      normalizeTrustId(selectedTrustId) ||
+      normalizeTrustId(activeTrust?.id) ||
+      normalizeTrustId(localStorage.getItem('selected_trust_id'));
+
+    if (!normalizedSelectedTrustId) return null;
+
+    const membershipMatch = (
+      memberships.find((membership) =>
+        normalizeTrustId(membership?.trust_id || membership?.id) === normalizedSelectedTrustId &&
+        membership?.is_active !== false
+      ) ||
+      memberships.find((membership) =>
+        normalizeTrustId(membership?.trust_id || membership?.id) === normalizedSelectedTrustId
+      ) ||
+      null
+    );
+    if (membershipMatch) return membershipMatch;
+
+    // Fallback: when selected trust came from merged trust list, still show header badges.
+    const trustMatch = (trustList || []).find(
+      (trust) => normalizeTrustId(trust?.id) === normalizedSelectedTrustId
+    );
+    if (!trustMatch) return null;
+    return {
+      trust_id: trustMatch.id || null,
+      role: trustMatch.role || null,
+      membership_number: trustMatch.membership_number || null,
+      members_id: trustMatch.members_id || null,
+      is_active: trustMatch.is_active !== false
+    };
+  }, [activeTrust?.id, currentUser?.hospital_memberships, selectedTrustId, trustList]);
+
+  const showSelectedTrustMemberBanner = Boolean(selectedTrustMembership?.trust_id || selectedTrustMembership?.id);
+  const footerShareLink = POWERED_BY_URL;
+
+  const renderTrustChip = (trust) => {
+    if (!trust?.id) return null;
+
+    const normalizedTrustId = normalizeTrustId(trust.id);
+    const isActive = normalizedTrustId === selectedTrustId;
+    const isAnimatingSelection = isActive && animatingTrustId === normalizedTrustId;
+    const trustUnreadCount = Number(unreadCountByTrust[normalizedTrustId] || 0);
+    const shouldBlinkForUnread = trustUnreadCount > 0;
+    const trustChipAnimations = [
+      isAnimatingSelection ? 'trustChipMoveToFront 520ms cubic-bezier(0.22, 1, 0.36, 1)' : null,
+      shouldBlinkForUnread ? 'trustChipUnreadPulse 1.6s ease-in-out infinite' : null,
+    ].filter(Boolean).join(', ');
+
+    return (
+      <button
+        key={normalizedTrustId || trust.id || trust.name}
+        onClick={() => handleTrustChipClick(trust)}
+        ref={(node) => {
+          if (!normalizedTrustId) return;
+          if (node) trustChipRefs.current[normalizedTrustId] = node;
+          else delete trustChipRefs.current[normalizedTrustId];
+        }}
+        className={`flex-shrink-0 w-[3rem] h-[3rem] rounded-full flex items-center justify-center overflow-visible transition-all duration-200 relative${shouldBlinkForUnread ? ' trust-chip-unread' : ''}`}
+        style={{
+          border: isActive
+            ? `2.5px solid ${theme.primary}`
+            : '2px solid color-mix(in srgb, var(--body-text-color) 18%, var(--surface-color))',
+          backgroundColor: 'color-mix(in srgb, var(--app-page-bg) 86%, var(--surface-color))',
+          transform: isActive ? 'scale(1.05)' : 'scale(1)',
+          boxShadow: isActive
+            ? '0 4px 12px color-mix(in srgb, var(--brand-navy) 22%, transparent)'
+            : 'none',
+          animation: trustChipAnimations || 'none',
+          '--trust-ring-color': theme.primary,
+          '--trust-ring-glow': `color-mix(in srgb, ${theme.primary} 45%, ${theme.accent || theme.secondary})`,
+          '--trust-badge-text': onPrimaryText,
+        }}
+        title={trust?.name || ''}
+        aria-label={shouldBlinkForUnread ? `${trust?.name || 'Trust'}: ${trustUnreadCount} new` : (trust?.name || 'Trust')}
+      >
+        <TrustChipIcon
+          iconUrl={trust?.icon_url || trustIconUrlById[normalizedTrustId]}
+          altText={trust?.name || 'Trust'}
+          versionToken={trustIconVersionById[normalizedTrustId] || resolveTrustIconToken(trust, '')}
+          state={isActive}
+        />
+        {shouldBlinkForUnread ? (
+          <span className="trust-chip-unread-badge" aria-hidden="true">
+            {trustUnreadCount > 9 ? '9+' : trustUnreadCount}
+          </span>
+        ) : null}
+      </button>
+    );
+  };
+
+  const trustListAllowed = isViewingHomeTrust ? ff('feature_trustlist') : homeTrustListOn !== false;
+  const shouldShowTrustSelector = trustList.length > 0 && trustListAllowed;
+  const showTrustSelector = shouldShowTrustSelector;
+  const surfaceColor = getThemeToken(theme, 'accent_bg', null)
+    || theme?.accentBg
+    || 'var(--surface-color)';
+  const mutedTextColor = getThemeToken(theme, 'typography.body_text_color', 'var(--body-text-color)');
+  const headingColor = getThemeToken(theme, 'typography.heading_color', 'var(--heading-color)');
+  const onPrimaryText = getThemeToken(theme, 'app_buttons.text_color', 'var(--app-button-text)');
+  const appButtonBg = 'var(--app-button-bg)';
+  const quickActionsBg = 'var(--quick-actions-bg)';
+  const quickActionsText = 'var(--quick-actions-text)';
+  const quickActionsIconBg = 'var(--quick-actions-icon-bg)';
+  const navbarTextColor = 'var(--navbar-text)';
+  const subtleBorderColor = `color-mix(in srgb, ${theme.secondary} 16%, transparent)`;
+  const subtleSurfaceColor = `color-mix(in srgb, ${surfaceColor} 82%, ${theme.accentBg})`;
+  const sponsorTheme = {
+    bgColor1: getThemeToken(theme, 'advertisement.bg_color_1', getThemeToken(theme, 'advertisement.bg_color', theme.accentBg || 'var(--app-accent-bg)')),
+    bgColor2: getThemeToken(theme, 'advertisement.bg_color_2', getThemeToken(theme, 'advertisement.bg_color', theme.accent || theme.accentBg || 'var(--app-accent)')),
+    bgOpacity: Number(getThemeToken(theme, 'advertisement.bg_opacity', 1)),
+    gradientType: String(getThemeToken(theme, 'advertisement.gradient_type', 'linear') || 'linear').toLowerCase(),
+    gradientAngle: Number(getThemeToken(theme, 'advertisement.gradient_angle', 135)),
+    textColor: getThemeToken(theme, 'advertisement.text_color', headingColor),
+    titleColor: getThemeToken(theme, 'advertisement.title_color', headingColor),
+    subtitleColor: getThemeToken(theme, 'advertisement.subtitle_color', mutedTextColor),
+    descriptionColor: getThemeToken(theme, 'advertisement.description_color', mutedTextColor),
+    borderColor1: getThemeToken(theme, 'advertisement.card_border_color', getThemeToken(theme, 'advertisement.border_color_1', theme.primary)),
+    borderColor2: getThemeToken(theme, 'advertisement.card_border_color', getThemeToken(theme, 'advertisement.border_color_2', theme.secondary)),
+    shadowColor: getThemeToken(theme, 'advertisement.card_shadow_color', theme.secondary),
+    cardBgColor: getThemeToken(
+      theme,
+      'advertisement.card_bg_color',
+      getThemeToken(theme, 'advertisement.bg_color', surfaceColor)
+    ),
+    cardBgOpacity: Number(
+      getThemeToken(
+        theme,
+        'advertisement.card_bg_opacity',
+        getThemeToken(theme, 'advertisement.bg_opacity', 0.93)
+      )
+    ),
+    badgeBgColor: getThemeToken(theme, 'advertisement.badge_bg_color', theme.accent),
+    badgeTextColor: getThemeToken(theme, 'advertisement.badge_text_color', theme.primary),
+    badgeDotColor: getThemeToken(theme, 'advertisement.badge_dot_color', theme.primary),
+    patternColor: getThemeToken(theme, 'advertisement.pattern_color', theme.accentBg),
+    glowColor1: getThemeToken(theme, 'advertisement.glow_color_1', theme.primary),
+    glowColor2: getThemeToken(theme, 'advertisement.glow_color_2', theme.secondary),
+    photoRingColor1: getThemeToken(theme, 'advertisement.photo_ring_color_1', theme.primary),
+    photoRingColor2: getThemeToken(theme, 'advertisement.photo_ring_color_2', theme.secondary),
+    indicatorActive1: getThemeToken(theme, 'advertisement.indicator_active_color_1', theme.primary),
+    indicatorActive2: getThemeToken(theme, 'advertisement.indicator_active_color_2', theme.secondary),
+    indicatorInactive: getThemeToken(theme, 'advertisement.indicator_inactive_color', applyOpacity(theme.primary, 0.21)),
+    emptyTextColor: getThemeToken(theme, 'advertisement.empty_text_color', mutedTextColor),
+    skeletonColor: getThemeToken(theme, 'advertisement.skeleton_color', theme.accent || 'var(--app-accent)'),
+  };
+  const sponsorBgColor1 = sponsorTheme.bgColor1;
+  const sponsorBgColor2 = sponsorTheme.bgColor2 || sponsorBgColor1;
+  const sponsorOverlayBackground = sponsorTheme.gradientType === 'none'
+    ? applyOpacity(sponsorBgColor1, sponsorTheme.bgOpacity)
+    : `linear-gradient(${Number.isFinite(sponsorTheme.gradientAngle) ? sponsorTheme.gradientAngle : 135}deg, ${applyOpacity(sponsorBgColor1, sponsorTheme.bgOpacity)} 0%, ${applyOpacity(sponsorBgColor2, sponsorTheme.bgOpacity)} 100%)`;
+  const animationMap = {
+    none: 'none',
+    fadeIn: 'themeFadeIn 360ms ease-out both',
+    fadeUp: 'themeFadeUp 420ms ease-out both',
+    slideUp: 'themeFadeUp 420ms ease-out both',
+    fadeSlideDown: 'themeFadeSlideDown 420ms ease-out both',
+    zoomIn: 'themeZoomIn 420ms ease-out both'
+  };
+  const resolveAnimation = (slotName, fallbackName = 'fadeUp') => {
+    const preferred = String(theme?.animations?.[slotName] || '').trim();
+    if (animationMap[preferred]) return animationMap[preferred];
+    return animationMap[fallbackName] || 'none';
+  };
+  const resolvedHomeLayout = useMemo(() => {
+    const stableDefaultOrder = ['trustList', 'sponsors', 'marquee', 'gallery', 'quickActions'];
+    const configuredLayout = normalizeHomeLayout(theme?.homeLayout, stableDefaultOrder);
+    const mergedLayout = [...configuredLayout];
+
+    stableDefaultOrder.forEach((sectionKey) => {
+      if (!mergedLayout.includes(sectionKey)) {
+        mergedLayout.push(sectionKey);
+      }
+    });
+
+    return mergedLayout;
+  }, [theme?.homeLayout]);
+
+  // A just-created-app redirect is still pending (see getValidPendingCreatedAppUrl
+  // above and the effect that fires it) — never paint this trust's own Home
+  // content (navbar, marquee, cards) in that window, or it flashes before the
+  // redirect to /app/<slug> takes over. Neutral loader only, then hand off.
+  if (pendingCreatedAppUrl) {
+    return (
+      <div
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          minHeight: '100dvh',
+          background: '#101014',
+          gap: '14px',
+        }}
+      >
+        <div
+          style={{
+            width: 40,
+            height: 40,
+            border: '3px solid rgba(255,255,255,0.15)',
+            borderTopColor: '#e2b227',
+            borderRadius: '50%',
+            animation: 'homePendingRedirectSpin 0.8s linear infinite',
+          }}
+        />
+        <style>{'@keyframes homePendingRedirectSpin { to { transform: rotate(360deg); } }'}</style>
+      </div>
+    );
+  }
+
+  return (
+    <div
+      ref={mainContainerRef}
+      className={`flex flex-col relative ${isMenuOpen ? 'overflow-hidden max-h-screen' : 'overflow-hidden'}`}
+      style={{ background: 'var(--page-bg, var(--app-page-bg))', minHeight: '100%' }}
+    >
+      {/* Decorative blobs (theme-aware) */}
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute"
+        style={{
+          top: '-110px',
+          left: '-120px',
+          width: '320px',
+          height: '320px',
+          borderRadius: '9999px',
+          background: `radial-gradient(circle, ${applyOpacity(theme.primary, 0.12)} 0%, transparent 70%)`,
+          animation: 'homeFloat1 7s ease-in-out infinite',
+        }}
+      />
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute"
+        style={{
+          bottom: '-140px',
+          right: '-110px',
+          width: '360px',
+          height: '360px',
+          borderRadius: '9999px',
+          background: `radial-gradient(circle, ${applyOpacity(theme.secondary, 0.12)} 0%, transparent 70%)`,
+          animation: 'homeFloat2 9s ease-in-out infinite',
+        }}
+      />
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute"
+        style={{
+          top: '35%',
+          left: '55%',
+          width: '220px',
+          height: '220px',
+          borderRadius: '9999px',
+          background: `radial-gradient(circle, ${applyOpacity(theme.primary, 0.07)} 0%, transparent 70%)`,
+          animation: 'homeFloat3 6s ease-in-out infinite',
+        }}
+      />
+
+      {/* ══ Light Navbar (theme-aware) ══ */}
+      <div
+        role="navigation"
+        className="theme-navbar sticky top-0 z-50 w-full"
+        style={{
+          background: 'var(--navbar-bg, var(--app-navbar-bg))',
+          backdropFilter: 'blur(var(--navbar-blur, 12px))',
+          WebkitBackdropFilter: 'blur(var(--navbar-blur, 12px))',
+          boxShadow: `0 2px 16px ${applyOpacity(theme.secondary, 0.13)}`,
+          borderBottom: '1px solid var(--navbar-border)'
+        }}
+      >
+        {/* Thin top accent bar */}
+        <div className="h-[3px]" style={{ background: 'var(--navbar-accent)' }} />
+
+        {/* Top row: hamburger | logo+name | bell */}
+        <div
+          className="flex items-center justify-between"
+          style={{
+            paddingTop: 'max(24px, calc(env(safe-area-inset-top, 0px) + 24px))',
+            paddingBottom: '10px',
+            paddingLeft: '16px',
+            paddingRight: '16px',
+          }}
+        >
+
+          {/* Hamburger */}
+          <button
+            onClick={() => setIsMenuOpen(!isMenuOpen)}
+            className="w-10 h-10 rounded-2xl flex items-center justify-center transition-all flex-shrink-0 active:scale-95"
+            style={{
+              background: isMenuOpen
+                ? appButtonBg
+                : 'color-mix(in srgb, var(--navbar-bg) 72%, var(--surface-color))',
+              boxShadow: isMenuOpen ? `0 4px 12px ${applyOpacity(theme.primary, 0.25)}` : 'none',
+            }}
+          >
+            {isMenuOpen
+              ? <X className="h-5 w-5" style={{ color: onPrimaryText }} />
+              : <Menu className="h-[22px] w-[22px]" style={{ color: navbarTextColor }} />}
+          </button>
+
+          {/* Trust logo + name */}
+          <div className="flex items-center flex-1 justify-center mx-2 min-w-0">
+            {(() => {
+              const trustName = activeTrust?.name || trustInfo?.name || defaultTrust?.name || '';
+              const isLongName = trustName.length > 35;
+              
+              return isLongName ? (
+                <div className="overflow-hidden w-full flex items-center">
+                  <h1
+                    className="trust-heading-marquee font-extrabold text-[15px] whitespace-nowrap min-w-max"
+                    style={{ color: navbarTextColor }}
+                    aria-label={trustName}
+                  >
+                    <span>{trustName}&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span>
+                    <span aria-hidden="true">{trustName}&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span>
+                  </h1>
+                </div>
+              ) : (
+                <h1
+                  className="font-extrabold text-[15px]"
+                  style={{ color: navbarTextColor }}
+                >
+                  {trustName}
+                </h1>
+              );
+            })()}
+          </div>
+
+          {/* Quick action (+) / bell */}
+          <div className="flex items-center gap-2 flex-shrink-0">
+            <button
+              type="button"
+              onClick={() => onNavigate('user-panel')}
+              aria-label="User Panel"
+              data-coach="add-products"
+              className="w-10 h-10 rounded-2xl flex items-center justify-center transition-all active:scale-95"
+              style={{
+                background: 'color-mix(in srgb, var(--navbar-bg) 72%, var(--surface-color))',
+                boxShadow: 'none',
+              }}
+            >
+              <svg
+                className="plus-spark-icon h-7 w-7"
+                viewBox="0 0 24 24"
+                fill="none"
+                strokeWidth="2.2"
+                strokeLinecap="round"
+                aria-hidden="true"
+                style={{ color: navbarTextColor }}
+              >
+                <path d="M5 12h14M12 5v14" stroke="currentColor" />
+                <g className="plus-spark-arms">
+                  <path pathLength="100" d="M12 12H5" />
+                  <path pathLength="100" d="M12 12h7" />
+                  <path pathLength="100" d="M12 12V5" />
+                  <path pathLength="100" d="M12 12v7" />
+                </g>
+              </svg>
+              <style>{`
+                .plus-spark-icon { overflow: visible; }
+                .plus-spark-arms { stroke: color-mix(in srgb, currentColor 30%, #ffffff); stroke-width: 2.6; filter: drop-shadow(0 0 2px currentColor) drop-shadow(0 0 4px currentColor); }
+                .plus-spark-arms path { stroke-dasharray: 100 200; stroke-dashoffset: 100; opacity: 0; animation: plus-spark-run 2.2s ease-in-out infinite; }
+                @keyframes plus-spark-run {
+                  0% { stroke-dashoffset: 100; opacity: 0; }
+                  8% { opacity: 1; }
+                  45% { stroke-dashoffset: 0; opacity: 1; }
+                  85% { stroke-dashoffset: -100; opacity: 0.8; }
+                  100% { stroke-dashoffset: -100; opacity: 0; }
+                }
+                @media (prefers-reduced-motion: reduce) { .plus-spark-arms { display: none; } }
+              `}</style>
+            </button>
+            {ff('feature_notifications') ? (
+              <div className="relative">
+                <button
+                  onClick={() => setIsNotificationsOpen(!isNotificationsOpen)}
+                  className="notification-button w-10 h-10 rounded-2xl flex items-center justify-center transition-all active:scale-95"
+                  style={{
+                    background: isNotificationsOpen
+                      ? appButtonBg
+                      : 'color-mix(in srgb, var(--navbar-bg) 72%, var(--surface-color))',
+                    boxShadow: isNotificationsOpen ? `0 4px 12px ${applyOpacity(theme.primary, 0.25)}` : 'none',
+                  }}
+                >
+                  <Bell
+                    className="h-[22px] w-[22px]"
+                    style={{ color: isNotificationsOpen ? onPrimaryText : navbarTextColor }}
+                  />
+                  {unreadCount > 0 && (
+                    <span
+                      className="absolute -top-1 -right-1 text-[9px] font-bold h-[18px] w-[18px] flex items-center justify-center rounded-full border-2"
+                      style={{ background: theme.primary, color: onPrimaryText, borderColor: surfaceColor }}
+                    >
+                      {unreadCount > 9 ? '9+' : unreadCount}
+                    </span>
+                  )}
+                </button>
+
+                {isNotificationsOpen && (
+                  <>
+                    <div
+                      className="fixed inset-0 z-[9998]"
+                      style={{ background: 'rgba(10, 16, 30, 0.12)' }}
+                      onClick={() => setIsNotificationsOpen(false)}
+                      onTouchMove={(e) => e.preventDefault()}
+                    />
+                    <div
+                      className="notification-dropdown fixed right-3 top-[72px] w-80 rounded-2xl shadow-2xl z-[9999] overflow-hidden"
+                      style={{
+                        border: `1px solid ${applyOpacity(theme.primary, 0.12)}`,
+                        background: 'var(--surface-color)'
+                      }}
+                    >
+                      <div className="p-4 flex items-center justify-between"
+                        style={{
+                          borderBottom: '1px solid var(--navbar-border)',
+                          background: 'var(--navbar-bg, var(--app-navbar-bg))'
+                        }}>
+                        <h3 className="font-bold text-sm" style={{ color: navbarTextColor }}>Notifications ({notifications.length})</h3>
+                        <div className="flex items-center gap-3">
+                          {unreadCount > 0 && (
+                            <button onClick={handleMarkAllAsRead} className="text-xs font-bold" style={{ color: navbarTextColor }}>Mark all read</button>
+                          )}
+                          {notifications.length > 0 && (
+                            <button onClick={handleClearAll} className="flex items-center gap-1 text-xs font-bold" style={{ color: navbarTextColor }}>
+                              <Trash2 className="w-3.5 h-3.5" /> Clear
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                      <div className="notification-list-scroll max-h-[360px] overflow-y-auto">
+                        {isNotificationsLoading ? (
+                          <div className="p-8 text-center">
+                            <div className="mx-auto mb-3 h-10 w-10 rounded-full border-2 border-current opacity-30 animate-spin" style={{ color: navbarTextColor }} />
+                            <p className="text-sm font-medium" style={{ color: 'color-mix(in srgb, var(--body-text-color) 70%, var(--surface-color))' }}>
+                              Loading notifications...
+                            </p>
+                          </div>
+                        ) : notifications.length > 0 ? (
+                          notifications.slice(0, 4).map((notification) => (
+                          <div key={notification.id}
+                            className="px-4 py-3 relative cursor-pointer transition-colors"
+                            style={{
+                              borderBottom: `1px solid ${subtleBorderColor}`,
+                              background: notification.is_read
+                                ? 'color-mix(in srgb, var(--surface-color) 90%, var(--app-accent-bg))'
+                                : `color-mix(in srgb, ${theme.primary} 9%, var(--surface-color))`
+                            }}
+                          >
+                            <div
+                              className="rounded-xl px-2.5 py-2 transition-colors"
+                              style={{
+                                background: notification.is_read
+                                  ? 'transparent'
+                                  : `color-mix(in srgb, ${theme.primary} 7%, transparent)`
+                              }}
+                              onClick={() => { handleMarkAsRead(notification.id); sessionStorage.setItem('initialNotification', JSON.stringify(notification)); setIsNotificationsOpen(false); onNavigate('notifications'); }}
+                            >
+                              {!notification.is_read && <div className="absolute left-2 top-1/2 -translate-y-1/2 w-1.5 h-1.5 rounded-full" style={{ background: theme.primary }} />}
+                              <h4
+                                className={`text-[15px] font-bold mb-1 leading-snug ${!notification.is_read ? 'pl-3' : ''}`}
+                                style={{ color: 'var(--heading-color)' }}
+                              >
+                                {formatNotificationTitle(notification.title, notification.message)}
+                              </h4>
+                              <p className="text-[13px] leading-relaxed mb-2" style={{ color: 'var(--body-text-color)' }}>
+                                {formatNotificationMessage(notification.message)}
+                              </p>
+                              <span className="inline-block text-[11px] font-semibold rounded-full px-2 py-0.5" style={{ color: 'color-mix(in srgb, var(--body-text-color) 72%, var(--surface-color))', background: 'color-mix(in srgb, var(--surface-color) 86%, var(--app-accent-bg))' }}>
+                                {new Date(notification.created_at).toLocaleDateString()} at {new Date(notification.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                              </span>
+                            </div>
+                            <button onClick={(e) => { e.stopPropagation(); handleDismissNotification(notification.id); }}
+                              className="absolute top-2.5 right-2.5 p-1 rounded-full transition-colors"
+                              style={{ color: 'color-mix(in srgb, var(--body-text-color) 70%, var(--surface-color))' }}
+                            >
+                              <X className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                          ))
+                        ) : (
+                          <div className="p-8 text-center">
+                            <div className="w-12 h-12 rounded-full flex items-center justify-center mx-auto mb-3" style={{ background: theme.accent }}>
+                              <Bell className="h-5 w-5" style={{ color: navbarTextColor }} />
+                            </div>
+                            <p className="text-sm font-medium" style={{ color: 'color-mix(in srgb, var(--body-text-color) 70%, var(--surface-color))' }}>
+                              No notifications yet
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                      {notifications.length > 0 && (
+                        <div className="p-3 text-center" style={{ borderTop: `1px solid ${subtleBorderColor}`, background: subtleSurfaceColor }}>
+                          <button onClick={() => { setIsNotificationsOpen(false); onNavigate('notifications'); }}
+                            className="text-xs font-bold" style={{ color: navbarTextColor }}>
+                            View all {notifications.length} →
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </>
+                )}
+              </div>
+            ) : <div className="w-9" />}
+          </div>
+        </div>
+
+        {/* Welcome strip / member banner */}
+        {showMemberBannerFeature && (userProfile?.name || showSelectedTrustMemberBanner) && (
+          <div className="px-4 pb-3">
+            <div
+              className="member-card relative overflow-hidden rounded-xl px-2.5 py-1.5"
+              style={{
+                background: 'color-mix(in srgb, var(--navbar-text) 12%, transparent)',
+                border: '1px solid color-mix(in srgb, var(--navbar-text) 22%, transparent)',
+              }}
+            >
+              <span className="member-card-shine" aria-hidden="true" />
+              <div className="relative flex items-center gap-2.5 min-w-0">
+                {userProfile?.profilePhotoUrl ? (
+                  <img
+                    src={userProfile.profilePhotoUrl}
+                    alt={userProfile.name}
+                    className="member-card-avatar w-8 h-8 rounded-full object-cover flex-shrink-0"
+                    style={{ border: '2px solid color-mix(in srgb, var(--navbar-text) 70%, transparent)' }}
+                  />
+                ) : (
+                  <div
+                    className="member-card-avatar w-8 h-8 rounded-full flex items-center justify-center text-[12px] font-bold flex-shrink-0"
+                    style={{
+                      background: appButtonBg,
+                      color: onPrimaryText,
+                      border: '2px solid color-mix(in srgb, var(--navbar-text) 70%, transparent)',
+                    }}
+                  >
+                    {(userProfile?.name || currentUser?.name || 'M').charAt(0).toUpperCase()}
+                  </div>
+                )}
+
+                <div className="min-w-0 flex-1">
+                  {userProfile?.name ? (
+                    <p className="text-[14px] font-extrabold truncate leading-tight" style={{ color: navbarTextColor }}>
+                      {userProfile.name}
+                    </p>
+                  ) : null}
+                  {showSelectedTrustMemberBanner && selectedTrustMembership?.role ? (
+                    <p
+                      className="text-[10px] font-semibold uppercase tracking-[0.08em] truncate leading-tight"
+                      style={{ color: 'color-mix(in srgb, var(--navbar-text) 75%, transparent)' }}
+                    >
+                      {selectedTrustMembership.role}
+                    </p>
+                  ) : null}
+                </div>
+
+                {showSelectedTrustMemberBanner && selectedTrustMembership?.membership_number ? (
+                  <span
+                    className="rounded-full px-2 py-0.5 text-[10px] font-bold tracking-[0.06em] flex-shrink-0"
+                    style={{
+                      background: 'color-mix(in srgb, var(--navbar-text) 18%, transparent)',
+                      color: navbarTextColor,
+                    }}
+                  >
+                    {selectedTrustMembership.membership_number}
+                  </span>
+                ) : null}
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+
+
+      <Sidebar isOpen={isMenuOpen} onClose={() => setIsMenuOpen(false)} onNavigate={onNavigate} currentPage="home" onLogout={onLogout} />
+
+      {/* ── Dynamic Section Renderer (order from theme.homeLayout) ── */}
+      <div
+        aria-hidden={isNotificationsOpen}
+        style={{
+          pointerEvents: isNotificationsOpen ? 'none' : 'auto',
+          userSelect: isNotificationsOpen ? 'none' : 'auto'
+        }}
+      >
+      
+        {(() => {
+          const galleryHomeMode = resolveHomeSectionMode(theme, 'gallery', 'feature_gallery');
+          const sponsorsHomeMode = resolveHomeSectionMode(theme, 'sponsors', 'feature_sponsors');
+          const SECTIONS = {
+            trustList: showTrustSelector && (selectedTrust || otherTrusts.length > 0) ? (
+              <div key="trustList">
+                <div
+                  className="flex items-center gap-2 px-4 py-1"
+                  style={{
+                    animation: resolveAnimation('trustList', 'cards'),
+                  }}
+                >
+                  {selectedTrust ? (
+                    <div className="flex-shrink-0">
+                      {renderTrustChip(selectedTrust)}
+                    </div>
+                  ) : null}
+                  {otherTrusts.length > 0 ? (
+                    <div
+                      className="flex min-w-0 flex-1 gap-2.5 overflow-x-auto overscroll-x-contain py-3 pl-3 pr-2"
+                      style={{
+                        scrollbarWidth: 'none',
+                        background: 'transparent',
+                        borderBottom: 'none',
+                        scrollBehavior: 'smooth'
+                      }}
+                      ref={trustListScrollRef}
+                    >
+                      {otherTrusts.map((trust) => renderTrustChip(trust))}
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+            ) : null,
+            marquee: ff('feature_marquee') && marqueeUpdates.length > 0 ? (
+              <div
+                className="mt-0 mb-2 w-full overflow-hidden"
+                style={{
+                  background: 'var(--marquee-bg)',
+                  boxShadow: `0 2px 12px ${applyOpacity(theme.primary, 0.3)}`,
+                  animation: resolveAnimation('marquee', 'cards')
+                }}
+                key="marquee"
+              >
+                <div className="flex items-stretch">
+                  <div className="overflow-hidden flex-1 py-2">
+                    {/* One "set" is repeated until it is wider than the screen, then
+                        the set is doubled; translating -50% loops seamlessly even when
+                        there is only one short message. */}
+                    <div
+                      className="marquee-track flex"
+                      style={{ animationDuration: `${Math.max(20, Math.max(marqueeUpdates.length, 6) * 6)}s` }}
+                    >
+                      {(() => {
+                        const repeat = Math.max(1, Math.ceil(6 / marqueeUpdates.length));
+                        const set = Array.from({ length: repeat }, () => marqueeUpdates).flat();
+                        return [...set, ...set];
+                      })().map((msg, i) => (
+                        <span key={i} className="whitespace-nowrap text-xs font-semibold px-6" style={{ color: 'var(--marquee-text)' }}>⭐ {msg}</span>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ) : null,
+            gallery: ff('feature_gallery') && isFeaturePlacedInHome('feature_gallery') ? (
+              galleryHomeMode === 'content' ? (
+                <div className="relative px-4 mt-5 mb-3" style={{ animation: resolveAnimation('gallery', 'zoomIn') }} key="gallery">
+                  <GalleryContent variant="home" onNavigate={onNavigate} />
+                </div>
+              ) : (
+              <div className="relative px-4 mt-5 mb-3" style={{ animation: resolveAnimation('gallery', 'zoomIn') }} key="gallery">
+
+                <div
+                  className="rounded-3xl overflow-hidden"
+                  style={{
+                    boxShadow: `0 10px 32px ${applyOpacity(theme.secondary, 0.16)}, 0 2px 8px ${applyOpacity(theme.primary, 0.08)}`,
+                    border: `1px solid ${applyOpacity(theme.primary, 0.1)}`,
+                  }}
+                >
+                  <div className="h-[3px]" style={{ background: `linear-gradient(90deg, ${theme.primary}, ${theme.secondary})` }} />
+                  {showGalleryLoader ? (
+                    <div className="w-full h-[200px] flex items-center justify-center" style={{ background: theme.accentBg }}>
+                      <div className="flex flex-col items-center gap-2">
+                        <div className="w-8 h-8 rounded-full border-2 border-t-transparent animate-spin" style={{ borderColor: theme.primary, borderTopColor: 'transparent' }} />
+                        <p className="text-xs font-medium" style={{ color: theme.secondary }}>Loading gallery...</p>
+                      </div>
+                    </div>
+                  ) : carouselImages.length > 0 ? (
+                    <ImageSlider images={carouselImages} onNavigate={onNavigate} showCounter={false} />
+                  ) : (
+                    <button
+                      onClick={() => onNavigate('gallery')}
+                      className="w-full h-[200px] flex flex-col items-center justify-center gap-3"
+                      style={{
+                        background: 'color-mix(in srgb, var(--app-page-bg) 80%, var(--surface-color))'
+                      }}
+                    >
+                      <div
+                        className="w-14 h-14 rounded-2xl flex items-center justify-center"
+                        style={{ background: `linear-gradient(135deg, ${theme.accent}, ${theme.accentBg})` }}
+                      >
+                        <Image className="h-7 w-7" style={{ color: theme.primary }} />
+                      </div>
+                      <div>
+                        <p className="text-sm font-bold text-center" style={{ color: theme.secondary }}>
+                          {(activeTrust?.name || defaultTrust?.name || DEFAULT_TRUST_NAME)} Gallery
+                        </p>
+                        <p
+                          className="text-xs text-center mt-0.5"
+                          style={{ color: 'color-mix(in srgb, var(--body-text-color) 72%, var(--surface-color))' }}
+                        >
+                          {galleryError || 'Tap to open gallery'}
+                        </p>
+                      </div>
+                    </button>
+                  )}
+                </div>
+              </div>
+              )
+            ) : null,
+
+            quickActions: enabledQuickActions.length > 0 ? (
+              <div className="px-4 mt-5 mb-4" style={{ animation: resolveAnimation('quickActions', 'cards') }} key="quickActions">
+                {(() => {
+                  const renderTile = (action) => (
+                    <button
+                      key={action.id}
+                      onClick={() => onNavigate(action.route)}
+                      className="rounded-2xl text-left transition-all active:scale-[0.97] duration-150"
+                      style={{
+                        background: quickActionsBg,
+                        border: `1px solid color-mix(in srgb, ${quickActionsText} 22%, transparent)`,
+                        boxShadow: `0 4px 16px color-mix(in srgb, ${quickActionsText} 14%, transparent), 0 1px 4px color-mix(in srgb, ${quickActionsText} 10%, transparent)`,
+                        overflow: 'hidden',
+                      }}
+                    >
+                      <div
+                        className="h-[4px]"
+                        style={{ background: `linear-gradient(90deg, ${quickActionsText} 0%, color-mix(in srgb, ${quickActionsText} 60%, var(--surface-color)) 100%)` }}
+                      />
+                      <div className="p-3.5">
+                        <div
+                          className="w-10 h-10 rounded-xl flex items-center justify-center mb-2.5"
+                          style={{
+                            background: quickActionsIconBg,
+                            border: `1px solid color-mix(in srgb, ${quickActionsText} 20%, transparent)`,
+                          }}
+                        >
+                          <QuickActionIcon src={action.icon_url} alt={action.displayName} />
+                        </div>
+                        <div className="flex items-start justify-between gap-1">
+                          <div className="min-w-0 flex-1">
+                            <h3 className="text-[12px] font-extrabold leading-snug" style={{ color: quickActionsText }}>
+                              {action.displayName}
+                            </h3>
+                            <p className="text-[10px] font-medium mt-0.5 leading-snug" style={{ color: `color-mix(in srgb, ${quickActionsText} 80%, var(--surface-color))` }}>
+                              {action.tagline}
+                            </p>
+                          </div>
+                          <ChevronRight className="h-3.5 w-3.5 flex-shrink-0 mt-0.5" style={{ color: `color-mix(in srgb, ${quickActionsText} 72%, transparent)` }} />
+                        </div>
+                      </div>
+                    </button>
+                  );
+
+                  // Group consecutive box-mode actions into shared tile grids, and render any
+                  // action explicitly set to "content" (with a registered *Content component)
+                  // as its own full-width block, preserving enabledQuickActions order.
+                  const groups = [];
+                  let tileBatch = [];
+                  enabledQuickActions.forEach((action) => {
+                    const mode = resolveHomeSectionMode(theme, action.route, action.id, action.displayName);
+                    const ContentRenderer = mode === 'content' ? HOME_CONTENT_RENDERERS[action.route] : null;
+                    if (ContentRenderer) {
+                      if (tileBatch.length > 0) {
+                        groups.push({ type: 'tiles', items: tileBatch });
+                        tileBatch = [];
+                      }
+                      groups.push({ type: 'content', action, ContentRenderer });
+                    } else {
+                      tileBatch.push(action);
+                    }
+                  });
+                  if (tileBatch.length > 0) groups.push({ type: 'tiles', items: tileBatch });
+
+                  return groups.map((group, groupIndex) => {
+                    const spacingClass = groupIndex > 0 ? 'mt-7' : '';
+                    if (group.type === 'content') {
+                      const { action, ContentRenderer } = group;
+                      const contentKey = action.route === 'products'
+                        ? `quickaction-content-${action.id}-${selectedTrustId || 'none'}`
+                        : `quickaction-content-${action.id}`;
+                      return (
+                        <div key={contentKey} className={spacingClass}>
+                          <ContentRenderer
+                            variant="home"
+                            onNavigate={onNavigate}
+                            selectedTrustId={action.route === 'products' ? selectedTrustId : undefined}
+                          />
+                        </div>
+                      );
+                    }
+                    return (
+                      <div key={`quickaction-tiles-${groupIndex}`} className={`grid grid-cols-2 gap-3 ${spacingClass}`}>
+                        {group.items.map((action) => renderTile(action))}
+                      </div>
+                    );
+                  });
+                })()}
+              </div>
+            ) : null,
+
+            sponsors: ff('feature_sponsors') && isFeaturePlacedInHome('feature_sponsors') ? (
+              sponsorsHomeMode === 'content' ? (
+                <div className="px-4 mt-5 mb-4" style={{ animation: resolveAnimation('sponsors', 'cards') }} key="sponsors">
+                  <SponsorsContent variant="home" onNavigate={onNavigate} />
+                </div>
+              ) : (
+              <div className="px-4 mt-5 mb-4" style={{ animation: resolveAnimation('sponsors', 'cards') }} key="sponsors">
+                {sponsors.length > 0 ? (
+                  <div className="relative">
+                    <div
+                      className="relative overflow-hidden rounded-3xl"
+                      onTouchStart={handleSponsorTouchStart}
+                      onTouchMove={handleSponsorTouchMove}
+                      onTouchEnd={handleSponsorTouchEnd}
+                    >
+                      <div
+                        className="absolute inset-0 pointer-events-none"
+                        style={{
+                          background: sponsorOverlayBackground,
+                        }}
+                      />
+                      <div className="relative min-h-[196px]">
+                        {visibleSponsors.map((sponsor, idx) => {
+                          if (!sponsor?.id) return null;
+                          const isActive = idx === activeVisibleSponsorIndex;
+                          return (
+                            <button
+                              key={sponsor.id}
+                              onClick={() => {
+                                console.log(`[Sponsor] clicked sponsor.id=${sponsor.id}`);
+                                setSelectedSponsorId(sponsor.id);
+                                setPinnedSponsor(currentSponsorTrustId, sponsor.id);
+                                onNavigate('sponsors');
+                              }}
+                              className={`absolute inset-0 w-full text-left transition-all duration-700 ease-out ${isActive ? 'opacity-100 translate-y-0 scale-100 pointer-events-auto' : 'opacity-0 translate-y-1 scale-[0.99] pointer-events-none'}`}
+                              aria-hidden={!isActive}
+                              tabIndex={isActive ? 0 : -1}
+                            >
+                              <div
+                                className="relative rounded-3xl p-[1px] h-full overflow-hidden"
+                                style={{
+                                  background: `linear-gradient(130deg, ${sponsorTheme.borderColor1}44 0%, ${sponsorTheme.borderColor2}33 40%, ${sponsorTheme.borderColor1}2E 100%)`,
+                                  boxShadow: `0 12px 28px ${sponsorTheme.shadowColor}1F`,
+                                }}
+                              >
+                                <div
+                                  className="relative rounded-3xl p-5 flex items-center gap-4 h-full overflow-hidden"
+                                  style={{
+                                    background: applyOpacity(sponsorTheme.cardBgColor, sponsorTheme.cardBgOpacity),
+                                    backdropFilter: 'blur(8px)',
+                                  }}
+                                >
+                                  <div
+                                    className="absolute inset-0 pointer-events-none opacity-45"
+                                    style={{
+                                      background: `repeating-linear-gradient(135deg, transparent 0 13px, ${sponsorTheme.patternColor}44 13px 14px)`,
+                                    }}
+                                  />
+                                  <div
+                                    className="absolute -top-10 -right-10 h-24 w-24 rounded-full pointer-events-none"
+                                    style={{ background: `radial-gradient(circle, ${sponsorTheme.glowColor1}66 0%, transparent 70%)` }}
+                                  />
+                                  <div
+                                    className="absolute -bottom-10 -left-8 h-20 w-20 rounded-full pointer-events-none"
+                                    style={{ background: `radial-gradient(circle, ${sponsorTheme.glowColor2}4A 0%, transparent 75%)` }}
+                                  />
+
+                                  <div className="w-20 h-20 rounded-[1.2rem] p-[2px] flex-shrink-0 z-10" style={{ background: `linear-gradient(145deg, ${sponsorTheme.photoRingColor1}55, ${sponsorTheme.photoRingColor2}44)` }}>
+                                    <div
+                                      className="w-full h-full rounded-[1rem] flex items-center justify-center overflow-hidden"
+                                      style={{
+                                        background: surfaceColor,
+                                        boxShadow: `0 6px 16px ${sponsorTheme.photoRingColor1}1A`,
+                                      }}
+                                    >
+                                      {(sponsor.photo_url || sponsor.photo_thumb_url)
+                                        ? <img src={sponsor.photo_url || sponsor.photo_thumb_url} alt={sponsor.name || sponsor.company_name} className="w-full h-full object-cover" style={{ objectPosition: '50% 20%' }} loading="lazy" decoding="async" />
+                                        : <Star className="h-6 w-6" style={{ color: sponsorTheme.textColor }} />}
+                                    </div>
+                                  </div>
+
+                                  <div className="flex-1 min-w-0 z-10">
+                                    <div className="mb-1.5">
+                                      <div
+                                        className="inline-flex items-center gap-1.5 rounded-full px-3 py-1"
+                                        style={{ background: sponsorTheme.badgeBgColor, border: `1px solid ${sponsorTheme.badgeTextColor}30`, boxShadow: `0 1px 5px ${sponsorTheme.badgeTextColor}12` }}
+                                      >
+                                        <span className="w-2 h-2 rounded-full inline-block animate-pulse" style={{ background: sponsorTheme.badgeDotColor }} />
+                                        <span className="text-[10px] font-bold uppercase tracking-[0.2em]" style={{ color: sponsorTheme.badgeTextColor }}>
+                                          {sponsor.badge_label || 'Official Sponsor'}
+                                        </span>
+                                      </div>
+                                    </div>
+
+                                    <div className="text-[20px] font-extrabold leading-snug truncate" style={{ color: sponsorTheme.titleColor }}>
+                                      {sponsor.name || sponsor.company_name}
+                                    </div>
+                                    <div className="mt-1 flex items-center gap-1.5 min-w-0">
+                                      <Building2 className="h-4 w-4 flex-shrink-0" style={{ color: sponsorTheme.subtitleColor }} />
+                                      <p className="text-[14px] font-bold truncate tracking-wide" style={{ color: sponsorTheme.subtitleColor }}>
+                                        {sponsor.company_name || sponsor.position || 'Community partner'}
+                                      </p>
+                                    </div>
+
+                                    <p className="text-[13px] font-medium mt-2 line-clamp-3 leading-relaxed" style={{ color: sponsorTheme.descriptionColor }}>
+                                      {sponsor.shortText || 'Supporting our community with care and commitment.'}
+                                    </p>
+                                  </div>
+
+                                </div>
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                    {sponsors.length > 1 && (
+                      <div className="flex justify-center items-center gap-1.5 mt-2">
+                        {visibleSponsors.map((_, idx) => {
+                          const globalIndex = sponsorChunkStart + idx;
+                          const isActive = globalIndex === sponsorIndex;
+                          return (
+                            <span
+                              key={`sponsor-indicator-${globalIndex}`}
+                              className="h-1.5 rounded-full transition-all duration-300"
+                              style={{
+                                width: isActive ? 16 : 6,
+                                background: isActive ? `linear-gradient(90deg, ${sponsorTheme.indicatorActive1}, ${sponsorTheme.indicatorActive2})` : sponsorTheme.indicatorInactive,
+                                boxShadow: isActive ? `0 1px 5px ${sponsorTheme.indicatorActive1}38` : 'none',
+                              }}
+                            />
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                ) : isSponsorSectionLoading ? (
+                  <div
+                    className="relative overflow-hidden rounded-3xl"
+                    style={{
+                      boxShadow: `0 8px 24px ${applyOpacity(theme.secondary, 0.07)}`
+                    }}
+                  >
+                    <div
+                      className="absolute inset-0 pointer-events-none"
+                      style={{
+                        background: sponsorOverlayBackground,
+                      }}
+                    />
+                    <div
+                      className="relative rounded-3xl p-[1px]"
+                      style={{
+                        background: `linear-gradient(130deg, ${sponsorTheme.borderColor1}44 0%, ${sponsorTheme.borderColor2}33 40%, ${sponsorTheme.borderColor1}2E 100%)`,
+                      }}
+                    >
+                      <div
+                        className="relative rounded-3xl p-4 min-h-[168px] overflow-hidden"
+                        style={{
+                          background: applyOpacity(sponsorTheme.cardBgColor, sponsorTheme.cardBgOpacity),
+                          backdropFilter: 'blur(8px)',
+                        }}
+                      >
+                        <div
+                          className="absolute inset-0 pointer-events-none opacity-45"
+                          style={{
+                            background: `repeating-linear-gradient(135deg, transparent 0 13px, ${sponsorTheme.patternColor}44 13px 14px)`,
+                          }}
+                        />
+                        <div className="relative z-10 h-full flex items-center gap-4">
+                          <div className="w-20 h-20 rounded-[1.2rem] animate-pulse flex-shrink-0" style={{ background: sponsorTheme.skeletonColor }} />
+                          <div className="flex-1 min-w-0 space-y-2.5">
+                            {sponsorSkeletonRows.map((row) => (
+                              <div
+                                key={`sponsor-skeleton-${row}`}
+                                className={`rounded-full animate-pulse ${row === 1 ? 'h-6 w-52' : row === 2 ? 'h-4 w-40' : 'h-4 w-32'}`}
+                                style={{ background: sponsorTheme.skeletonColor }}
+                              />
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div
+                    className="relative overflow-hidden rounded-3xl"
+                    style={{
+                      boxShadow: `0 8px 24px ${applyOpacity(theme.secondary, 0.07)}`
+                    }}
+                  >
+                    <div
+                      className="absolute inset-0 pointer-events-none"
+                      style={{
+                        background: sponsorOverlayBackground,
+                      }}
+                    />
+                    <div
+                      className="relative rounded-3xl p-[1px]"
+                      style={{
+                        background: `linear-gradient(130deg, ${sponsorTheme.borderColor1}44 0%, ${sponsorTheme.borderColor2}33 40%, ${sponsorTheme.borderColor1}2E 100%)`,
+                      }}
+                    >
+                      <div
+                        className="relative rounded-3xl p-4 min-h-[168px] overflow-hidden"
+                        style={{
+                          background: applyOpacity(sponsorTheme.cardBgColor, sponsorTheme.cardBgOpacity),
+                          backdropFilter: 'blur(8px)',
+                        }}
+                      >
+                        <div
+                          className="absolute inset-0 pointer-events-none opacity-45"
+                          style={{
+                            background: `repeating-linear-gradient(135deg, transparent 0 13px, ${sponsorTheme.patternColor}44 13px 14px)`,
+                          }}
+                        />
+                        <div className="relative z-10 h-full flex flex-col items-center justify-center text-center gap-1.5 px-4">
+                          <div
+                            className="w-14 h-14 rounded-2xl flex items-center justify-center mb-1"
+                            style={{ background: applyOpacity(sponsorTheme.badgeTextColor, 0.14) }}
+                          >
+                            <Star className="h-6 w-6" style={{ color: sponsorTheme.badgeTextColor }} />
+                          </div>
+                          <p className="text-[13px] font-semibold" style={{ color: sponsorTheme.emptyTextColor }}>
+                            No sponsors to show right now
+                          </p>
+                          <p className="text-[11px] font-medium" style={{ color: applyOpacity(sponsorTheme.emptyTextColor, 0.7) }}>
+                            Please add sponsors to get started
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+              </div>
+              )
+            ) : null,
+          };
+
+          return resolvedHomeLayout.map((key) => {
+            if (key === 'trustList' && !showTrustSelector) return null;
+            return SECTIONS[key] || null;
+          });
+        })()}
+      </div>
+
+
+
+      <style>{`
+        .member-card {
+          animation: memberCardIn 0.45s cubic-bezier(0.22, 1, 0.36, 1) both;
+        }
+        .member-card-avatar {
+          animation: memberAvatarPop 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) 0.12s both;
+        }
+        .member-card-shine {
+          position: absolute;
+          top: 0;
+          bottom: 0;
+          left: 0;
+          width: 40%;
+          pointer-events: none;
+          background: linear-gradient(105deg, transparent 0%, color-mix(in srgb, var(--navbar-text) 28%, transparent) 50%, transparent 100%);
+          transform: translateX(-120%);
+          animation: memberCardShine 1.1s ease-out 0.5s 1 both;
+        }
+        @keyframes memberCardIn {
+          from { opacity: 0; transform: translateY(8px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes memberAvatarPop {
+          from { opacity: 0; transform: scale(0.7); }
+          to { opacity: 1; transform: scale(1); }
+        }
+        @keyframes memberCardShine {
+          from { transform: translateX(-120%); }
+          to { transform: translateX(380%); }
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .member-card, .member-card-avatar { animation: none; }
+          .member-card-shine { display: none; }
+        }
+        .marquee-track {
+          display: flex;
+          animation: marquee-scroll 30s linear infinite;
+          width: max-content;
+        }
+        @keyframes marquee-scroll {
+          0%   { transform: translateX(0); }
+          100% { transform: translateX(-50%); }
+        }
+
+        .trust-heading-marquee {
+          display: inline-block;
+          animation: trust-heading-scroll 30s linear infinite;
+          will-change: transform;
+        }
+
+        @keyframes trust-heading-scroll {
+          0%, 15% { transform: translateX(0); }
+          85%, 100% { transform: translateX(-50%); }
+        }
+
+        @keyframes themeFadeIn {
+          from { opacity: 0; }
+          to { opacity: 1; }
+        }
+        @keyframes themeFadeUp {
+          from { opacity: 0; transform: translateY(14px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes themeFadeSlideDown {
+          from { opacity: 0; transform: translateY(-12px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes themeZoomIn {
+          from { opacity: 0; transform: scale(0.98); }
+          to { opacity: 1; transform: scale(1); }
+        }
+
+        /* Decorative home blobs animations */
+        @keyframes homeFloat1 {
+          0%, 100% { transform: translateY(0px) scale(1); }
+          50% { transform: translateY(-18px) scale(1.04); }
+        }
+        @keyframes homeFloat2 {
+          0%, 100% { transform: translateY(0px) scale(1); }
+          50% { transform: translateY(14px) scale(0.97); }
+        }
+        @keyframes homeFloat3 {
+          0%, 100% { transform: translateX(0px); }
+          50% { transform: translateX(12px); }
+        }
+
+        @keyframes trustChipMoveToFront {
+          0% {
+            transform: translateX(14px) scale(0.92);
+            opacity: 0.72;
+            box-shadow: 0 0 0 rgba(0, 0, 0, 0);
+          }
+          55% {
+            transform: translateX(-6px) scale(1.11);
+            opacity: 1;
+            box-shadow: 0 14px 28px color-mix(in srgb, var(--brand-navy) 26%, transparent);
+          }
+          100% {
+            transform: translateX(0) scale(1.05);
+            opacity: 1;
+            box-shadow: 0 4px 12px color-mix(in srgb, var(--brand-navy) 22%, transparent);
+          }
+        }
+
+        /* Unread: theme colours, but strong enough to read on a dark page
+           (the ring brightens toward white at the peak). */
+        @keyframes trustChipUnreadPulse {
+          0%, 100% {
+            border-color: var(--trust-ring-color);
+            box-shadow:
+              0 0 0 2px color-mix(in srgb, var(--trust-ring-glow) 40%, transparent),
+              0 0 10px 2px color-mix(in srgb, var(--trust-ring-glow) 50%, transparent);
+          }
+          50% {
+            border-color: color-mix(in srgb, var(--trust-ring-color) 65%, #ffffff);
+            box-shadow:
+              0 0 0 3px color-mix(in srgb, var(--trust-ring-glow) 60%, transparent),
+              0 0 18px 5px color-mix(in srgb, var(--trust-ring-glow) 70%, transparent);
+          }
+        }
+
+        @keyframes trustChipUnreadRipple {
+          0% { transform: scale(1); opacity: 0.85; }
+          100% { transform: scale(1.45); opacity: 0; }
+        }
+
+        @keyframes trustChipBadgePop {
+          0%, 100% { transform: scale(1); }
+          50% { transform: scale(1.18); }
+        }
+
+        .trust-chip-unread::after {
+          content: '';
+          position: absolute;
+          inset: -3px;
+          border-radius: 9999px;
+          border: 2px solid var(--trust-ring-color);
+          pointer-events: none;
+          animation: trustChipUnreadRipple 1.6s ease-out infinite;
+        }
+
+        .trust-chip-unread-badge {
+          position: absolute;
+          top: -5px;
+          right: -6px;
+          z-index: 2;
+          min-width: 18px;
+          height: 18px;
+          padding: 0 4px;
+          border-radius: 9999px;
+          background: var(--trust-ring-color);
+          color: var(--trust-badge-text, #fff);
+          font-size: 10px;
+          font-weight: 700;
+          line-height: 18px;
+          text-align: center;
+          border: 2px solid var(--app-page-bg, #1a1a1a);
+          box-shadow: 0 2px 8px color-mix(in srgb, var(--trust-ring-glow) 70%, transparent);
+          pointer-events: none;
+          animation: trustChipBadgePop 1.6s ease-in-out infinite;
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+          .trust-chip-unread,
+          .trust-chip-unread::after,
+          .trust-chip-unread-badge { animation: none !important; }
+        }
+
+        /* Hide scrollbar on home page content */
+        .home-scroll::-webkit-scrollbar { display: none; }
+        .home-scroll { -ms-overflow-style: none; scrollbar-width: none; }
+        .notification-list-scroll::-webkit-scrollbar { display: none; }
+        .notification-list-scroll { -ms-overflow-style: none; scrollbar-width: none; }
+      `}</style>
+
+      {/* ── Footer ── */}
+      <footer
+        className="mt-auto py-3 px-6"
+        style={{
+          borderTop: '1px solid var(--footer-border)',
+          background: 'var(--footer-bg)',
+          color: 'var(--footer-text)'
+        }}
+      >
+        <div className="flex items-center justify-center gap-2">
+          <div className="w-8 h-px" style={{ background: 'linear-gradient(to right, transparent, var(--footer-accent))' }} />
+          <a
+            href={footerShareLink}
+            className="text-[11px] font-medium transition-colors no-underline hover:opacity-90"
+            style={{ color: 'var(--footer-text)' }}
+          >
+            Powered by Developers
+          </a>
+          <div className="w-8 h-px" style={{ background: 'linear-gradient(to left, transparent, var(--footer-accent))' }} />
+        </div>
+        <p className="text-[11px] font-semibold text-center mt-2 opacity-80">App Version {displayTrustVersion}</p>
+      </footer>
+
+      <BottomNav onNavigate={onNavigate} />
+
+      <TermsModal
+        isOpen={showTermsModal}
+        onAccept={handleAcceptTerms}
+        content={termsModalContent}
+        trustName={termsModalTrustName}
+        loading={termsModalLoading}
+        error={termsModalError}
+      />
+    </div>
+  );
+};
+
+export default Home;

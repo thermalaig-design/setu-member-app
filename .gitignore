@@ -8,6 +8,7 @@ ios/
 
 backend/node_modules/
 .vite/
+.DS_Store
 
 app_logcat.txt
 full_app_log*.txt

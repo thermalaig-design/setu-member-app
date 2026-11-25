@@ -93,23 +93,23 @@ globalThis.__rzpTest = { database, Razorpay, express, jwt,
     getInvoiceSignedUrl: async (id) => `https://signed.test/${id}.pdf`,
   } };
 const load = (source) => import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}`);
-let source = await readFile(new URL('../backend/services/razorpayRouteService.js', import.meta.url), 'utf8');
+let source = await readFile(new URL('../backend/features/products/razorpayRouteService.js', import.meta.url), 'utf8');
 source = source.replace("import Razorpay from 'razorpay';", 'const { Razorpay } = globalThis.__rzpTest;')
-  .replace("import { paymentSupabase } from '../config/supabase.js';", 'const paymentSupabase = globalThis.__rzpTest.database;')
-  .replace("import { sendAdminAlertEmail } from './emailService.js';", 'const { sendAdminAlertEmail } = globalThis.__rzpTest.mail;')
+  .replace("import { paymentSupabase } from '../../shared/config/supabase.js';", 'const paymentSupabase = globalThis.__rzpTest.database;')
+  .replace("import { sendAdminAlertEmail } from '../appointments-reports-referral/emailService.js';", 'const { sendAdminAlertEmail } = globalThis.__rzpTest.mail;')
   .replace("import { generateAndStoreInvoicePdf, getInvoiceSignedUrl } from './invoicePdfService.js';",
     'const { generateAndStoreInvoicePdf, getInvoiceSignedUrl } = globalThis.__rzpTest.invoicePdf;');
 const service = await load(source);
 globalThis.__rzpTest.service = service;
-source = await readFile(new URL('../backend/middleware/memberAuth.js', import.meta.url), 'utf8');
+source = await readFile(new URL('../backend/shared/middleware/memberAuth.js', import.meta.url), 'utf8');
 source = source.replace("import jwt from 'jsonwebtoken';", 'const { jwt } = globalThis.__rzpTest;')
   .replace("import { supabase } from '../config/supabase.js';", 'const supabase = globalThis.__rzpTest.database;');
 globalThis.__rzpTest.auth = await load(source);
-source = await readFile(new URL('../backend/routes/paymentRoutes.js', import.meta.url), 'utf8');
+source = await readFile(new URL('../backend/features/products/paymentRoutes.js', import.meta.url), 'utf8');
 source = source.replace("import express from 'express';", 'const { express } = globalThis.__rzpTest;')
-  .replace("import { requireMemberSession, memberBelongsToSession } from '../middleware/memberAuth.js';", 'const { requireMemberSession, memberBelongsToSession } = globalThis.__rzpTest.auth;')
-  .replace("import { supabase } from '../config/supabase.js';", 'const supabase = globalThis.__rzpTest.database;')
-  .replace(/import \{([\s\S]*?)\} from '..\/services\/razorpayRouteService.js';/, 'const {$1} = globalThis.__rzpTest.service;');
+  .replace("import { requireMemberSession, memberBelongsToSession } from '../../shared/middleware/memberAuth.js';", 'const { requireMemberSession, memberBelongsToSession } = globalThis.__rzpTest.auth;')
+  .replace("import { supabase } from '../../shared/config/supabase.js';", 'const supabase = globalThis.__rzpTest.database;')
+  .replace(/import \{([\s\S]*?)\} from '\.\/razorpayRouteService.js';/, 'const {$1} = globalThis.__rzpTest.service;');
 const routes = await load(source);
 let server, url;
 const envKeys = ['RAZORPAY_KEY_ID', 'RAZORPAY_KEY_SECRET', 'RAZORPAY_WEBHOOK_SECRET', 'SETU_SESSION_SECRET'];
@@ -311,10 +311,10 @@ test('client checkout dismissal returns PAYMENT_CANCELLED and retains pending pu
     open() { this.options.modal.ondismiss(); }
   } };
   try {
-    const clientSource = (await readFile(new URL('../src/services/paymentService.js', import.meta.url), 'utf8'))
+    const clientSource = (await readFile(new URL('../src/features/products/paymentService.js', import.meta.url), 'utf8'))
       .replace("import { Capacitor, registerPlugin } from '@capacitor/core';", "const Capacitor = { getPlatform: () => 'web' }; const registerPlugin = () => ({});")
-      .replace("import { track } from './analytics';", 'const track = () => {};')
-      .replace("import { api } from './api';", 'const { api } = globalThis.__rzpTest;');
+      .replace("import { track } from '../../shared/services/analytics';", 'const track = () => {};')
+      .replace("import { api } from '../../shared/services/api';", 'const { api } = globalThis.__rzpTest;');
     const client = await load(clientSource);
     await assert.rejects(() => client.openRazorpayCheckout({ trustId, purchaseIds: [ids[0]] }), { code: 'PAYMENT_CANCELLED' });
     assert.equal(tables.product_purchases.length, 1);
@@ -436,11 +436,11 @@ test('Razorpay rejecting a refund leaves the database untouched', async () => {
 test('successful payment stores an invoice PDF; admin refund endpoint requires admin auth', async () => {
   await paidCheckout();
   assert.deepEqual(pdfs, [tables.product_invoices[0].id]);
-  const adminSource = (await readFile(new URL('../backend/routes/adminPaymentRoutes.js', import.meta.url), 'utf8'))
+  const adminSource = (await readFile(new URL('../backend/features/admin/adminPaymentRoutes.js', import.meta.url), 'utf8'))
     .replace("import express from 'express';", 'const { express } = globalThis.__rzpTest;')
-    .replace("import { authenticateAdmin } from '../middleware/adminAuth.js';",
+    .replace("import { authenticateAdmin } from './adminAuth.js';",
       "const authenticateAdmin = (req, res, next) => (req.headers['x-test-admin'] ? next() : res.status(401).json({ success: false }));")
-    .replace(/import \{([\s\S]*?)\} from '..\/services\/razorpayRouteService.js';/, 'const {$1} = globalThis.__rzpTest.service;');
+    .replace(/import \{([\s\S]*?)\} from '\.\.\/products\/razorpayRouteService.js';/, 'const {$1} = globalThis.__rzpTest.service;');
   const adminRoutes = await load(adminSource);
   const app = express(); app.use(express.json()); app.use('/admin', adminRoutes.default);
   const listener = await new Promise((resolve) => { const l = app.listen(0, '127.0.0.1', () => resolve(l)); });

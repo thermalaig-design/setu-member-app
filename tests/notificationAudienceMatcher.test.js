@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { isNotificationRelevantForUser } from '../backend/services/notificationAudienceMatcher.js';
+import { isNotificationRelevantForUser } from '../backend/features/notifications/notificationAudienceMatcher.js';
 
 test('isNotificationRelevantForUser matches phone audience IDs across common India formats', () => {
   const notification = {

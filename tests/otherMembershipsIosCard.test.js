@@ -19,7 +19,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // Normalize CRLF -> LF: this file is saved with Windows line endings, and
 // every multi-line pattern below assumes plain \n.
 const source = fs.readFileSync(
-  path.join(__dirname, '../src/OtherMemberships.jsx'),
+  path.join(__dirname, '../src/features/member/OtherMemberships.jsx'),
   'utf8'
 ).replace(/\r\n/g, '\n');
 

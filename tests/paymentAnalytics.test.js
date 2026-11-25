@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { Buffer } from 'node:buffer';
 
-const source = await readFile(new URL('../src/services/paymentService.js', import.meta.url), 'utf8');
+const source = await readFile(new URL('../src/features/products/paymentService.js', import.meta.url), 'utf8');
 
 async function runCheckout({ status = 'paid', cancel = false, repeat = false, verifyFails = false, platform = 'web', nativeOpen } = {}) {
   const events = [];
@@ -50,8 +50,8 @@ async function runCheckout({ status = 'paid', cancel = false, repeat = false, ve
   try {
     const isolatedSource = source
       .replace("import { Capacitor, registerPlugin } from '@capacitor/core';", 'const { Capacitor, registerPlugin } = globalThis.__paymentAnalyticsTest;')
-      .replace("import { api } from './api';", 'const { api } = globalThis.__paymentAnalyticsTest;')
-      .replace("import { track } from './analytics';", 'const { track } = globalThis.__paymentAnalyticsTest;')
+      .replace("import { api } from '../../shared/services/api';", 'const { api } = globalThis.__paymentAnalyticsTest;')
+      .replace("import { track } from '../../shared/services/analytics';", 'const { track } = globalThis.__paymentAnalyticsTest;')
       .replace('const STATUS_POLL_INTERVAL_MS = 2500;', 'const STATUS_POLL_INTERVAL_MS = 0;');
     const service = await import(`data:text/javascript;base64,${Buffer.from(isolatedSource).toString('base64')}#${Math.random()}`);
     const result = await service.openRazorpayCheckout({ trustId: 'trust_test', purchaseIds: ['purchase_test'] });

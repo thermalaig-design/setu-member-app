@@ -9,7 +9,7 @@ import {
   isAndroidNonChromeBrowser,
   buildChromeIntentUrl,
   isIOSChromeUA,
-} from '../src/utils/installBrowserSupport.js';
+} from '../src/shared/utils/installBrowserSupport.js';
 
 // Android Chrome-only guided PWA installation: on Android, only REAL Chrome
 // runs the native beforeinstallprompt/countdown/appinstalled flow. Every
@@ -88,7 +88,7 @@ test('Chrome intent URL falls back to empty string on an unparsable URL, never t
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const tenantLandingSource = fs.readFileSync(
-  path.join(__dirname, '../src/TenantLanding.jsx'),
+  path.join(__dirname, '../src/features/home-navigation/TenantLanding.jsx'),
   'utf8'
 );
 
@@ -346,7 +346,7 @@ test('source guard: handleInstallClick\'s CriOS fallback (isIosSafari() || isIOS
 });
 
 test('source guard: installOutcome === \'ios-instructions\' renders IosInstallInstructionsModal, passing onClose back to setInstallOutcome(\'\') (no navigation/handoff)', () => {
-  assert.match(tenantLandingSource, /import IosInstallInstructionsModal from '\.\/components\/IosInstallInstructionsModal';/);
+  assert.match(tenantLandingSource, /import IosInstallInstructionsModal from '\.\.\/\.\.\/shared\/components\/IosInstallInstructionsModal';/);
   const renderIdx = tenantLandingSource.indexOf("installOutcome === 'ios-instructions' && (");
   assert.ok(renderIdx !== -1);
   const renderBlock = tenantLandingSource.slice(renderIdx, renderIdx + 300);
@@ -360,7 +360,7 @@ test('the mac-safari-instructions modal keeps its own "on Safari" title (File > 
 
 test('IosInstallInstructionsModal.jsx exists and defines the 3-step Share -> Add to Home Screen -> Add copy, browser-neutral (never "Safari toolbar")', () => {
   const modalSource = fs.readFileSync(
-    path.join(__dirname, '../src/components/IosInstallInstructionsModal.jsx'),
+    path.join(__dirname, '../src/shared/components/IosInstallInstructionsModal.jsx'),
     'utf8'
   );
   assert.match(modalSource, /Tap the Share button/);

@@ -10,7 +10,7 @@ import {
   parseAmount,
   ORDER_HISTORY_UNKNOWN_TRUST_KEY,
   ORDER_HISTORY_UNKNOWN_TRUST_LABEL,
-} from '../src/utils/orderHistoryDisplay.js';
+} from '../src/features/products/orderHistoryDisplay.js';
 
 // ---------------------------------------------------------------------------
 // getStatusMeta — status -> {group, label, tone}

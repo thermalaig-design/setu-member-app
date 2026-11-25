@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { buildNotificationViewModel, mergeNotifications } from '../backend/services/notificationSchemaMapper.js';
+import { buildNotificationViewModel, mergeNotifications } from '../backend/features/notifications/notificationSchemaMapper.js';
 
 test('buildNotificationViewModel maps new-schema recipients into a readable notification view', () => {
   const viewModel = buildNotificationViewModel({

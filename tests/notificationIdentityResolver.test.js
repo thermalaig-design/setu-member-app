@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { buildRegMemberLookupPairs } from '../backend/services/notificationIdentityResolver.js';
+import { buildRegMemberLookupPairs } from '../backend/features/notifications/notificationIdentityResolver.js';
 
 test('buildRegMemberLookupPairs includes members_id lookup for UUID-based user identifiers', () => {
   const pairs = buildRegMemberLookupPairs('c6912e61-16e8-4670-90be-285bc71f85eb');

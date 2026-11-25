@@ -28,7 +28,7 @@ const installWindowStub = ({ pathname, standalone }) => {
 };
 
 const { getAppHomePath, rememberWindowTenantSlug, readWindowTenantSlug } =
-  await import('../src/utils/tenantNavigation.js');
+  await import('../src/shared/utils/tenantNavigation.js');
 
 test('URL slug wins over a different slug already recorded for this window (fresh /app/<slug> load beats stale session state)', () => {
   const sessionStorage = installWindowStub({ pathname: '/app/siahh-niahh', standalone: true });

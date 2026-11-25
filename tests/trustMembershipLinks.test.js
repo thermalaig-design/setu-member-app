@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { buildShareAppLinksFromMembership } from '../src/utils/trustMembershipLinks.js';
-import { getShareAppTargetLink } from '../src/utils/shareApp.js';
+import { buildShareAppLinksFromMembership } from '../src/shared/utils/trustMembershipLinks.js';
+import { getShareAppTargetLink } from '../src/shared/utils/shareApp.js';
 
 test('membership links map into the share-app shape, with web_app_url as the store links', () => {
   const links = buildShareAppLinksFromMembership({

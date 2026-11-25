@@ -1,7 +1,7 @@
 import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
-import { RESERVED_APP_ROUTES } from './src/constants/reservedRoutes.js'
+import { RESERVED_APP_ROUTES } from './src/shared/constants/reservedRoutes.js'
 
 // Dev/preview-only convenience proxy: in production, Nginx forwards
 // /pwa-manifest/<slug>.webmanifest to the generate-webApp-link Supabase Edge

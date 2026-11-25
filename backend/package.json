@@ -7,9 +7,9 @@
   "scripts": {
     "build": "echo 'No build step'",
     "update-appointment-notification": "node update_appointment_with_notification.js",
-    "setup-trust": "node setup_trust.js",
-    "theme-rollout-audit": "node theme_rollout_audit.js",
-    "theme-rollout-audit:strict": "node theme_rollout_audit.js --fail-on-warnings",
+    "setup-trust": "node scripts/setup_trust.js",
+    "theme-rollout-audit": "node scripts/theme_rollout_audit.js",
+    "theme-rollout-audit:strict": "node scripts/theme_rollout_audit.js --fail-on-warnings",
     "start": "node server.js",
     "dev": "nodemon server.js",
     "update-notifications": "echo 'Please run the SQL commands in update_notification_system.sql in your Supabase SQL editor'"

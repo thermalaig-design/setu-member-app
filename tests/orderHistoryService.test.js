@@ -69,8 +69,8 @@ let cartUtils;
 
 before(async () => {
   createEnvironment();
-  orderHistoryService = await import('../src/services/orderHistoryService.js');
-  cartUtils = await import('../src/utils/productCart.js');
+  orderHistoryService = await import('../src/features/products/orderHistoryService.js');
+  cartUtils = await import('../src/features/products/productCart.js');
 });
 
 afterEach(() => {

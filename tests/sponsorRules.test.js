@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { isDateValidForToday, isFresh, isRowActive } from '../src/services/sponsorRules.js';
+import { isDateValidForToday, isFresh, isRowActive } from '../src/features/gallery-sponsors/sponsorRules.js';
 
 test('inactive sponsor rows are filtered out', () => {
   assert.equal(isRowActive({ status: 'inactive' }), false);

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { buildCategoryView } from '../src/utils/categoryDisplay.js';
+import { buildCategoryView } from '../src/features/products/categoryDisplay.js';
 
 test('card parent renders active descendants without requiring child display metadata', () => {
   const categories = [

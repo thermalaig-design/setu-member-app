@@ -29,7 +29,7 @@ const {
   hasIosA2hsAck,
   writeIosA2hsAck,
   clearIosA2hsAck,
-} = await import('../src/utils/iosA2hsAck.js');
+} = await import('../src/shared/utils/iosA2hsAck.js');
 
 // --- Pure record behavior -------------------------------------------------
 
@@ -99,7 +99,7 @@ test('a malformed/foreign record is ignored rather than throwing', () => {
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const tenantLandingSource = fs.readFileSync(
-  path.join(__dirname, '../src/TenantLanding.jsx'),
+  path.join(__dirname, '../src/features/home-navigation/TenantLanding.jsx'),
   'utf8'
 );
 
