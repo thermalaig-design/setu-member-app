@@ -57,6 +57,14 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # @capawesome/capacitor-app-update 7.x asks for capacitor-swift-pm 7, which
+      # conflicts with Capacitor 8. Its iOS source is the same as 8.x.
+      - name: Patch app-update plugin for Capacitor 8
+        run: |
+          file=node_modules/@capawesome/capacitor-app-update/Package.swift
+          sed -i '' -e 's/from: "7\.0\.0"/from: "8.0.0"/' -e 's/\.iOS(\.v14)/.iOS(.v15)/' "$file"
+          grep -q 'from: "8.0.0"' "$file" || { echo "::error::app-update plugin patch did not apply"; exit 1; }
+
       - name: Write .env from APP_ENV
         env:
           APP_ENV: ${{ secrets.APP_ENV }}
