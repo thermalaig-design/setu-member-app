@@ -4,7 +4,6 @@ dist-capacitor/
 .env
 backend/.env
 android
-ios/
 
 backend/node_modules/
 .vite/
@@ -21,4 +20,3 @@ android/keystore.properties
 android.7z
 android1111/
 ios 2nov/
-ios/ 
