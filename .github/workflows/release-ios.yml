@@ -1,0 +1,190 @@
+name: Release iOS (App Store)
+
+on:
+  # Temporary: lets us test build-only before merging. Remove after the merge to develop.
+  push:
+    branches: [feat/ios-release]
+    paths:
+      - ".github/workflows/release-ios.yml"
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: build-only (no Apple keys), signed-check (sign, no upload), testflight (sign and upload)
+        type: choice
+        options: [build-only, signed-check, testflight]
+        default: build-only
+      version:
+        description: App version, must be higher than the live App Store version (e.g. 1.7)
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-ios
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: macos-26
+    timeout-minutes: 45
+    env:
+      TEAM_ID: 26L6W22BA4
+      MODE: ${{ inputs.mode || 'build-only' }}
+      VERSION: ${{ inputs.version }}
+    steps:
+      - name: Validate inputs
+        run: |
+          if [ -n "$VERSION" ] && ! [[ "$VERSION" =~ ^[0-9]+(\.[0-9]+){1,2}$ ]]; then
+            echo "::error::version must look like 1.7 or 1.7.1, got '$VERSION'"; exit 1
+          fi
+          if [ "$MODE" = "testflight" ] && [ -z "$VERSION" ]; then
+            echo "::error::version is required for testflight"; exit 1
+          fi
+          echo "Mode: $MODE"
+
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Show Xcode version
+        run: xcodebuild -version
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Write .env from APP_ENV
+        env:
+          APP_ENV: ${{ secrets.APP_ENV }}
+        run: |
+          [ -n "$APP_ENV" ] || { echo "::error::APP_ENV secret missing"; exit 1; }
+          printf '%s\n' "$APP_ENV" > .env
+          chmod 600 .env
+          for name in VITE_SUPABASE_URL VITE_SUPABASE_ANON_KEY VITE_API_BASE_URL; do
+            grep -Eq "^[[:space:]]*(export[[:space:]]+)?${name}=.+" .env || { echo "::error::APP_ENV is missing $name"; exit 1; }
+          done
+          grep -Eq "^[[:space:]]*(export[[:space:]]+)?VITE_ENABLE_FCM_PUSH=[\"']?true" .env \
+            || echo "::warning::VITE_ENABLE_FCM_PUSH is not true in APP_ENV; push notifications may be off in this build"
+
+      - name: Build web assets and sync Capacitor
+        run: |
+          npm run build:capacitor
+          npx cap sync ios
+
+      # The archive is built unsigned so that CI does not create a new
+      # development certificate on every run. Signing happens at export.
+      - name: Archive
+        run: |
+          extra=()
+          [ -n "$VERSION" ] && extra+=("MARKETING_VERSION=$VERSION")
+          build_number="$((100 + GITHUB_RUN_NUMBER)).${GITHUB_RUN_ATTEMPT}"
+          echo "version=${VERSION:-from project} build=$build_number"
+          set -o pipefail
+          xcodebuild archive \
+            -project ios/App/App.xcodeproj \
+            -scheme App \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath "$RUNNER_TEMP/App.xcarchive" \
+            CODE_SIGNING_ALLOWED=NO \
+            CURRENT_PROJECT_VERSION="$build_number" \
+            ${extra[@]+"${extra[@]}"} \
+            | tee "$RUNNER_TEMP/archive.log" | grep -E "error:|warning: Signing|ARCHIVE" || {
+              tail -80 "$RUNNER_TEMP/archive.log"; exit 1; }
+          [ -d "$RUNNER_TEMP/App.xcarchive/Products/Applications/App.app" ] || { echo "::error::Archive has no App.app"; exit 1; }
+
+      # An unsigned archive carries no entitlements, so add them (ad-hoc) before
+      # export. Without this the push notification entitlement would be lost.
+      - name: Add entitlements to the archive
+        if: env.MODE != 'build-only'
+        run: |
+          app="$RUNNER_TEMP/App.xcarchive/Products/Applications/App.app"
+          ent="$RUNNER_TEMP/release.entitlements"
+          cp ios/App/App/App.entitlements "$ent"
+          /usr/libexec/PlistBuddy -c "Set :aps-environment production" "$ent"
+          if [ -d "$app/Frameworks" ]; then
+            find "$app/Frameworks" -maxdepth 1 \( -name '*.framework' -o -name '*.dylib' \) -print0 |
+              while IFS= read -r -d '' item; do codesign --force --sign - "$item"; done
+          fi
+          codesign --force --sign - --entitlements "$ent" --generate-entitlement-der "$app"
+
+      - name: Prepare App Store Connect key
+        if: env.MODE != 'build-only'
+        env:
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+        run: |
+          for name in ASC_KEY_P8 ASC_KEY_ID ASC_ISSUER_ID; do
+            [ -n "${!name}" ] || { echo "::error::$name secret missing"; exit 1; }
+          done
+          (umask 077; printf '%s\n' "$ASC_KEY_P8" > "$RUNNER_TEMP/asc_key.p8")
+
+      - name: Sign and export IPA
+        if: env.MODE != 'build-only'
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+        run: |
+          for destination in export upload; do
+            plist="$RUNNER_TEMP/ExportOptions-$destination.plist"
+            cat > "$plist" <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key><string>app-store-connect</string>
+            <key>destination</key><string>$destination</string>
+            <key>teamID</key><string>$TEAM_ID</string>
+            <key>signingStyle</key><string>automatic</string>
+            <key>manageAppVersionAndBuildNumber</key><false/>
+          </dict>
+          </plist>
+          EOF
+          done
+
+          xcodebuild -exportArchive \
+            -archivePath "$RUNNER_TEMP/App.xcarchive" \
+            -exportPath "$RUNNER_TEMP/export" \
+            -exportOptionsPlist "$RUNNER_TEMP/ExportOptions-export.plist" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$RUNNER_TEMP/asc_key.p8" \
+            -authenticationKeyID "$ASC_KEY_ID" \
+            -authenticationKeyIssuerID "$ASC_ISSUER_ID"
+
+      - name: Verify signed IPA
+        if: env.MODE != 'build-only'
+        run: |
+          ipa=$(find "$RUNNER_TEMP/export" -name '*.ipa' | head -1)
+          [ -n "$ipa" ] || { echo "::error::No IPA produced"; exit 1; }
+          unzip -q "$ipa" -d "$RUNNER_TEMP/ipa"
+          app=$(find "$RUNNER_TEMP/ipa/Payload" -maxdepth 1 -name '*.app' | head -1)
+          codesign --verify --deep --strict "$app"
+          codesign -dvv "$app" 2>&1 | grep -E "^(Identifier|Authority|TeamIdentifier)="
+          codesign -d --entitlements "$RUNNER_TEMP/signed.entitlements" --xml "$app"
+          aps=$(/usr/libexec/PlistBuddy -c "Print :aps-environment" "$RUNNER_TEMP/signed.entitlements" || true)
+          echo "aps-environment: ${aps:-missing}"
+          [ "$aps" = "production" ] || { echo "::error::Push entitlement is not 'production'; refusing to upload"; exit 1; }
+
+      - name: Upload to TestFlight
+        if: env.MODE == 'testflight'
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+        run: |
+          xcodebuild -exportArchive \
+            -archivePath "$RUNNER_TEMP/App.xcarchive" \
+            -exportPath "$RUNNER_TEMP/upload" \
+            -exportOptionsPlist "$RUNNER_TEMP/ExportOptions-upload.plist" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$RUNNER_TEMP/asc_key.p8" \
+            -authenticationKeyID "$ASC_KEY_ID" \
+            -authenticationKeyIssuerID "$ASC_ISSUER_ID"
+
+      - name: Cleanup secrets
+        if: always()
+        run: rm -f "$RUNNER_TEMP/asc_key.p8" .env
