@@ -1,11 +1,6 @@
 name: Release iOS (App Store)
 
 on:
-  # Temporary: lets us test build-only before merging. Remove after the merge to develop.
-  push:
-    branches: [feat/ios-release]
-    paths:
-      - ".github/workflows/release-ios.yml"
   workflow_dispatch:
     inputs:
       mode:
@@ -17,22 +12,43 @@ on:
         description: App version, must be higher than the live App Store version (e.g. 1.7)
         type: string
         default: ""
+      then_appstore:
+        description: After TestFlight, wait for approval and then submit to App Review
+        type: boolean
+        default: false
+      release_notes:
+        description: What's New text (needed if then_appstore is ticked)
+        type: string
+        default: ""
+      release_type:
+        description: "After Apple approval: manual button or automatic release"
+        type: choice
+        options: [manual, automatic]
+        default: manual
+      phased_release:
+        description: Release to users gradually over 7 days
+        type: boolean
+        default: false
 
 permissions:
   contents: read
 
-concurrency:
-  group: release-ios
-  cancel-in-progress: false
-
 jobs:
   release:
     runs-on: macos-26
+    # On this job only, so a run waiting for approval does not block new builds.
+    concurrency:
+      group: release-ios
+      cancel-in-progress: false
+    outputs:
+      build_number: ${{ steps.archive.outputs.build_number }}
     timeout-minutes: 45
     env:
       TEAM_ID: 26L6W22BA4
       MODE: ${{ inputs.mode || 'build-only' }}
       VERSION: ${{ inputs.version }}
+      THEN_APPSTORE: ${{ inputs.then_appstore }}
+      RELEASE_NOTES: ${{ inputs.release_notes }}
     steps:
       - name: Validate inputs
         run: |
@@ -41,6 +57,11 @@ jobs:
           fi
           if [ "$MODE" = "testflight" ] && [ -z "$VERSION" ]; then
             echo "::error::version is required for testflight"; exit 1
+          fi
+          if [ "$THEN_APPSTORE" = "true" ]; then
+            [ "$MODE" = "testflight" ] || { echo "::error::then_appstore needs mode testflight"; exit 1; }
+            [ -n "${RELEASE_NOTES// /}" ] || { echo "::error::release_notes is required with then_appstore"; exit 1; }
+            [ "$GITHUB_REF" = "refs/heads/develop" ] || { echo "::error::then_appstore is allowed only from develop"; exit 1; }
           fi
           echo "Mode: $MODE"
 
@@ -86,11 +107,13 @@ jobs:
       # The archive is built unsigned so that CI does not create a new
       # development certificate on every run. Signing happens at export.
       - name: Archive
+        id: archive
         run: |
           extra=()
           [ -n "$VERSION" ] && extra+=("MARKETING_VERSION=$VERSION")
           build_number="$((100 + GITHUB_RUN_NUMBER)).${GITHUB_RUN_ATTEMPT}"
           echo "version=${VERSION:-from project} build=$build_number"
+          echo "build_number=$build_number" >> "$GITHUB_OUTPUT"
           set -o pipefail
           xcodebuild archive \
             -project ios/App/App.xcodeproj \
@@ -196,3 +219,36 @@ jobs:
       - name: Cleanup secrets
         if: always()
         run: rm -f "$RUNNER_TEMP/asc_key.p8" .env
+
+  # Waits here until a reviewer has tested the build on TestFlight and approves.
+  approval:
+    name: Test ${{ inputs.version }} (${{ needs.release.outputs.build_number }}) then approve
+    needs: release
+    if: inputs.mode == 'testflight' && inputs.then_appstore
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: app-store-approval
+    permissions:
+      actions: read
+    steps:
+      # Without a required reviewer this job would pass on its own, so stop then.
+      - name: Make sure a reviewer is required
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          count=$(gh api "repos/$GITHUB_REPOSITORY/environments/app-store-approval" \
+            --jq '[.protection_rules[] | select(.type == "required_reviewers")] | length')
+          [ "$count" -ge 1 ] || { echo "::error::Add Required reviewers to the app-store-approval environment"; exit 1; }
+          echo "Approved"
+
+  appstore:
+    needs: [release, approval]
+    uses: ./.github/workflows/release-ios-appstore.yml
+    with:
+      action: submit
+      version: ${{ inputs.version }}
+      build_number: ${{ needs.release.outputs.build_number }}
+      release_notes: ${{ inputs.release_notes }}
+      release_type: ${{ inputs.release_type }}
+      phased_release: ${{ inputs.phased_release }}
+    secrets: inherit

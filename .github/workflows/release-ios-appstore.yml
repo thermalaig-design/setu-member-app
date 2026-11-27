@@ -4,6 +4,27 @@ name: Release iOS to App Store
 # It does not build anything and never cancels an existing review.
 
 on:
+  # Called by "Release iOS (App Store)" after the tester approves.
+  workflow_call:
+    inputs:
+      action:
+        type: string
+        required: true
+      version:
+        type: string
+        required: true
+      build_number:
+        type: string
+        required: true
+      release_notes:
+        type: string
+        required: false
+      release_type:
+        type: string
+        default: manual
+      phased_release:
+        type: boolean
+        default: false
   workflow_dispatch:
     inputs:
       action:
