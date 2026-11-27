@@ -1,0 +1,188 @@
+name: Release iOS to App Store
+
+# Submits a build that is already on TestFlight to App Review.
+# It does not build anything and never cancels an existing review.
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "check = read only | prepare = fill version, do not submit | submit = send to App Review"
+        type: choice
+        options: [check, prepare, submit]
+        default: check
+      version:
+        description: "App Store version, e.g. 1.7"
+        type: string
+        required: true
+      build_number:
+        description: "Tested TestFlight build, e.g. 105.1"
+        type: string
+        required: true
+      release_notes:
+        description: "What's New text (needed for prepare and submit)"
+        type: string
+        required: false
+      release_type:
+        description: "After approval: manual button or automatic release"
+        type: choice
+        options: [manual, automatic]
+        default: manual
+      phased_release:
+        description: "Release to users gradually over 7 days"
+        type: boolean
+        default: false
+
+permissions: {}
+
+concurrency:
+  group: release-ios-appstore
+  cancel-in-progress: false
+
+jobs:
+  appstore:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: App Store ${{ inputs.action }}
+        env:
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          BUNDLE_ID: com.Setu.app
+          ACTION: ${{ inputs.action }}
+          VERSION: ${{ inputs.version }}
+          BUILD_NUMBER: ${{ inputs.build_number }}
+          RELEASE_NOTES: ${{ inputs.release_notes }}
+          RELEASE_TYPE: ${{ inputs.release_type }}
+          PHASED: ${{ inputs.phased_release }}
+        run: |
+          node --input-type=module <<'SCRIPT'
+          import { createPrivateKey, sign } from 'node:crypto';
+
+          const env = process.env;
+          const action = env.ACTION;
+          const version = (env.VERSION || '').trim();
+          const buildNumber = (env.BUILD_NUMBER || '').trim();
+          const notes = (env.RELEASE_NOTES || '').trim();
+          const releaseType = env.RELEASE_TYPE === 'automatic' ? 'AFTER_APPROVAL' : 'MANUAL';
+          const phased = env.PHASED === 'true';
+
+          class Stop extends Error {}
+          const stop = (message) => { throw new Stop(message); };
+
+          const b64 = (value) => Buffer.from(JSON.stringify(value)).toString('base64url');
+          const token = () => {
+            const now = Math.floor(Date.now() / 1000);
+            const body = `${b64({ alg: 'ES256', kid: env.ASC_KEY_ID.trim(), typ: 'JWT' })}.${b64({ iss: env.ASC_ISSUER_ID.trim(), iat: now, exp: now + 600, aud: 'appstoreconnect-v1' })}`;
+            const key = createPrivateKey(env.ASC_KEY_P8);
+            return `${body}.${sign('sha256', Buffer.from(body), { key, dsaEncoding: 'ieee-p1363' }).toString('base64url')}`;
+          };
+
+          const api = async (method, path, body, { allow404 = false } = {}) => {
+            const response = await fetch(`https://api.appstoreconnect.apple.com${path}`, {
+              method,
+              headers: { Authorization: `Bearer ${token()}`, 'Content-Type': 'application/json' },
+              body: body ? JSON.stringify(body) : undefined,
+            });
+            const text = await response.text();
+            if (allow404 && response.status === 404) return { data: null };
+            if (!response.ok) {
+              let detail = text.slice(0, 500);
+              try {
+                detail = JSON.parse(text).errors.map((e) => {
+                  const more = Object.values(e.meta?.associatedErrors || {}).flat().map((a) => a.detail);
+                  return [e.detail || e.title, ...more].join(' | ');
+                }).join(' | ');
+              } catch { /* keep raw text */ }
+              stop(`Apple API ${method} ${path.split('?')[0]} failed (${response.status}): ${detail}`);
+            }
+            return text ? JSON.parse(text) : { data: null };
+          };
+          const ref = (type, id) => ({ data: { type, id } });
+
+          const EDITABLE = ['PREPARE_FOR_SUBMISSION', 'DEVELOPER_REJECTED', 'REJECTED', 'METADATA_REJECTED', 'INVALID_BINARY'];
+          const FINISHED = ['READY_FOR_SALE', 'READY_FOR_DISTRIBUTION', 'REPLACED_WITH_NEW_VERSION', 'REMOVED_FROM_SALE', 'DEVELOPER_REMOVED_FROM_SALE', 'NOT_APPLICABLE'];
+
+          async function main() {
+            if (!['check', 'prepare', 'submit'].includes(action)) stop('Unknown action');
+            if (!/^\d+(\.\d+){1,2}$/.test(version)) stop('version must look like 1.7 or 1.7.1');
+            if (!/^\d+(\.\d+){0,2}$/.test(buildNumber)) stop('build_number must look like 105.1');
+            if (action !== 'check' && !notes) stop('release_notes is required for prepare and submit');
+            for (const name of ['ASC_KEY_P8', 'ASC_KEY_ID', 'ASC_ISSUER_ID']) if (!env[name]) stop(`${name} secret is missing`);
+
+            const app = (await api('GET', `/v1/apps?filter[bundleId]=${env.BUNDLE_ID}`)).data.find((a) => a.attributes.bundleId === env.BUNDLE_ID);
+            if (!app) stop(`App ${env.BUNDLE_ID} not found`);
+
+            const versions = (await api('GET', `/v1/apps/${app.id}/appStoreVersions?filter[platform]=IOS&limit=50`)).data;
+            const stateOf = (v) => v.attributes.appStoreState || v.attributes.appVersionState;
+            console.log('Recent App Store versions:');
+            for (const v of versions.slice(0, 8)) console.log(`  ${v.attributes.versionString}  ${stateOf(v)}`);
+
+            const builds = (await api('GET', `/v1/builds?filter[app]=${app.id}&filter[version]=${buildNumber}&filter[preReleaseVersion.version]=${version}&filter[preReleaseVersion.platform]=IOS&limit=5`)).data;
+            const build = builds[0];
+            if (!build) stop(`Build ${buildNumber} of version ${version} not found on TestFlight`);
+            console.log(`Build ${version} (${buildNumber}): ${build.attributes.processingState}${build.attributes.expired ? ', expired' : ''}`);
+            if (build.attributes.processingState !== 'VALID' || build.attributes.expired) stop('This build cannot be submitted');
+
+            let target = versions.find((v) => v.attributes.versionString === version);
+            if (target && !EDITABLE.includes(stateOf(target))) stop(`Version ${version} is already ${stateOf(target)}. Nothing was changed.`);
+            const other = versions.find((v) => v.attributes.versionString !== version && !FINISHED.includes(stateOf(v)));
+            if (other) stop(`Version ${other.attributes.versionString} is ${stateOf(other)}. Finish it first, then run this again. Nothing was changed.`);
+
+            const submissions = (await api('GET', `/v1/reviewSubmissions?filter[app]=${app.id}&filter[platform]=IOS&filter[state]=READY_FOR_REVIEW,WAITING_FOR_REVIEW,IN_REVIEW,UNRESOLVED_ISSUES,CANCELING,COMPLETING`)).data;
+            const busy = submissions.find((s) => s.attributes.state !== 'READY_FOR_REVIEW');
+            if (busy) stop(`A review submission is ${busy.attributes.state}. Check App Review in App Store Connect. Nothing was changed.`);
+            const draft = submissions[0];
+            if (draft) {
+              const items = (await api('GET', `/v1/reviewSubmissions/${draft.id}/items`)).data;
+              if (items.length) stop('A draft review submission with items already exists. Check App Review in App Store Connect. Nothing was changed.');
+            }
+
+            if (action === 'check') {
+              console.log(`::notice::Check passed. ${version} (${buildNumber}) can be prepared. Nothing was changed.`);
+              return;
+            }
+
+            if (!target) {
+              target = (await api('POST', '/v1/appStoreVersions', { data: { type: 'appStoreVersions', attributes: { platform: 'IOS', versionString: version, releaseType }, relationships: { app: ref('apps', app.id) } } })).data;
+              console.log(`Created version ${version}`);
+            } else {
+              await api('PATCH', `/v1/appStoreVersions/${target.id}`, { data: { type: 'appStoreVersions', id: target.id, attributes: { releaseType, earliestReleaseDate: null } } });
+            }
+
+            await api('PATCH', `/v1/appStoreVersions/${target.id}/relationships/build`, ref('builds', build.id));
+            console.log(`Attached build ${buildNumber}`);
+
+            const locales = (await api('GET', `/v1/appStoreVersions/${target.id}/appStoreVersionLocalizations?limit=50`)).data;
+            for (const l of locales) {
+              await api('PATCH', `/v1/appStoreVersionLocalizations/${l.id}`, { data: { type: 'appStoreVersionLocalizations', id: l.id, attributes: { whatsNew: notes } } });
+              console.log(`Release notes set for ${l.attributes.locale}`);
+            }
+
+            const current = (await api('GET', `/v1/appStoreVersions/${target.id}/appStoreVersionPhasedRelease`, null, { allow404: true })).data;
+            if (phased && !current) {
+              await api('POST', '/v1/appStoreVersionPhasedReleases', { data: { type: 'appStoreVersionPhasedReleases', attributes: { phasedReleaseState: 'INACTIVE' }, relationships: { appStoreVersion: ref('appStoreVersions', target.id) } } });
+            } else if (!phased && current) {
+              await api('DELETE', `/v1/appStoreVersionPhasedReleases/${current.id}`);
+            }
+            console.log(`Release: ${env.RELEASE_TYPE}, phased: ${phased}`);
+
+            if (action === 'prepare') {
+              console.log('::notice::Version is prepared. It has NOT been submitted for review.');
+              return;
+            }
+
+            const submission = draft || (await api('POST', '/v1/reviewSubmissions', { data: { type: 'reviewSubmissions', attributes: { platform: 'IOS' }, relationships: { app: ref('apps', app.id) } } })).data;
+            await api('POST', '/v1/reviewSubmissionItems', { data: { type: 'reviewSubmissionItems', relationships: { reviewSubmission: ref('reviewSubmissions', submission.id), appStoreVersion: ref('appStoreVersions', target.id) } } });
+            await api('PATCH', `/v1/reviewSubmissions/${submission.id}`, { data: { type: 'reviewSubmissions', id: submission.id, attributes: { submitted: true } } });
+            console.log(`::notice::Submitted ${version} (${buildNumber}) to App Review.`);
+          }
+
+          try {
+            await main();
+          } catch (error) {
+            console.log(`::error::${String(error.message).replace(/[\r\n]+/g, ' ')}`);
+            process.exitCode = 1;
+          }
+          SCRIPT
